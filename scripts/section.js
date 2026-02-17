@@ -1,16 +1,40 @@
 (function () {
   const { initThemeToggle } = window.RenaissanceTheme;
-  const { loadEssay, loadEssays, loadSection, renderBlocks, sectionDisplay } = window.RenaissanceContent;
+  const {
+    formatReadMinutes,
+    formatWordCount,
+    loadEssay,
+    loadEssays,
+    loadSection,
+    renderBlocks,
+    sectionDisplay
+  } = window.RenaissanceContent;
 
   const backToEssay = document.getElementById("back-to-essay");
   const essayLine = document.getElementById("essay-line");
   const sectionKicker = document.getElementById("section-kicker");
   const sectionTitle = document.getElementById("section-title");
   const sectionSubtitle = document.getElementById("section-subtitle");
+  const sectionMeta = document.getElementById("section-meta");
   const sectionContent = document.getElementById("section-content");
   const prevLink = document.getElementById("prev-link");
   const nextLink = document.getElementById("next-link");
   const nextCta = document.getElementById("next-cta");
+
+  function escapeHtml(text) {
+    return String(text)
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#39;");
+  }
+
+  function joinMetaParts(parts) {
+    return parts
+      .map((part) => '<span>' + escapeHtml(part) + "</span>")
+      .join('<span class="meta-sep" aria-hidden="true">·</span>');
+  }
 
   function essayUrl(slug) {
     return "essay.html?essay=" + encodeURIComponent(slug);
@@ -63,6 +87,7 @@
     sectionKicker.textContent = "Reader";
     sectionTitle.textContent = message;
     sectionSubtitle.textContent = "";
+    sectionMeta.textContent = "";
     sectionContent.innerHTML = '<p><a href="index.html">Return to Home</a></p>';
     backToEssay.href = "index.html";
     backToEssay.textContent = "Home";
@@ -102,6 +127,10 @@
       sectionKicker.textContent = display.label;
       sectionTitle.textContent = display.title;
       sectionSubtitle.textContent = display.subtitle ? "(" + display.subtitle + ")" : "";
+      sectionMeta.innerHTML = joinMetaParts([
+        formatWordCount(payload.wordCount),
+        formatReadMinutes(payload.readMinutes)
+      ]);
       renderBlocks(sectionContent, blocks);
       document.title = display.title + " | " + essay.title + " | Renaissance";
 

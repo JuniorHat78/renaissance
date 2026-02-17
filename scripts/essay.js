@@ -1,9 +1,16 @@
 (function () {
   const { initThemeToggle } = window.RenaissanceTheme;
-  const { loadEssaySections, loadEssays, sectionDisplay } = window.RenaissanceContent;
+  const {
+    formatReadDuration,
+    formatWordCount,
+    loadEssaySections,
+    loadEssays,
+    sectionDisplay
+  } = window.RenaissanceContent;
 
   const essayTitle = document.getElementById("essay-title");
   const essaySummary = document.getElementById("essay-summary");
+  const essayStats = document.getElementById("essay-stats");
   const sectionList = document.getElementById("section-list");
   const searchForm = document.getElementById("search-form");
   const searchInput = document.getElementById("search-input");
@@ -27,6 +34,12 @@
     return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
 
+  function joinMetaParts(parts) {
+    return parts
+      .map((part) => '<span>' + escapeHtml(part) + "</span>")
+      .join('<span class="meta-sep" aria-hidden="true">·</span>');
+  }
+
   function sectionUrl(slug, sectionNumber) {
     return "section.html?essay=" + encodeURIComponent(slug) + "&section=" + String(sectionNumber);
   }
@@ -38,6 +51,7 @@
         const subtitleHtml = display.subtitle
           ? '<span class="chapter-item-subtitle">(' + escapeHtml(display.subtitle) + ")</span>"
           : "";
+        const sectionStatsHtml = '<span class="chapter-item-meta">' + escapeHtml(formatWordCount(section.wordCount)) + "</span>";
         return (
           '<li class="toc-item">' +
             '<a href="' + sectionUrl(essay.slug, section.sectionNumber) + '">' +
@@ -45,6 +59,7 @@
               '<span class="chapter-item-title-wrap">' +
                 '<span class="chapter-item-title">' + escapeHtml(display.title) + "</span>" +
                 subtitleHtml +
+                sectionStatsHtml +
               "</span>" +
             "</a>" +
           "</li>"
@@ -231,6 +246,13 @@
 
       essayTitle.textContent = currentEssay.title;
       essaySummary.textContent = currentEssay.summary;
+      const sectionCount = currentSections.length;
+      const sectionLabel = sectionCount === 1 ? "1 section" : String(sectionCount) + " sections";
+      essayStats.innerHTML = joinMetaParts([
+        sectionLabel,
+        formatWordCount(payload.stats.totalWords),
+        formatReadDuration(payload.stats.totalReadMinutes)
+      ]);
       renderSectionList(currentEssay, currentSections);
       document.title = currentEssay.title + " | Renaissance";
 
@@ -244,6 +266,7 @@
     } catch (error) {
       essayTitle.textContent = "Unable to load this essay.";
       essaySummary.textContent = "";
+      essayStats.textContent = "";
       sectionList.innerHTML = '<li class="muted">Sections unavailable.</li>';
       clearSearchResults();
     }

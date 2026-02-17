@@ -360,7 +360,7 @@
     const meta = getSectionMeta(essay, sectionNumber);
     const title = meta.title || label;
     const subtitle = meta.subtitle || "";
-    const searchLabel = meta.title ? label + " · " + meta.title : label;
+    const searchLabel = meta.title ? label + " | " + meta.title : label;
 
     return {
       label,
@@ -368,6 +368,38 @@
       subtitle,
       searchLabel
     };
+  }
+
+  function countWords(text) {
+    if (!text || typeof text !== "string") {
+      return 0;
+    }
+
+    const tokens = text.trim().split(/\s+/).filter((value) => value.length > 0);
+    return tokens.length;
+  }
+
+  function estimateReadMinutes(wordCount) {
+    const wordsPerMinute = 220;
+    return Math.max(1, Math.round(wordCount / wordsPerMinute));
+  }
+
+  function formatWordCount(wordCount) {
+    return Number(wordCount || 0).toLocaleString("en-US") + " words";
+  }
+
+  function formatReadMinutes(minutes) {
+    const totalMinutes = Math.max(1, Number(minutes || 0));
+    if (totalMinutes < 60) {
+      return String(totalMinutes) + " min";
+    }
+
+    const hours = Math.max(1, Math.floor(totalMinutes / 60));
+    return String(hours) + "h";
+  }
+
+  function formatReadDuration(minutes) {
+    return formatReadMinutes(minutes) + " read";
   }
 
   function removeLeadingHeadings(blocks) {
@@ -413,6 +445,9 @@
 
     const rawText = await loadSectionText(essay, section);
     const blocks = parseBlocks(rawText);
+    const searchableText = toSearchableText(rawText);
+    const wordCount = countWords(searchableText);
+    const readMinutes = estimateReadMinutes(wordCount);
 
     return {
       essay,
@@ -421,7 +456,9 @@
       rawText,
       blocks,
       contentBlocks: removeLeadingHeadings(blocks),
-      searchableText: toSearchableText(rawText)
+      searchableText,
+      wordCount,
+      readMinutes
     };
   }
 
@@ -435,9 +472,16 @@
       essay.section_order.map((sectionNumber) => loadSection(essay.slug, sectionNumber))
     );
 
+    const totalWords = sections.reduce((sum, section) => sum + section.wordCount, 0);
+    const totalReadMinutes = estimateReadMinutes(totalWords);
+
     return {
       essay,
-      sections
+      sections,
+      stats: {
+        totalWords,
+        totalReadMinutes
+      }
     };
   }
 
@@ -462,6 +506,9 @@
 
   window.RenaissanceContent = {
     firstParagraph,
+    formatReadDuration,
+    formatReadMinutes,
+    formatWordCount,
     loadEssay,
     loadEssays,
     loadEssaySections,
