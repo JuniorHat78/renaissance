@@ -1,0 +1,14 @@
+# Generated exports
+exports/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+
+# Temp/log files
+*.log
+*.tmp
+*.temp
