@@ -1,0 +1,57 @@
+Renaissance Plan
+Date: 2026-02-17
+Status: Approved roadmap only. Implementation paused.
+
+Product Direction
+- Renaissance is the publication/archive index.
+- Etching God into Sand is one essay entry in the archive.
+- Sections are currently unnamed and ordered (I..X).
+
+Primary Goal
+- Move from chapter-first IA to essay-first IA without losing current reading quality.
+
+Phase Plan
+1. Information Architecture
+- Home page becomes essay index.
+- Essay page becomes the landing page for one essay.
+- Section page remains long-form reader for a single section.
+
+2. Data Model
+- Add essay registry metadata (all essays).
+- Add per-essay metadata (title, slug, summary, section order, source directory).
+- Keep section text files as canonical source.
+
+3. Routing and Navigation
+- Home route: index of essays.
+- Essay route: one essay overview + section TOC + search.
+- Section route: section reader with Home + Back to Essay + Prev/Next.
+
+4. Search Behavior Revision
+- Search scope defaults to current essay.
+- One result row per occurrence (not one per section/chapter).
+- Sort order is reading order: section order, then in-text occurrence order.
+- Result summary includes total hits and per-section counts.
+
+5. Labeling Strategy
+- Keep section labels generic for now (Section I, Section II, ...).
+- Add optional metadata hook for custom section names later.
+
+6. Runtime Compatibility
+- Continue supporting both localhost server mode and file mode fallback.
+- Preserve encoding-safe text rendering.
+
+7. QA and Acceptance
+- Validate home index, essay page, section page, and navigation.
+- Validate search ordering, per-occurrence rendering, and counts.
+- Validate behavior in both http:// and file:// modes.
+
+Out of Scope (Current Phase)
+- Cross-essay global search.
+- Authoring UI for naming sections.
+- Scrollytelling/animation-heavy narrative effects.
+
+Deliverables
+- Updated page structure and routing.
+- Essay metadata files.
+- Search engine updates for per-occurrence ordered hits.
+- Regression coverage for runtime modes and encoding.

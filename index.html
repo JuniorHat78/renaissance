@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Renaissance</title>
+  <script>
+    (function () {
+      try {
+        var savedTheme = localStorage.getItem("renaissance-theme");
+        document.documentElement.setAttribute(
+          "data-theme",
+          savedTheme === "dark" ? "dark" : "light"
+        );
+      } catch (error) {
+        document.documentElement.setAttribute("data-theme", "light");
+      }
+    })();
+  </script>
+  <link rel="stylesheet" href="styles/site.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="header-inner">
+      <div>
+        <p class="eyebrow">Essay Archive</p>
+        <h1 class="site-title">Renaissance</h1>
+        <p class="site-subtitle">A growing log of long-form essays.</p>
+      </div>
+      <button
+        id="theme-toggle"
+        class="button button-ghost"
+        type="button"
+        aria-label="Toggle color theme"
+      ></button>
+    </div>
+  </header>
+
+  <main class="layout archive-layout">
+    <section class="archive-panel" aria-labelledby="essays-heading">
+      <h2 id="essays-heading">Essays</h2>
+      <ul id="essay-list" class="essay-list">
+        <li class="muted">Loading essays...</li>
+      </ul>
+    </section>
+  </main>
+
+  <script src="scripts/theme.js" defer></script>
+  <script src="scripts/essays-data.js" defer></script>
+  <script src="scripts/chapters-data.js" defer></script>
+  <script src="scripts/content.js" defer></script>
+  <script src="scripts/archive.js" defer></script>
+</body>
+</html>

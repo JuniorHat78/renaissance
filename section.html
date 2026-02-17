@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Section | Renaissance</title>
+  <script>
+    (function () {
+      try {
+        var savedTheme = localStorage.getItem("renaissance-theme");
+        document.documentElement.setAttribute(
+          "data-theme",
+          savedTheme === "dark" ? "dark" : "light"
+        );
+      } catch (error) {
+        document.documentElement.setAttribute("data-theme", "light");
+      }
+    })();
+  </script>
+  <link rel="stylesheet" href="styles/site.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="reader-header-links">
+        <a class="button button-ghost" href="index.html">Home</a>
+        <a id="back-to-essay" class="button button-ghost" href="#">Back To Essay</a>
+      </div>
+      <button
+        id="theme-toggle"
+        class="button button-ghost"
+        type="button"
+        aria-label="Toggle color theme"
+      ></button>
+    </div>
+  </header>
+
+  <main class="reader-layout">
+    <nav class="chapter-nav-top" aria-label="Section navigation">
+      <a id="prev-link" class="button button-ghost hidden" href="#">Previous Section</a>
+      <a id="next-link" class="button button-ghost hidden" href="#">Next Section</a>
+    </nav>
+
+    <article class="chapter-article" aria-live="polite">
+      <p id="essay-line" class="eyebrow"></p>
+      <p id="section-kicker" class="eyebrow"></p>
+      <h1 id="section-title">Loading section...</h1>
+      <p id="section-subtitle" class="section-subtitle"></p>
+      <div id="section-content" class="chapter-content"></div>
+    </article>
+
+    <div class="chapter-nav-bottom">
+      <a id="next-cta" class="button hidden" href="#">Next Section</a>
+    </div>
+  </main>
+
+  <script src="scripts/theme.js" defer></script>
+  <script src="scripts/essays-data.js" defer></script>
+  <script src="scripts/chapters-data.js" defer></script>
+  <script src="scripts/content.js" defer></script>
+  <script src="scripts/section.js" defer></script>
+</body>
+</html>

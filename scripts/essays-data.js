@@ -1,0 +1,64 @@
+window.RENAISSANCE_EMBEDDED_ESSAYS = [
+  {
+    "id": "etching-god-into-sand",
+    "slug": "etching-god-into-sand",
+    "title": "Etching God into Sand",
+    "summary": "A long-form essay in ten sections tracing sand, silicon, language, and cognition.",
+    "source_dir": "raw",
+    "section_order": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10
+    ],
+    "section_meta": {
+      "1": {
+        "title": "The Oldest Material",
+        "subtitle": "fire, accident, and the thing beneath your feet"
+      },
+      "2": {
+        "title": "Nine Nines",
+        "subtitle": "one wrong atom in a billion"
+      },
+      "3": {
+        "title": "The Amber Twilight",
+        "subtitle": "yellow light, slow movement, the human body as contaminant"
+      },
+      "4": {
+        "title": "Emet",
+        "subtitle": "truth and death, one letter apart"
+      },
+      "5": {
+        "title": "Every Possible Book",
+        "subtitle": "the library, the librarians, the madness"
+      },
+      "6": {
+        "title": "Unmixed Attention",
+        "subtitle": "what a mystic called prayer, what an engineer called a mechanism"
+      },
+      "7": {
+        "title": "The Omega Point",
+        "subtitle": "a priest in the trenches, looking at fossils, seeing the future"
+      },
+      "8": {
+        "title": "A World in a Grain",
+        "subtitle": "the silence where a name should be"
+      },
+      "9": {
+        "title": "While You Were Arguing",
+        "subtitle": "it was already here"
+      },
+      "10": {
+        "title": "The Roof Is Open",
+        "subtitle": "sand, silence, the question"
+      }
+    },
+    "published": true
+  }
+];
