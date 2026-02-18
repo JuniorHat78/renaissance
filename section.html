@@ -61,6 +61,10 @@
       <h1 id="section-title">Loading section...</h1>
       <p id="section-subtitle" class="section-subtitle"></p>
       <p id="section-meta" class="section-meta muted"></p>
+      <div id="section-tools" class="section-tools" hidden>
+        <button id="copy-highlight-link" class="button button-ghost" type="button">Copy Link to Highlight</button>
+      </div>
+      <p id="copy-highlight-status" class="sr-only" role="status" aria-live="polite"></p>
       <div id="section-content" class="chapter-content"></div>
     </article>
 
@@ -69,10 +73,18 @@
     </div>
   </main>
 
+  <button id="selection-copy-chip" class="selection-copy-chip button" type="button" hidden>
+    Copy link
+  </button>
+  <div id="selection-copy-bar" class="selection-copy-bar" hidden>
+    <button id="selection-copy-bar-button" class="button" type="button">Copy link</button>
+  </div>
+  <div id="copy-toast" class="copy-toast" role="status" aria-live="polite" hidden></div>
+
   <script src="scripts/theme.js" defer></script>
   <script src="scripts/essays-data.js" defer></script>
-  <script src="scripts/chapters-data.js" defer></script>
   <script src="scripts/content.js" defer></script>
+  <script src="scripts/search-engine.js" defer></script>
   <script src="scripts/section.js" defer></script>
 </body>
 </html>

@@ -1,19 +1,75 @@
 (function () {
   const ESSAYS_PATH = "data/essays.json";
   const RAW_MANIFEST_PATH = "raw/manifest.json";
+  const EMBEDDED_CHAPTERS_PATH = "scripts/chapters-data.js";
 
-  const EMBEDDED_CHAPTERS = Array.isArray(window.RENAISSANCE_EMBEDDED_CHAPTERS)
-    ? window.RENAISSANCE_EMBEDDED_CHAPTERS
-    : [];
   const EMBEDDED_ESSAYS = Array.isArray(window.RENAISSANCE_EMBEDDED_ESSAYS)
     ? window.RENAISSANCE_EMBEDDED_ESSAYS
     : [];
 
-  const EMBEDDED_MAP = new Map(
-    EMBEDDED_CHAPTERS.map((entry) => [entry.chapterNumber, entry.rawText])
-  );
-
+  const EMBEDDED_MAP = new Map();
+  const SECTION_TEXT_CACHE = new Map();
   let essayCache = null;
+  let embeddedChaptersPromise = null;
+
+  function embeddedChapters() {
+    return Array.isArray(window.RENAISSANCE_EMBEDDED_CHAPTERS)
+      ? window.RENAISSANCE_EMBEDDED_CHAPTERS
+      : [];
+  }
+
+  function refreshEmbeddedMap() {
+    EMBEDDED_MAP.clear();
+    for (const entry of embeddedChapters()) {
+      const chapterNumber = parseNumber(entry && entry.chapterNumber);
+      if (chapterNumber === null) {
+        continue;
+      }
+      EMBEDDED_MAP.set(chapterNumber, String(entry.rawText || ""));
+    }
+  }
+
+  async function ensureEmbeddedChaptersLoaded() {
+    if (EMBEDDED_MAP.size > 0) {
+      return;
+    }
+
+    if (embeddedChaptersPromise) {
+      return embeddedChaptersPromise;
+    }
+
+    if (typeof document !== "object" || !document.createElement) {
+      throw new Error("Embedded chapter loader unavailable");
+    }
+
+    embeddedChaptersPromise = new Promise((resolve, reject) => {
+      const existing = embeddedChapters();
+      if (existing.length > 0) {
+        refreshEmbeddedMap();
+        resolve();
+        return;
+      }
+
+      const script = document.createElement("script");
+      script.src = EMBEDDED_CHAPTERS_PATH;
+      script.async = true;
+      script.onload = () => {
+        refreshEmbeddedMap();
+        resolve();
+      };
+      script.onerror = () => {
+        reject(new Error("Failed to load embedded chapter fallback"));
+      };
+      document.head.appendChild(script);
+    }).catch((error) => {
+      embeddedChaptersPromise = null;
+      throw error;
+    });
+
+    return embeddedChaptersPromise;
+  }
+
+  refreshEmbeddedMap();
 
   function escapeHtml(text) {
     return text
@@ -48,7 +104,7 @@
   }
 
   async function fetchAsText(path) {
-    const response = await fetch(path, { cache: "no-store" });
+    const response = await fetch(path);
     if (!response.ok) {
       throw new Error("Failed to load " + path + " (" + response.status + ")");
     }
@@ -109,10 +165,23 @@
   }
 
   function embeddedManifestNumbers() {
-    return EMBEDDED_CHAPTERS
-      .map((entry) => parseNumber(entry.chapterNumber))
-      .filter((value) => value !== null)
-      .sort((a, b) => a - b);
+    refreshEmbeddedMap();
+    return Array.from(EMBEDDED_MAP.keys()).sort((a, b) => a - b);
+  }
+
+  async function fallbackManifestNumbers() {
+    const fromMap = embeddedManifestNumbers();
+    if (fromMap.length > 0) {
+      return fromMap;
+    }
+
+    try {
+      await ensureEmbeddedChaptersLoaded();
+    } catch (error) {
+      return fromMap;
+    }
+
+    return embeddedManifestNumbers();
   }
 
   async function loadRawManifestNumbers() {
@@ -122,9 +191,9 @@
       if (numbers.length > 0) {
         return numbers;
       }
-      return embeddedManifestNumbers();
+      return fallbackManifestNumbers();
     } catch (error) {
-      return embeddedManifestNumbers();
+      return fallbackManifestNumbers();
     }
   }
 
@@ -233,6 +302,19 @@
       .replace(/^#{1,6}\s+/gm, "")
       .replace(/^\s*---\s*$/gm, " ")
       .replace(/\*([^*\n]+)\*/g, "$1")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function blocksToSearchableText(blocks) {
+    return blocks
+      .map((block) => {
+        if (block.type === "hr") {
+          return " ";
+        }
+        return String(block.text || "").replace(/\*([^*\n]+)\*/g, "$1");
+      })
+      .join(" ")
       .replace(/\s+/g, " ")
       .trim();
   }
@@ -416,13 +498,36 @@
   }
 
   async function loadSectionText(essay, sectionNumber) {
+    const cacheKey = essay.slug + ":" + String(sectionNumber);
+    if (SECTION_TEXT_CACHE.has(cacheKey)) {
+      return SECTION_TEXT_CACHE.get(cacheKey);
+    }
+
     const relativePath = essay.source_dir + "/" + String(sectionNumber) + ".txt";
 
     try {
-      return await fetchAsText(relativePath);
+      const loaded = await fetchAsText(relativePath);
+      SECTION_TEXT_CACHE.set(cacheKey, loaded);
+      return loaded;
     } catch (error) {
-      if (essay.source_dir === "raw" && EMBEDDED_MAP.has(sectionNumber)) {
-        return EMBEDDED_MAP.get(sectionNumber);
+      if (essay.source_dir === "raw") {
+        if (EMBEDDED_MAP.has(sectionNumber)) {
+          const embedded = EMBEDDED_MAP.get(sectionNumber);
+          SECTION_TEXT_CACHE.set(cacheKey, embedded);
+          return embedded;
+        }
+
+        try {
+          await ensureEmbeddedChaptersLoaded();
+        } catch (fallbackError) {
+          // Keep original error as the source failure.
+        }
+
+        if (EMBEDDED_MAP.has(sectionNumber)) {
+          const embedded = EMBEDDED_MAP.get(sectionNumber);
+          SECTION_TEXT_CACHE.set(cacheKey, embedded);
+          return embedded;
+        }
       }
       throw error;
     }
@@ -445,7 +550,8 @@
 
     const rawText = await loadSectionText(essay, section);
     const blocks = parseBlocks(rawText);
-    const searchableText = toSearchableText(rawText);
+    const contentBlocks = removeLeadingHeadings(blocks);
+    const searchableText = blocksToSearchableText(contentBlocks) || toSearchableText(rawText);
     const wordCount = countWords(searchableText);
     const readMinutes = estimateReadMinutes(wordCount);
 
@@ -455,7 +561,7 @@
       display: sectionDisplay(essay, section),
       rawText,
       blocks,
-      contentBlocks: removeLeadingHeadings(blocks),
+      contentBlocks,
       searchableText,
       wordCount,
       readMinutes

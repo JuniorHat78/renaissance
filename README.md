@@ -1,19 +1,17 @@
 # Renaissance
 
-Renaissance is a clean, book-style static website for long-form essays.
+Renaissance is a warm, book-style static website for long-form essays.
 
 Current published essay:
 - `Etching God into Sand`
 
 ## Quick Start
 
-Run a local static server from the project root:
-
 ```powershell
 python -m http.server 8000
 ```
 
-If `python` is not available:
+If needed:
 
 ```powershell
 py -m http.server 8000
@@ -28,26 +26,42 @@ Open:
 - Home archive: `index.html`
 - Essay page: `essay.html?essay=etching-god-into-sand`
 - Section reader: `section.html?essay=etching-god-into-sand&section=1`
+- Full search: `search.html`
 
-## Project Structure
+## Reader Shortcuts
 
-- `raw/*.txt`: section source text files
-- `data/essays.json`: essay metadata and section titles/subtitles
-- `scripts/content.js`: data loading, rendering helpers, search helpers
-- `scripts/archive.js`: home/archive page logic
-- `scripts/essay.js`: essay page + section list + in-essay search
-- `scripts/section.js`: section reader page
-- `styles/site.css`: site theme and typography
+- `Ctrl+Alt+C` / `Cmd+Option+C`: copy highlight link for current selection in section reader.
+- Standard copy in section content appends a source link to copied text.
+
+## Quality Checks
+
+Run these before commit:
+
+```powershell
+Get-ChildItem scripts\*.js | ForEach-Object { node --check $_.FullName }
+node scripts/validate-content.js
+node scripts/generate-embedded-data.js --check
+```
 
 ## Content Workflow
 
-After editing `raw/*.txt` or `data/essays.json`, regenerate embedded fallback files:
+1. Edit content:
+- `raw/*.txt`
+- `raw/manifest.json`
+- `data/essays.json`
+2. Validate content:
+
+```powershell
+node scripts/validate-content.js
+```
+
+3. Regenerate embedded fallback data:
 
 ```powershell
 node scripts/generate-embedded-data.js
 ```
 
-Export all 10 sections into one portable text file:
+4. Optional portable export:
 
 ```powershell
 node scripts/export-essay-text.js
@@ -57,8 +71,18 @@ Output:
 
 `exports/etching-god-into-sand.txt`
 
+## CI
+
+GitHub Actions workflow: `.github/workflows/ci.yml`
+
+Runs on every `push` to `main` and on every pull request:
+- JS syntax checks (`node --check`)
+- Content validation (`scripts/validate-content.js`)
+- Embedded data sync check (`scripts/generate-embedded-data.js --check`)
+- Lighthouse performance audit in warning-only mode (logs warnings, does not fail build)
+
 ## Deployment
 
-This project is designed for GitHub Pages project-site deployment:
+GitHub Pages project site:
 
 `https://juniorhat78.github.io/renaissance/`

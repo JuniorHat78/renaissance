@@ -12,3 +12,9 @@ desktop.ini
 *.log
 *.tmp
 *.temp
+
+# Local perf report artifacts
+.tmp-lh-*.json
+localhost_*.report.html
+.npm-cache/
+.chrome-test*/

@@ -7,37 +7,51 @@
     loadEssays,
     sectionDisplay
   } = window.RenaissanceContent;
+  const {
+    buildSearchUrl,
+    buildSectionUrl,
+    createSearchEngine,
+    escapeHtml,
+    highlightSnippet,
+    normalizeMode,
+    parseBooleanFlag
+  } = window.RenaissanceSearch;
+
+  const PREVIEW_LIMIT = 3;
 
   const essayTitle = document.getElementById("essay-title");
   const essaySummary = document.getElementById("essay-summary");
   const essayStats = document.getElementById("essay-stats");
   const sectionList = document.getElementById("section-list");
+
   const searchForm = document.getElementById("search-form");
   const searchInput = document.getElementById("search-input");
   const searchHint = document.getElementById("search-hint");
-  const searchCounts = document.getElementById("search-counts");
   const searchResults = document.getElementById("search-results");
+  const searchPanel = document.getElementById("search-panel");
+  const searchViewFull = document.getElementById("search-view-full");
+
+  const advancedToggle = document.getElementById("search-advanced-toggle");
+  const advancedPanel = document.getElementById("search-advanced");
+  const searchMode = document.getElementById("search-mode");
+  const searchCase = document.getElementById("search-case");
 
   let currentEssay = null;
   let currentSections = [];
+  let searchEngine = null;
+  let debounceTimer = null;
+  let searchRunId = 0;
 
-  function escapeHtml(text) {
-    return text
-      .replaceAll("&", "&amp;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;")
-      .replaceAll('"', "&quot;")
-      .replaceAll("'", "&#39;");
-  }
-
-  function escapeRegExp(text) {
-    return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  }
+  const state = {
+    query: "",
+    mode: "contains",
+    caseSensitive: false
+  };
 
   function joinMetaParts(parts) {
     return parts
       .map((part) => '<span>' + escapeHtml(part) + "</span>")
-      .join('<span class="meta-sep" aria-hidden="true">·</span>');
+      .join('<span class="meta-sep" aria-hidden="true">&middot;</span>');
   }
 
   function sectionUrl(slug, sectionNumber) {
@@ -68,157 +82,269 @@
       .join("");
   }
 
-  function findAllOccurrences(haystack, needle) {
-    const indexes = [];
-    if (!needle) {
-      return indexes;
-    }
-
-    let fromIndex = 0;
-    while (true) {
-      const index = haystack.indexOf(needle, fromIndex);
-      if (index === -1) {
-        break;
-      }
-
-      indexes.push(index);
-      fromIndex = index + needle.length;
-    }
-
-    return indexes;
-  }
-
-  function makeSnippet(text, startIndex, needleLength) {
-    const lead = 90;
-    const tail = 130;
-    const safeStart = Math.max(0, startIndex - lead);
-    const safeEnd = Math.min(text.length, startIndex + needleLength + tail);
-
-    let snippet = text.slice(safeStart, safeEnd).trim();
-    if (safeStart > 0) {
-      snippet = "... " + snippet;
-    }
-    if (safeEnd < text.length) {
-      snippet += " ...";
-    }
-    return snippet;
-  }
-
-  function highlightSnippet(snippet, query) {
-    if (!query) {
-      return escapeHtml(snippet);
-    }
-
-    const pattern = new RegExp("(" + escapeRegExp(query) + ")", "gi");
-    return escapeHtml(snippet).replace(pattern, "<mark>$1</mark>");
-  }
-
-  function clearSearchResults() {
-    searchCounts.innerHTML = "";
-    searchResults.innerHTML = "";
-    searchHint.textContent = "Search runs within this essay and returns one row per occurrence.";
-  }
-
-  function searchEssay(query) {
-    const term = query.trim().toLowerCase();
-    if (!term) {
-      clearSearchResults();
-      return;
-    }
-
-    const sectionCounts = [];
-    const hits = [];
-
-    for (const section of currentSections) {
-      const source = section.searchableText;
-      const lower = source.toLowerCase();
-      const indexes = findAllOccurrences(lower, term);
-
-      if (indexes.length === 0) {
-        continue;
-      }
-
-      sectionCounts.push({
-        sectionNumber: section.sectionNumber,
-        count: indexes.length
-      });
-
-      indexes.forEach((index, offset) => {
-        hits.push({
-          sectionNumber: section.sectionNumber,
-          occurrence: offset + 1,
-          index,
-          snippet: makeSnippet(source, index, term.length)
-        });
-      });
-    }
-
-    if (hits.length === 0) {
-      searchCounts.innerHTML = "";
-      searchResults.innerHTML = '<p class="muted">No matches found.</p>';
-      searchHint.textContent = "0 hits in 0 sections.";
-      return;
-    }
-
-    searchHint.textContent =
-      String(hits.length) +
-      (hits.length === 1 ? " hit" : " hits") +
-      " in " +
-      String(sectionCounts.length) +
-      (sectionCounts.length === 1 ? " section." : " sections.");
-
-    searchCounts.innerHTML = sectionCounts
-      .map((entry) => {
-        const display = sectionDisplay(currentEssay, entry.sectionNumber);
-        const countLabel = entry.count === 1 ? "1 hit" : String(entry.count) + " hits";
-        return (
-          '<p class="search-count-row">' +
-            '<a href="' + sectionUrl(currentEssay.slug, entry.sectionNumber) + '">' + escapeHtml(display.searchLabel) + "</a>" +
-            '<span class="muted">' + escapeHtml(countLabel) + "</span>" +
-          "</p>"
-        );
-      })
-      .join("");
-
-    searchResults.innerHTML = hits
-      .map((hit) => {
-        const display = sectionDisplay(currentEssay, hit.sectionNumber);
-        return (
-          '<article class="result-card">' +
-            '<h3><a href="' + sectionUrl(currentEssay.slug, hit.sectionNumber) + '">' +
-              '<span class="search-result-kicker">' + escapeHtml(display.searchLabel) + "</span>" +
-              '<span class="search-result-title">Occurrence ' + String(hit.occurrence) + "</span>" +
-            "</a></h3>" +
-            "<p>" + highlightSnippet(hit.snippet, term) + "</p>" +
-          "</article>"
-        );
-      })
-      .join("");
-  }
-
-  function bindSearch() {
-    searchForm.addEventListener("submit", (event) => {
-      event.preventDefault();
-      searchEssay(searchInput.value);
-    });
-
-    searchInput.addEventListener("input", () => {
-      if (!searchInput.value.trim()) {
-        clearSearchResults();
-      }
-    });
-  }
-
   function queryEssaySlug() {
     const params = new URLSearchParams(window.location.search);
     const value = params.get("essay");
     return value ? value.trim() : "";
   }
 
-  function querySearchTerm() {
+  function parseInitialSearchState() {
     const params = new URLSearchParams(window.location.search);
-    const value = params.get("q");
-    return value ? value.trim() : "";
+    return {
+      query: String(params.get("q") || "").trim(),
+      mode: normalizeMode(params.get("mode")),
+      caseSensitive: parseBooleanFlag(params.get("case"))
+    };
+  }
+
+  function applyState(nextState) {
+    state.query = String(nextState.query || "").trim();
+    state.mode = normalizeMode(nextState.mode);
+    state.caseSensitive = Boolean(nextState.caseSensitive);
+  }
+
+  function syncControlsFromState() {
+    searchInput.value = state.query;
+    searchMode.value = state.mode;
+    searchCase.checked = state.caseSensitive;
+  }
+
+  function syncStateFromControls() {
+    state.query = searchInput.value.trim();
+    state.mode = normalizeMode(searchMode.value);
+    state.caseSensitive = searchCase.checked;
+  }
+
+  function hasAdvancedState() {
+    return state.mode !== "contains" || state.caseSensitive;
+  }
+
+  function setAdvancedOpen(isOpen) {
+    advancedPanel.hidden = !isOpen;
+    advancedToggle.setAttribute("aria-expanded", isOpen ? "true" : "false");
+  }
+
+  function updateUrlState() {
+    const essaySlug = currentEssay ? currentEssay.slug : queryEssaySlug();
+    if (!essaySlug) {
+      return;
+    }
+
+    const params = new URLSearchParams(window.location.search);
+    params.set("essay", essaySlug);
+    ["q", "mode", "case", "sort", "page", "page_size", "scope"].forEach((key) => params.delete(key));
+
+    if (state.query) {
+      params.set("q", state.query);
+      if (state.mode !== "contains") {
+        params.set("mode", state.mode);
+      }
+      if (state.caseSensitive) {
+        params.set("case", "1");
+      }
+    }
+
+    const next = "essay.html?" + params.toString();
+    window.history.replaceState(null, "", next);
+  }
+
+  function clearSearchView() {
+    searchPanel.hidden = true;
+    searchHint.textContent = "Search preview is grouped by section and shows the first few hits.";
+    searchResults.innerHTML = "";
+    searchViewFull.href = currentEssay
+      ? buildSearchUrl({ query: "", scope: currentEssay.slug })
+      : "search.html";
+  }
+
+  function renderNoResults() {
+    searchPanel.hidden = false;
+    searchHint.textContent = "0 hits in 0 sections.";
+    searchResults.innerHTML = '<p class="muted">No matches found.</p>';
+    if (currentEssay) {
+      searchViewFull.href = buildSearchUrl({
+        query: state.query,
+        scope: currentEssay.slug,
+        mode: state.mode,
+        caseSensitive: state.caseSensitive
+      }, {
+        allowedScopes: [currentEssay.slug]
+      });
+    }
+  }
+
+  function groupPreviewHits(result) {
+    const groups = new Map();
+    const hits = result.hits.slice().sort((left, right) => {
+      if (left.sectionOrder !== right.sectionOrder) {
+        return left.sectionOrder - right.sectionOrder;
+      }
+      return left.index - right.index;
+    });
+
+    for (const hit of hits) {
+      const key = String(hit.sectionNumber);
+      let group = groups.get(key);
+      if (!group) {
+        group = {
+          sectionNumber: hit.sectionNumber,
+          sectionOrder: hit.sectionOrder,
+          sectionSearchLabel: hit.sectionSearchLabel,
+          total: 0,
+          hits: []
+        };
+        groups.set(key, group);
+      }
+
+      group.total += 1;
+      if (group.hits.length < PREVIEW_LIMIT) {
+        group.hits.push(hit);
+      }
+    }
+
+    return Array.from(groups.values()).sort((left, right) => left.sectionOrder - right.sectionOrder);
+  }
+
+  function renderPreview(result) {
+    searchPanel.hidden = false;
+
+    const hitLabel = result.totalHits === 1 ? "1 hit" : String(result.totalHits) + " hits";
+    const sectionLabel = result.totalSections === 1 ? "1 section" : String(result.totalSections) + " sections";
+    searchHint.textContent = hitLabel + " in " + sectionLabel + ".";
+
+    const grouped = groupPreviewHits(result);
+    searchResults.innerHTML = grouped
+      .map((group) => {
+        const sectionCountCopy = group.total === 1 ? "1 hit" : String(group.total) + " hits";
+        const sectionLink = buildSectionUrl(currentEssay.slug, group.sectionNumber, state.query, {
+          mode: state.mode,
+          caseSensitive: state.caseSensitive
+        });
+        const previewHitsHtml = group.hits
+          .map((hit) => {
+            const occurrenceLink = buildSectionUrl(currentEssay.slug, hit.sectionNumber, state.query, {
+              occurrence: hit.occurrence,
+              mode: state.mode,
+              caseSensitive: state.caseSensitive
+            });
+            return (
+              '<li class="search-preview-hit">' +
+                '<a href="' + occurrenceLink + '">' +
+                  '<span class="search-preview-hit-title">Occurrence ' + String(hit.occurrence) + "</span>" +
+                  '<span class="search-preview-hit-snippet">' + highlightSnippet(hit.snippet, hit.matchedText) + "</span>" +
+                "</a>" +
+              "</li>"
+            );
+          })
+          .join("");
+
+        const remaining = group.total - group.hits.length;
+        const remainingHtml = remaining > 0
+          ? '<p class="search-preview-more muted">+' + String(remaining) + " more in this section</p>"
+          : "";
+
+        return (
+          '<article class="search-preview-group">' +
+            '<h3><a href="' + sectionLink + '">' + escapeHtml(group.sectionSearchLabel) + "</a></h3>" +
+            '<p class="search-preview-meta muted">' + escapeHtml(sectionCountCopy) + "</p>" +
+            '<ol class="search-preview-hit-list">' + previewHitsHtml + "</ol>" +
+            remainingHtml +
+          "</article>"
+        );
+      })
+      .join("");
+
+    searchViewFull.href = buildSearchUrl({
+      query: state.query,
+      scope: currentEssay.slug,
+      mode: state.mode,
+      caseSensitive: state.caseSensitive
+    }, {
+      allowedScopes: [currentEssay.slug]
+    });
+  }
+
+  async function executeSearch() {
+    syncStateFromControls();
+    if (!state.query || !currentEssay) {
+      clearSearchView();
+      updateUrlState();
+      return;
+    }
+
+    searchPanel.hidden = false;
+    searchHint.textContent = "Searching...";
+
+    const runId = ++searchRunId;
+    let result;
+    try {
+      result = await searchEngine.search({
+        query: state.query,
+        mode: state.mode,
+        scope: currentEssay.slug,
+        caseSensitive: state.caseSensitive
+      }, {
+        forceEssaySlug: currentEssay.slug
+      });
+    } catch (error) {
+      if (runId !== searchRunId) {
+        return;
+      }
+      searchHint.textContent = "Search is unavailable right now.";
+      searchResults.innerHTML = '<p class="muted">Unable to load search results.</p>';
+      searchViewFull.href = "search.html";
+      updateUrlState();
+      return;
+    }
+
+    if (runId !== searchRunId) {
+      return;
+    }
+
+    if (result.totalHits === 0) {
+      renderNoResults();
+      updateUrlState();
+      return;
+    }
+
+    renderPreview(result);
+    updateUrlState();
+  }
+
+  function scheduleSearch() {
+    if (debounceTimer) {
+      clearTimeout(debounceTimer);
+    }
+    debounceTimer = setTimeout(() => {
+      executeSearch();
+    }, 180);
+  }
+
+  function bindEvents() {
+    searchForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      executeSearch();
+    });
+
+    searchInput.addEventListener("input", () => {
+      if (!searchInput.value.trim()) {
+        state.query = "";
+        clearSearchView();
+        updateUrlState();
+        return;
+      }
+      scheduleSearch();
+    });
+
+    [searchMode, searchCase].forEach((element) => {
+      element.addEventListener("change", () => {
+        executeSearch();
+      });
+    });
+
+    advancedToggle.addEventListener("click", () => {
+      setAdvancedOpen(advancedPanel.hidden);
+    });
   }
 
   async function resolveEssaySlug() {
@@ -236,7 +362,8 @@
 
   async function init() {
     initThemeToggle();
-    bindSearch();
+    bindEvents();
+    searchEngine = createSearchEngine(window.RenaissanceContent);
 
     try {
       const essaySlug = await resolveEssaySlug();
@@ -256,19 +383,21 @@
       renderSectionList(currentEssay, currentSections);
       document.title = currentEssay.title + " | Renaissance";
 
-      const initialTerm = querySearchTerm();
-      if (initialTerm) {
-        searchInput.value = initialTerm;
-        searchEssay(initialTerm);
+      applyState(parseInitialSearchState());
+      syncControlsFromState();
+      setAdvancedOpen(hasAdvancedState());
+
+      if (state.query) {
+        await executeSearch();
       } else {
-        clearSearchResults();
+        clearSearchView();
       }
     } catch (error) {
       essayTitle.textContent = "Unable to load this essay.";
       essaySummary.textContent = "";
       essayStats.textContent = "";
       sectionList.innerHTML = '<li class="muted">Sections unavailable.</li>';
-      clearSearchResults();
+      clearSearchView();
     }
   }
 

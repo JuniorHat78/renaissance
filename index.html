@@ -43,16 +43,70 @@
         <h1 class="site-title">Renaissance</h1>
         <p class="site-subtitle">A growing log of long-form essays.</p>
       </div>
-      <button
-        id="theme-toggle"
-        class="button button-ghost"
-        type="button"
-        aria-label="Toggle color theme"
-      ></button>
+      <div class="header-tools">
+        <form id="global-search-form" class="search-inline-form" role="search">
+          <label class="sr-only" for="global-search-input">Search all essays</label>
+          <input
+            id="global-search-input"
+            name="q"
+            type="search"
+            placeholder="Search all essays"
+            autocomplete="off"
+          >
+          <button class="button" type="submit">Search</button>
+        </form>
+        <div class="search-inline-actions">
+          <button
+            id="global-search-advanced-toggle"
+            class="button button-ghost"
+            type="button"
+            aria-controls="global-search-advanced"
+            aria-expanded="false"
+          >Advanced</button>
+          <button
+            id="theme-toggle"
+            class="button button-ghost"
+            type="button"
+            aria-label="Toggle color theme"
+          ></button>
+        </div>
+        <section id="global-search-advanced" class="search-advanced" hidden>
+          <h2 class="sr-only">Search options</h2>
+          <div class="search-advanced-grid">
+            <label>
+              <span>Scope</span>
+              <select id="global-search-scope">
+                <option value="all">All essays</option>
+              </select>
+            </label>
+            <label>
+              <span>Match</span>
+              <select id="global-search-mode">
+                <option value="contains">Contains</option>
+                <option value="exact_phrase">Exact phrase</option>
+                <option value="fuzzy">Fuzzy</option>
+              </select>
+            </label>
+            <label class="search-checkbox">
+              <input id="global-search-case" type="checkbox">
+              <span>Case sensitive</span>
+            </label>
+          </div>
+        </section>
+      </div>
     </div>
   </header>
 
   <main class="layout archive-layout">
+    <section id="global-search-panel" class="search-panel search-results-panel" aria-labelledby="global-search-heading" hidden>
+      <h2 id="global-search-heading">Search Preview</h2>
+      <p id="global-search-hint" class="muted search-hint">Search across all published essays.</p>
+      <div id="global-search-results" class="search-preview" aria-live="polite"></div>
+      <p class="search-full-link-row">
+        <a id="global-search-view-full" class="button button-ghost" href="search.html">View Full Results</a>
+      </p>
+    </section>
+
     <section class="archive-panel" aria-labelledby="essays-heading">
       <h2 id="essays-heading">Essays</h2>
       <ul id="essay-list" class="essay-list">
@@ -63,8 +117,8 @@
 
   <script src="scripts/theme.js" defer></script>
   <script src="scripts/essays-data.js" defer></script>
-  <script src="scripts/chapters-data.js" defer></script>
   <script src="scripts/content.js" defer></script>
+  <script src="scripts/search-engine.js" defer></script>
   <script src="scripts/archive.js" defer></script>
 </body>
 </html>

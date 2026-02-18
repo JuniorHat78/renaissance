@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: JavaScript Syntax Check
+        run: |
+          for file in scripts/*.js; do
+            node --check "$file"
+          done
+
+      - name: Validate Content
+        run: node scripts/validate-content.js
+
+      - name: Validate Generated Embedded Data
+        run: node scripts/generate-embedded-data.js --check
+
+      - name: Lighthouse (warning-only)
+        env:
+          LIGHTHOUSE_WARN_THRESHOLD: "90"
+        run: |
+          set -u
+          mkdir -p .lighthouseci
+          python3 -m http.server 4173 > /tmp/renaissance-http.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill $SERVER_PID || true' EXIT
+
+          run_lighthouse() {
+            local url="$1"
+            local out="$2"
+            local label="$3"
+            if ! npx --yes lighthouse "$url" \
+              --only-categories=performance \
+              --quiet \
+              --chrome-flags="--headless=new --no-sandbox --disable-dev-shm-usage" \
+              --output=json \
+              --output-path="$out"; then
+              echo "::warning title=Lighthouse run failed ($label)::Could not run Lighthouse for $url"
+            fi
+          }
+
+          run_lighthouse "http://127.0.0.1:4173/index.html" ".lighthouseci/index.json" "Home"
+          run_lighthouse "http://127.0.0.1:4173/essay.html?essay=etching-god-into-sand" ".lighthouseci/essay.json" "Essay"
+          run_lighthouse "http://127.0.0.1:4173/section.html?essay=etching-god-into-sand&section=1" ".lighthouseci/section.json" "Section"
+
+          node scripts/lighthouse-warning-summary.js

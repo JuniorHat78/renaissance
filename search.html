@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Search across Renaissance essays and sections with full controls and shareable results.">
+  <link rel="canonical" href="https://juniorhat78.github.io/renaissance/search.html">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Renaissance">
+  <meta property="og:title" content="Search | Renaissance">
+  <meta property="og:description" content="Full search across Renaissance essays with shareable, occurrence-level links.">
+  <meta property="og:url" content="https://juniorhat78.github.io/renaissance/search.html">
+  <meta property="og:image" content="https://juniorhat78.github.io/renaissance/assets/og-home.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Search | Renaissance">
+  <meta name="twitter:description" content="Full search across Renaissance essays with shareable, occurrence-level links.">
+  <meta name="twitter:image" content="https://juniorhat78.github.io/renaissance/assets/og-home.png">
+  <title>Search | Renaissance</title>
+  <script>
+    (function () {
+      try {
+        var savedTheme = localStorage.getItem("renaissance-theme");
+        document.documentElement.setAttribute(
+          "data-theme",
+          savedTheme === "dark" ? "dark" : "light"
+        );
+      } catch (error) {
+        document.documentElement.setAttribute("data-theme", "light");
+      }
+    })();
+  </script>
+  <link rel="stylesheet" href="styles/site.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="button button-ghost" href="index.html">Home</a>
+      <button
+        id="theme-toggle"
+        class="button button-ghost"
+        type="button"
+        aria-label="Toggle color theme"
+      ></button>
+    </div>
+  </header>
+
+  <main class="layout search-layout">
+    <section class="search-page-hero">
+      <p class="eyebrow">Search</p>
+      <h1 class="essay-main-title">Find Across Renaissance</h1>
+      <p class="essay-main-summary">
+        Full search view with one result per occurrence, advanced matching, and shareable links.
+      </p>
+
+      <form id="search-page-form" class="search-inline-form search-inline-form-wide" role="search">
+        <label class="sr-only" for="search-page-input">Search query</label>
+        <input
+          id="search-page-input"
+          name="q"
+          type="search"
+          placeholder="Search essays and sections"
+          autocomplete="off"
+        >
+        <button class="button" type="submit">Search</button>
+      </form>
+      <div class="search-inline-actions">
+        <button
+          id="search-page-advanced-toggle"
+          class="button button-ghost"
+          type="button"
+          aria-controls="search-page-advanced"
+          aria-expanded="false"
+        >Advanced</button>
+      </div>
+
+      <section id="search-page-advanced" class="search-advanced search-advanced-wide" hidden>
+        <h2 class="sr-only">Search options</h2>
+        <div class="search-advanced-grid search-advanced-grid-wide">
+          <label>
+            <span>Scope</span>
+            <select id="search-page-scope">
+              <option value="all">All essays</option>
+            </select>
+          </label>
+          <label>
+            <span>Match</span>
+            <select id="search-page-mode">
+              <option value="contains">Contains</option>
+              <option value="exact_phrase">Exact phrase</option>
+              <option value="fuzzy">Fuzzy</option>
+            </select>
+          </label>
+          <label>
+            <span>Sort</span>
+            <select id="search-page-sort">
+              <option value="reading_order">Reading order</option>
+              <option value="relevance">Relevance</option>
+            </select>
+          </label>
+          <label>
+            <span>Page size</span>
+            <select id="search-page-page-size">
+              <option value="25">25</option>
+              <option value="50" selected>50</option>
+              <option value="100">100</option>
+            </select>
+          </label>
+          <label class="search-checkbox">
+            <input id="search-page-case" type="checkbox">
+            <span>Case sensitive</span>
+          </label>
+        </div>
+      </section>
+    </section>
+
+    <section id="search-page-panel" class="search-panel search-results-panel" aria-labelledby="search-page-heading">
+      <h2 id="search-page-heading">Results</h2>
+      <p id="search-page-hint" class="muted search-hint">Enter a query to search all published essays.</p>
+      <div id="search-page-counts" class="search-counts" aria-live="polite"></div>
+      <div id="search-page-results" class="search-results" aria-live="polite"></div>
+      <nav id="search-page-pagination" class="search-pagination" aria-label="Search result pages" hidden>
+        <button id="search-page-prev" type="button" class="button button-ghost">Previous</button>
+        <p id="search-page-status" class="muted search-page-status"></p>
+        <button id="search-page-next" type="button" class="button button-ghost">Next</button>
+      </nav>
+    </section>
+  </main>
+
+  <script src="scripts/theme.js" defer></script>
+  <script src="scripts/essays-data.js" defer></script>
+  <script src="scripts/content.js" defer></script>
+  <script src="scripts/search-engine.js" defer></script>
+  <script src="scripts/search-page.js" defer></script>
+</body>
+</html>

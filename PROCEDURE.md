@@ -1,6 +1,6 @@
 # Procedure
 
-Simple maintenance flow for this project.
+Simple maintenance flow with copy-paste commands.
 
 ## 1. Run Locally
 
@@ -20,23 +20,32 @@ Open:
 
 ## 2. Edit Content
 
-Edit:
-- `raw/1.txt` ... `raw/10.txt`
-- `data/essays.json` (essay metadata + section titles/subtitles)
+Edit files:
+- `raw/*.txt`
+- `raw/manifest.json`
+- `data/essays.json`
 
-## 3. Regenerate Embedded Fallback Data
+## 3. Validate Content
 
-Run after content/metadata changes:
+```powershell
+node scripts/validate-content.js
+```
+
+## 4. Regenerate Embedded Fallback Data
 
 ```powershell
 node scripts/generate-embedded-data.js
 ```
 
-This updates:
-- `scripts/chapters-data.js`
-- `scripts/essays-data.js`
+## 5. Validate Everything Before Commit
 
-## 4. Export One Combined Text File
+```powershell
+Get-ChildItem scripts\*.js | ForEach-Object { node --check $_.FullName }
+node scripts/validate-content.js
+node scripts/generate-embedded-data.js --check
+```
+
+## 6. Optional Portable Export
 
 ```powershell
 node scripts/export-essay-text.js
@@ -46,21 +55,17 @@ Output:
 
 `exports/etching-god-into-sand.txt`
 
-Note:
-- `exports/` is generated output and is ignored by git.
-
-## 5. Quick Smoke Check
-
-Check these URLs:
+## 7. Quick Smoke Check
 
 - `http://localhost:8000/index.html`
 - `http://localhost:8000/essay.html?essay=etching-god-into-sand`
 - `http://localhost:8000/section.html?essay=etching-god-into-sand&section=1`
+- `http://localhost:8000/search.html?q=sand`
 
-## 6. Commit + Push
+## 8. Commit + Push
 
 ```powershell
 git add .
-git commit -m "Update content and regenerate data"
+git commit -m "Update content and validation artifacts"
 git push origin main
 ```

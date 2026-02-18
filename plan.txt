@@ -1,57 +1,123 @@
 Renaissance Plan
-Date: 2026-02-17
-Status: Approved roadmap only. Implementation paused.
+Date: 2026-02-18
+Status: Approved roadmap only. Spec codification update (no implementation in this step).
 
-Product Direction
-- Renaissance is the publication/archive index.
-- Etching God into Sand is one essay entry in the archive.
-- Sections are currently unnamed and ordered (I..X).
+Objective (This Phase)
+- Keep search discoverable and shareable without overcrowding reading pages.
+- Shift heavy search exploration to a dedicated full-results page.
 
-Primary Goal
-- Move from chapter-first IA to essay-first IA without losing current reading quality.
+Locked Product Decisions
+- Search surfaces remain:
+  - Home global search.
+  - Essay local search.
+- Inline search becomes preview-only (not full comb-through UI).
+- Full comb-through moves to dedicated `search.html`.
+- Deep-linking and sharing are first-class:
+  - `q` + `occ` result links.
+  - text highlight links.
+  - Chromium text fragments with fallback.
 
-Phase Plan
-1. Information Architecture
-- Home page becomes essay index.
-- Essay page becomes the landing page for one essay.
-- Section page remains long-form reader for a single section.
+Execution Plan
+1. Shared Search Engine Foundation
+- Keep one shared client-side search engine module.
+- Reuse content loaders and searchable text parsing.
+- Preserve match modes and sorting logic.
+- Keep lazy index build + in-memory caching.
 
-2. Data Model
-- Add essay registry metadata (all essays).
-- Add per-essay metadata (title, slug, summary, section order, source directory).
-- Keep section text files as canonical source.
+2. Inline Preview Search (Home + Essay)
+- Home: compact global search in header.
+- Essay: compact local search in upper-right.
+- Results are grouped by section.
+- Show section-level counts + first N hits per section (default N = 3).
+- Add `View Full Results` CTA carrying current query/options.
 
-3. Routing and Navigation
-- Home route: index of essays.
-- Essay route: one essay overview + section TOC + search.
-- Section route: section reader with Home + Back to Essay + Prev/Next.
+3. Dedicated Full Results Page (`search.html`)
+- Add full search route for comb-through workflows.
+- Support:
+  - global scope or essay scope
+  - advanced controls
+  - full pagination (`Previous` / `Next`)
+  - page size 25/50/100 (default 50)
+- Preserve URL state for refresh/share.
 
-4. Search Behavior Revision
-- Search scope defaults to current essay.
-- One result row per occurrence (not one per section/chapter).
-- Sort order is reading order: section order, then in-text occurrence order.
-- Result summary includes total hits and per-section counts.
+4. Shareable Deep Links (Search to Reader)
+- Result links include `q` and `occ`:
+  - `section.html?essay=<slug>&section=<n>&q=<term>&occ=<k>`
+- On load:
+  - resolve k-th occurrence
+  - scroll to hit
+  - apply visible highlight
 
-5. Labeling Strategy
-- Keep section labels generic for now (Section I, Section II, ...).
-- Add optional metadata hook for custom section names later.
+5. Shareable Manual Highlights
+- Add selection action: `Copy Link to Highlight`.
+- Generate two link variants:
+  - Chromium: `#:~:text=...`
+  - Fallback: query params (`hl`, optional context)
+- Reader resolves fallback highlight reliably after load.
 
-6. Runtime Compatibility
-- Continue supporting both localhost server mode and file mode fallback.
-- Preserve encoding-safe text rendering.
+6. Anchor Priority Rules
+- If multiple anchor modes exist in URL, resolve in order:
+  1) explicit highlight (`hl` / text-fragment fallback data)
+  2) occurrence (`occ`)
+  3) plain query (`q`) with no anchor target
 
-7. QA and Acceptance
-- Validate home index, essay page, section page, and navigation.
-- Validate search ordering, per-occurrence rendering, and counts.
-- Validate behavior in both http:// and file:// modes.
+7. UI Polish Pass
+- Improve select/dropdown styling to match theme.
+- Fix checkbox alignment for case-sensitive toggle.
+- Tighten control spacing and visual hierarchy.
+- Keep controls subtle and non-dashboard-like.
 
-Out of Scope (Current Phase)
-- Cross-essay global search.
-- Authoring UI for naming sections.
-- Scrollytelling/animation-heavy narrative effects.
+8. QA and Hardening
+- Validate inline preview grouping + preview limit behavior.
+- Validate full page pagination and URL round-trip.
+- Validate `occ` deep-links and highlight placement.
+- Validate Chromium text-fragment behavior and non-Chromium fallback.
+- Validate mobile/desktop layout and keyboard accessibility.
+- Validate localhost and embedded fallback runtime modes.
+
+9. Contextual Highlight Sharing UX
+- Reduce friction for in-section sharing in long reads.
+- Desktop:
+  - Show a floating `Copy highlight link` chip near active text selection.
+  - Position chip with viewport clamping.
+- Mobile:
+  - Show a fixed bottom mini action bar when selection is active.
+- Keep top `Copy Link to Highlight` button as fallback for accessibility and degraded scenarios.
+- Preserve existing link format:
+  - Chromium text fragment (`#:~:text=...`)
+  - fallback params (`hl`, optional `hlp`/`hls`)
+- Interaction rules:
+  - Hide contextual action on collapsed/outside selection, `Esc`, or after copy success timeout.
+  - Do not override native browser context menus.
+- QA additions:
+  - Validate mid-section selection workflows in long sections.
+  - Validate desktop/mobile behavior, light/dark themes, and keyboard fallback path.
+
+10. Short Source-Link Strategy
+- Reduce copied source URL length while preserving deterministic re-open behavior.
+- Selection-to-link anchor strategy:
+  - Full paragraph selection(s) -> `p=<start>-<end>` paragraph range anchors.
+  - Partial contiguous selection -> `r=<start>-<end>` compact absolute offsets (base36).
+  - Fallback for unsupported/ambiguous cases -> existing `hl` payload anchors.
+- Prefer compact anchors over long text payload in source links.
+- Keep backward compatibility for existing `hl` links.
+- Build source link base by runtime:
+  - `http/https` uses current origin.
+  - `file://` falls back to canonical public URL when available.
+- Clipboard behavior:
+  - copied quote remains unchanged
+  - append `[Source] <url>` with compact anchor when available.
 
 Deliverables
-- Updated page structure and routing.
-- Essay metadata files.
-- Search engine updates for per-occurrence ordered hits.
-- Regression coverage for runtime modes and encoding.
+- Preview-first inline search on home and essay pages.
+- New `search.html` full-results workflow.
+- Shareable search and highlight links (Chromium + fallback).
+- Contextual (selection-driven) highlight-share UX on section reader.
+- Refined search control styling and alignment.
+- Updated QA checklist and acceptance verification.
+
+Out of Scope (This Phase)
+- Backend indexing service.
+- Search analytics dashboard.
+- Vector/semantic retrieval.
+- Cross-essay compare workspace.

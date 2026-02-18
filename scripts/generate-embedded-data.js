@@ -41,12 +41,58 @@ function buildEssaysOutput() {
   );
 }
 
-const files = chapterFiles();
-const chapterOutput = buildChapterOutput(files);
-const essaysOutput = buildEssaysOutput();
+function readTextIfExists(filePath) {
+  try {
+    return fs.readFileSync(filePath, "utf8");
+  } catch (error) {
+    if (error && error.code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  }
+}
 
-fs.writeFileSync(chaptersOutPath, chapterOutput, "utf8");
-fs.writeFileSync(essaysOutPath, essaysOutput, "utf8");
+function writeOutputs(files) {
+  const chapterOutput = buildChapterOutput(files);
+  const essaysOutput = buildEssaysOutput();
+  fs.writeFileSync(chaptersOutPath, chapterOutput, "utf8");
+  fs.writeFileSync(essaysOutPath, essaysOutput, "utf8");
+  console.log(`Wrote ${files.length} sections to ${chaptersOutPath}`);
+  console.log(`Wrote essay metadata to ${essaysOutPath}`);
+}
 
-console.log(`Wrote ${files.length} sections to ${chaptersOutPath}`);
-console.log(`Wrote essay metadata to ${essaysOutPath}`);
+function checkOutputs(files) {
+  const expectedChapterOutput = buildChapterOutput(files);
+  const expectedEssaysOutput = buildEssaysOutput();
+  const actualChapterOutput = readTextIfExists(chaptersOutPath);
+  const actualEssaysOutput = readTextIfExists(essaysOutPath);
+
+  const hasChapterDiff = actualChapterOutput !== expectedChapterOutput;
+  const hasEssaysDiff = actualEssaysOutput !== expectedEssaysOutput;
+
+  if (!hasChapterDiff && !hasEssaysDiff) {
+    console.log("Embedded data files are up to date.");
+    return;
+  }
+
+  if (hasChapterDiff) {
+    console.error("Out of date: scripts/chapters-data.js");
+  }
+  if (hasEssaysDiff) {
+    console.error("Out of date: scripts/essays-data.js");
+  }
+  console.error("Run: node scripts/generate-embedded-data.js");
+  process.exit(1);
+}
+
+function main() {
+  const files = chapterFiles();
+  const checkMode = process.argv.includes("--check");
+  if (checkMode) {
+    checkOutputs(files);
+    return;
+  }
+  writeOutputs(files);
+}
+
+main();

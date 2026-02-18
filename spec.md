@@ -1,130 +1,177 @@
 # Renaissance Essay Platform Spec
 
-Date: 2026-02-17  
-Status: Approved spec only (no implementation in this step)
+Date: 2026-02-18  
+Status: Approved spec only (pre-implementation update)
 
 ## 1. Product Model
 
 ### 1.1 Identity
 - `Renaissance` is the publication/archive.
 - `Etching God into Sand` is one essay in that archive.
-- Essay sections are currently unnamed and referenced by order.
+- Sections are ordered; metadata titles/subtitles are optional overlays.
 
-### 1.2 Core Experience
-- Browse essays from the archive home.
-- Open an essay landing page.
-- Read essay sections sequentially with long-form typography.
-- Search within the current essay with ordered, per-occurrence hits.
+### 1.2 Search Experience Model
+- Inline search is for fast preview and discovery.
+- Full search analysis happens on dedicated results page.
+- Search outputs and highlights are shareable by URL.
 
 ## 2. Information Architecture
 
 ### 2.1 Pages
-- `index.html`: archive home (essay list).
-- `essay.html?essay=<slug>`: essay landing + section list + essay-scoped search.
-- `section.html?essay=<slug>&section=<n>`: section reader with prev/next navigation.
+- `index.html`: archive home + global inline preview search.
+- `essay.html?essay=<slug>`: essay landing + local inline preview search.
+- `search.html`: full search results page (global or scoped).
+- `section.html?essay=<slug>&section=<n>`: section reader with deep-link highlight behavior.
 
-### 2.2 Navigation
-- Global: `Home`.
-- Essay context: `Back to Essay`.
-- Section navigation: `Previous Section`, `Next Section`.
-- Optional action: explicit bottom CTA for `Next Section`.
+### 2.2 Search Surface Placement
+- Home: compact search input in header/top-right.
+- Essay: compact search input in hero/top-right.
+- Advanced controls collapsed by default.
 
-## 3. Content and Metadata
+## 3. Inline Preview Search Contract
 
-### 3.1 Canonical Text Source
-- Section source text files remain canonical.
-- Current essay source directory remains `raw/` unless migrated later.
+### 3.1 Scope
+- Home inline search defaults to global (`all essays`) with optional scope selector.
+- Essay inline search is fixed to current essay scope.
 
-### 3.2 Essay Registry (Proposed)
-- `data/essays.json` contains all essays.
-- Example fields per essay:
-  - `id`
-  - `slug`
-  - `title`
-  - `summary`
-  - `published` (boolean/date-ready field)
-  - `source_dir`
-  - `section_order` (array of numbers)
+### 3.2 Preview Structure
+- Results grouped by section.
+- Show section-level hit count.
+- Show first N occurrences per section (`preview_limit`, default `3`).
+- Include `View Full Results` CTA.
 
-### 3.3 Optional Section Title Overlay
-- Per-essay optional map:
-  - `section_titles`: `{ "1": "Optional Name", ... }`
-- If absent, UI uses generic section labels.
+### 3.3 CTA Behavior
+- CTA routes to `search.html` and carries query/options state.
+- No full pagination in inline preview area.
 
-## 4. Section Labeling Rules
+## 4. Full Results Page Contract (`search.html`)
 
-- Default display label: `Section <RomanNumeral>`.
-- Fallback if numeral unavailable: `Section <NN>`.
-- If `section_titles` exists, prefer custom title while still showing section number context.
+### 4.1 Inputs
+- URL state supported:
+  - `q`
+  - `scope`
+  - `mode`
+  - `sort`
+  - `case`
+  - `page`
+  - `page_size`
 
-## 5. Search Specification
+### 4.2 Controls
+- Match modes: `contains`, `exact_phrase`, `fuzzy`.
+- Sort modes: `reading_order`, `relevance`.
+- Scope: `all` or essay slug.
+- Case-sensitive toggle.
+- Pagination: `Previous` / `Next`.
+- Page size: `25`, `50`, `100` (default `50`).
 
-### 5.1 Scope
-- Default scope: current essay only.
-- No cross-essay aggregation in this phase.
+## 5. Query and Ranking Rules
 
-### 5.2 Match Unit
-- One occurrence equals one result row.
-- A section with many matches yields many result rows.
+### 5.1 Match Unit
+- One occurrence equals one result item.
+- Grouping/viewing layer may summarize by section, but canonical hit unit remains occurrence.
 
-### 5.3 Ordering
-- Primary sort: section order ascending.
-- Secondary sort: character index ascending within section.
+### 5.2 Sorting
+- `reading_order`: essay order, section order, in-text occurrence order.
+- `relevance`: exact phrase > exact token > fuzzy token; ties resolved by reading order.
 
-### 5.4 Result Metadata
-- Top summary:
-  - total hits across essay
-  - number of sections containing hits
-- Per-section summary line:
-  - section label + count in that section
-- Each result row:
-  - section label
-  - occurrence index within section
-  - highlighted snippet
-  - link to section route
+### 5.3 Fuzzy
+- Typo-tolerant, lightweight client-side matching.
+- Fuzzy default is off.
+- UI must indicate when fuzzy mode is active.
 
-### 5.5 Query Behavior
-- Case-insensitive literal matching for initial release.
-- Multi-token behavior can remain logical AND, provided ordering rules above are preserved.
+## 6. Shareable Result and Highlight Links
 
-## 6. UI and Theme Constraints
+### 6.1 Occurrence Deep Links
+- Format:
+  - `section.html?essay=<slug>&section=<n>&q=<term>&occ=<k>`
+- Behavior:
+  - resolve k-th occurrence of query in section
+  - scroll to match
+  - apply visible highlight state
 
-### 6.1 Visual Direction
-- Literary print-style UI.
-- Warm rust accent in light theme.
-- Warm charcoal palette in dark theme.
-- No dashboard-heavy cards or oversized search container.
+### 6.2 Manual Text Selection Links
+- Add `Copy Link to Highlight` action for user-selected text.
+- Include robust fallback params (example: `hl` + context tokens) to re-find highlight.
 
-### 6.2 Home (Archive) UI
-- Compact search control area.
-- Essay list as clear index rows.
-- Minimal chrome and restrained ornamentation.
+### 6.3 Chromium Text Fragment Support
+- Generate Chromium-friendly links using `#:~:text=...` when possible.
+- Also generate/retain fallback params for non-Chromium environments.
 
-### 6.3 Reader UI
-- Centered long-form column.
-- Clean line rhythm, readable serif body.
-- Restrained controls for navigation.
+### 6.4 Anchor Priority
+- If multiple anchor hints exist, resolve in order:
+  1) explicit highlight payload (`p`, `r`, `hl` / selection payload)
+  2) `occ`
+  3) plain `q` (no forced anchor target)
 
-## 7. Runtime and Encoding Requirements
+### 6.5 Contextual Share Trigger (Section Reader)
+- Section reader exposes contextual highlight-share actions when user selects text in `#section-content`.
+- Desktop behavior:
+  - show a floating `Copy highlight link` action near selected text.
+- Mobile behavior:
+  - show a fixed bottom mini action bar for the same action.
+- Existing top-page `Copy Link to Highlight` remains available as fallback.
+- Action must reuse existing share payload contract:
+  - Chromium `#:~:text=...`
+  - fallback query params (`hl`, optional `hlp`, `hls`).
 
-- Must work in both modes:
+### 6.6 Compact Source-Link Anchors
+- Section source links may use compact anchors to reduce URL length:
+  - `p=<start>-<end>` for full paragraph range selections.
+  - `r=<start>-<end>` for contiguous character-offset selections (base36).
+- Existing text payload anchors (`hl`, optional `hlp`, `hls`) remain supported for backward compatibility.
+
+### 6.7 Source URL Base Resolution
+- Source links generated from selection should use:
+  - current `http/https` origin when served from web context
+  - canonical public URL as fallback when runtime is `file://` (if canonical URL is available)
+- Local filesystem paths should not be preferred in copied source links when public canonical base exists.
+
+## 7. URL State and Share Stability
+
+- Search state must round-trip via URL.
+- Refresh and shared links must restore same state.
+- Full results and section deep-links must be deterministic.
+
+## 8. UI Constraints and Polish Requirements
+
+- Preserve warm rust / warm charcoal visual language.
+- Keep search controls compact and non-dashboard-like.
+- Improve select/dropdown styling to match theme.
+- Fix checkbox alignment for case-sensitive control.
+- Maintain visual hierarchy and spacing consistency on mobile and desktop.
+
+## 9. Accessibility and Interaction
+
+- Keyboard-accessible controls, pagination, and copy-link actions.
+- Clear focus-visible states.
+- ARIA live regions for async search result updates.
+- Highlight target should be focusable or otherwise navigably announced.
+- Non-color cues required for active state and selected hits.
+- Contextual share action dismisses on collapsed selection or `Esc`.
+- Native browser context menu remains untouched (no custom right-click replacement).
+
+## 10. Runtime and Encoding Requirements
+
+- Must work in:
   - `http://localhost` static server mode
-  - direct `file://` mode via embedded fallback data
+  - `file://` mode via embedded fallback data
 - Must preserve punctuation and symbols (no mojibake artifacts).
 
-## 8. Non-Goals (This Phase)
+## 11. Non-Goals (This Phase)
 
-- Cross-essay global search.
-- CMS/editor for essay authoring.
-- Automated section-title generation.
-- Scrollytelling interactions.
+- Backend search index service.
+- Search analytics dashboards.
+- Semantic/vector retrieval.
+- CMS/editor authoring workflows.
 
-## 9. Acceptance Criteria
+## 12. Acceptance Criteria
 
-1. Home page lists essays; `Etching God into Sand` appears as one entry.
-2. Essay page renders section TOC and essay-scoped search.
-3. Search for terms like `sand` returns per-occurrence rows, in strict reading order.
-4. Search displays total counts and per-section counts.
-5. Section navigation works (`Prev/Next`, `Back to Essay`).
-6. UI remains consistent with warm rust / warm charcoal design system.
-7. All core behavior works in both `http://` and `file://` modes.
+1. Inline search on home and essay pages shows grouped preview-only hits with configurable preview cap.
+2. `View Full Results` from inline surfaces opens `search.html` with preserved query/options.
+3. `search.html` supports full controls + pagination and restores state from URL.
+4. `occ` links land on correct in-section occurrence and visibly highlight target.
+5. Manual highlight links are copyable and reopen to matched text.
+6. Chromium text-fragment links work where supported and fallback links work where not.
+7. UI polish pass resolves dropdown and checkbox alignment issues.
+8. Behavior remains correct in both `http://` and `file://` modes.
+9. In long sections, text can be selected and shared without scrolling to top controls.
