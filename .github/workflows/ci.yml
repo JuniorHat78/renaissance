@@ -19,9 +19,15 @@ jobs:
         with:
           node-version: 20
 
+      - name: Install Node Dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
       - name: JavaScript Syntax Check
         run: |
-          for file in scripts/*.js; do
+          find scripts -name "*.js" -print0 | while IFS= read -r -d '' file; do
             node --check "$file"
           done
 
@@ -30,6 +36,50 @@ jobs:
 
       - name: Validate Generated Embedded Data
         run: node scripts/generate-embedded-data.js --check
+
+      - name: Anchor and Copy Regression Suite
+        run: |
+          set -u
+          python3 -m http.server 4173 > /tmp/renaissance-http-regression.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill $SERVER_PID || true' EXIT
+          for i in $(seq 1 20); do
+            if curl -fsS http://127.0.0.1:4173/index.html > /dev/null; then
+              break
+            fi
+            sleep 0.5
+          done
+
+          npm run test:regression -- --base http://127.0.0.1:4173
+
+      - name: Visual QA Check (warning-only)
+        run: |
+          set -u
+          python3 -m http.server 4173 > /tmp/renaissance-http-visual.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill $SERVER_PID || true' EXIT
+          for i in $(seq 1 20); do
+            if curl -fsS http://127.0.0.1:4173/index.html > /dev/null; then
+              break
+            fi
+            sleep 0.5
+          done
+
+          if ! npm run visual:check -- --base http://127.0.0.1:4173 --warn-only; then
+            echo "::warning title=Visual QA check failed::Unable to run screenshot capture/diff workflow"
+          fi
+
+      - name: Upload Visual QA Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-qa-report
+          if-no-files-found: warn
+          path: |
+            qa/visual/current/**
+            qa/visual/diff/**
+            qa/visual/report.json
+            qa/visual/report.md
 
       - name: Lighthouse (warning-only)
         env:

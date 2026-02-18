@@ -31,17 +31,55 @@ Open:
 ## Reader Shortcuts
 
 - `Ctrl+Alt+C` / `Cmd+Option+C`: copy highlight link for current selection in section reader.
-- Standard copy in section content appends a source link to copied text.
+- Standard copy in section content appends a source footer: `[Source] <url>`.
 
 ## Quality Checks
 
 Run these before commit:
 
 ```powershell
-Get-ChildItem scripts\*.js | ForEach-Object { node --check $_.FullName }
+Get-ChildItem -Recurse scripts\*.js | ForEach-Object { node --check $_.FullName }
 node scripts/validate-content.js
 node scripts/generate-embedded-data.js --check
+npm run test:regression -- --base http://127.0.0.1:8000
 ```
+
+## Visual QA Routine
+
+Install dev tooling:
+
+```powershell
+npm.cmd install
+```
+
+Capture current screenshots from your running local server:
+
+```powershell
+npm.cmd run visual:capture -- --base http://127.0.0.1:8000
+```
+
+Run diff against git-tracked baseline:
+
+```powershell
+npm.cmd run visual:diff
+```
+
+Approve current screenshots as new baseline (intentional changes only):
+
+```powershell
+npm.cmd run visual:approve
+```
+
+One-shot warning mode (capture + diff):
+
+```powershell
+npm.cmd run visual:check -- --base http://127.0.0.1:8000 --warn-only
+```
+
+Visual QA architecture files:
+- Scenario registry: `qa/visual/scenarios.json`
+- Baseline images: `qa/visual/baseline/`
+- Runtime outputs: `qa/visual/current/`, `qa/visual/diff/`, `qa/visual/report.json`, `qa/visual/report.md`
 
 ## Content Workflow
 
@@ -79,6 +117,8 @@ Runs on every `push` to `main` and on every pull request:
 - JS syntax checks (`node --check`)
 - Content validation (`scripts/validate-content.js`)
 - Embedded data sync check (`scripts/generate-embedded-data.js --check`)
+- Anchor/copy regression checks (`npm run test:regression`)
+- Visual QA check (`npm run visual:check -- --warn-only`) with artifact upload
 - Lighthouse performance audit in warning-only mode (logs warnings, does not fail build)
 
 ## Deployment

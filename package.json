@@ -1,0 +1,23 @@
+{
+  "name": "renaissance",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Renaissance is a warm, book-style static website for long-form essays.",
+  "type": "commonjs",
+  "scripts": {
+    "test:anchors": "node scripts/tests/anchor-regression.js",
+    "test:copy-footer": "node scripts/tests/copy-footer-regression.js",
+    "test:regression": "node scripts/tests/regression-check.js",
+    "visual:capture": "node scripts/visual/capture.js",
+    "visual:diff": "node scripts/visual/diff.js",
+    "visual:check": "node scripts/visual/check.js",
+    "visual:approve": "node scripts/visual/approve.js",
+    "validate:content": "node scripts/validate-content.js",
+    "validate:embedded:check": "node scripts/generate-embedded-data.js --check"
+  },
+  "devDependencies": {
+    "pixelmatch": "^7.1.0",
+    "playwright": "^1.58.2",
+    "pngjs": "^7.0.0"
+  }
+}

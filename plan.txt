@@ -1,10 +1,15 @@
 Renaissance Plan
 Date: 2026-02-18
-Status: Approved roadmap only. Spec codification update (no implementation in this step).
+Status: Implemented roadmap with actionables complete and verified.
 
 Objective (This Phase)
 - Keep search discoverable and shareable without overcrowding reading pages.
 - Shift heavy search exploration to a dedicated full-results page.
+
+Current Priority (Visual Recovery)
+- Reset the recent over-styled search UI pass to a cleaner baseline.
+- Re-polish search UI deliberately using screenshot loops (not blind CSS iteration).
+- Keep all search behavior and URL contracts unchanged during this visual pass.
 
 Locked Product Decisions
 - Search surfaces remain:
@@ -108,12 +113,111 @@ Execution Plan
   - copied quote remains unchanged
   - append `[Source] <url>` with compact anchor when available.
 
+11. Screenshot-Driven Reset + Re-Polish Workflow (Current)
+- Runtime source of truth:
+  - Use the running local server at `http://127.0.0.1:8000` (user-managed).
+- Visual evidence source:
+  - Use browser PNG screenshots from real viewport rendering.
+  - Do not use PDF snapshots for layout/style decisions.
+- Required capture set per iteration:
+  - Desktop: `1440x1200`
+  - Mobile: `390x844`
+  - Pages:
+    - `index.html`
+    - `essay.html?essay=etching-god-into-sand`
+    - `search.html?q=sand`
+- Iteration sequence:
+  1) Capture current-state screenshots.
+  2) Reset search UI styling to pre-overstyled baseline (UI only).
+  3) Capture reset baseline screenshots.
+  4) Apply subtle polish pass A (control sizing, alignment, spacing).
+  5) Capture screenshots and review.
+  6) Apply subtle polish pass B (advanced panel and dropdown polish, restrained).
+  7) Capture screenshots and review.
+  8) Apply subtle polish pass C (results/pagination integration, restrained).
+  9) Final screenshot capture and QA sign-off.
+- Guardrails for this pass:
+  - No search logic changes.
+  - No URL/state changes.
+  - No copy/deep-link behavior changes.
+  - Keep visual language book-like and understated (avoid dashboard/chip-heavy styling).
+
+12. Visual QA Tooling Architecture (Codified Next Step)
+- Goal:
+  - Make UI screenshot review repeatable, comparable, and CI-friendly.
+- Runtime:
+  - Local dev server remains user-managed at `http://127.0.0.1:8000`.
+- Components:
+  1) Scenario Registry
+  - File: `qa/visual/scenarios.json`
+  - Contains deterministic capture scenarios:
+    - route
+    - viewport/device
+    - theme
+    - query-state
+    - scroll behavior (top/bottom/full)
+  2) Capture Runner
+  - File: `scripts/visual/capture.js`
+  - Reads scenario registry and captures PNGs.
+  - Writes to:
+    - `qa/visual/current/`
+  3) Diff Runner
+  - File: `scripts/visual/diff.js`
+  - Compares:
+    - `qa/visual/current/` vs `qa/visual/baseline/`
+  - Writes:
+    - `qa/visual/diff/`
+    - `qa/visual/report.json`
+    - `qa/visual/report.md`
+  4) Approve Runner
+  - File: `scripts/visual/approve.js`
+  - Promotes current images to baseline when changes are intentional.
+  5) NPM Entrypoints
+  - `visual:capture`
+  - `visual:diff`
+  - `visual:check` (capture + diff)
+  - `visual:approve`
+- Stability Constraints:
+  - Fixed viewport sizes
+  - Fixed locale/timezone
+  - Fixed browser channel
+  - Prefer reduced-motion for stable snapshots
+- CI Strategy:
+  - Start with warning mode (non-blocking)
+  - Upload `current/diff/report` artifacts for PR review
+  - Optionally promote to strict blocking mode later
+
+13. Recommendations Actionables (Codified Backlog)
+- R1 `copy-footer-format`:
+  - Standardize source footer copy format across copy surfaces.
+  - Priority: Medium
+  - Status: Done
+- R2 `q-only-cap-note`:
+  - Show subtle note when `q`-only highlight cap is applied.
+  - Priority: Medium
+  - Status: Done
+- R3 `anchor-regression-suite`:
+  - Add focused automated checks for anchor/occurrence precedence and highlight counts.
+  - Priority: High
+  - Status: Done
+- R4 `highlight-perf-metric`:
+  - Add lightweight dev-only timing metric for multi-highlight passes.
+  - Priority: Low
+  - Status: Done
+- R5 `visual-qa-routine`:
+  - Make screenshot diff checks part of normal pre-merge workflow.
+  - Priority: High
+  - Status: Done
+
 Deliverables
 - Preview-first inline search on home and essay pages.
 - New `search.html` full-results workflow.
 - Shareable search and highlight links (Chromium + fallback).
 - Contextual (selection-driven) highlight-share UX on section reader.
 - Refined search control styling and alignment.
+- Screenshot workflow script and reproducible screenshot output folders for review loops.
+- Codified visual QA architecture (`scenario -> capture -> diff -> approve`) for implementation.
+- Actionable recommendation backlog with priorities and statuses.
 - Updated QA checklist and acceptance verification.
 
 Out of Scope (This Phase)
@@ -121,3 +225,4 @@ Out of Scope (This Phase)
 - Search analytics dashboard.
 - Vector/semantic retrieval.
 - Cross-essay compare workspace.
+- Any content or narrative edits to essays.

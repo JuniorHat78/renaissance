@@ -24,9 +24,12 @@
   const nextCta = document.getElementById("next-cta");
   const copyHighlightButton = document.getElementById("copy-highlight-link");
   const copyHighlightStatus = document.getElementById("copy-highlight-status");
+  const highlightCapNote = document.getElementById("highlight-cap-note");
   let selectionCopyChip = document.getElementById("selection-copy-chip");
   let selectionCopyBar = document.getElementById("selection-copy-bar");
   let selectionCopyBarButton = document.getElementById("selection-copy-bar-button");
+  const MAX_QUERY_ONLY_HIGHLIGHTS = 160;
+  const SOURCE_FOOTER_LABEL = "[Source] ";
 
   let currentEssay = null;
   let currentSectionNumber = null;
@@ -41,6 +44,15 @@
   const CONTEXTUAL_LABEL_ERROR = "Try copy again";
   let hasContextualShare = false;
   let copyToast = document.getElementById("copy-toast");
+  const shouldLogHighlightPerf = (() => {
+    const protocol = String(window.location.protocol || "").toLowerCase();
+    if (protocol === "file:") {
+      return true;
+    }
+
+    const host = String(window.location.hostname || "").toLowerCase();
+    return host === "localhost" || host === "127.0.0.1";
+  })();
 
   function escapeHtml(text) {
     return String(text)
@@ -49,6 +61,46 @@
       .replaceAll(">", "&gt;")
       .replaceAll('"', "&quot;")
       .replaceAll("'", "&#39;");
+  }
+
+  function nowMs() {
+    if (window.performance && typeof window.performance.now === "function") {
+      return window.performance.now();
+    }
+    return Date.now();
+  }
+
+  function logHighlightPerf(label, startedAt, details) {
+    if (!shouldLogHighlightPerf) {
+      return;
+    }
+
+    const duration = Math.max(0, nowMs() - startedAt);
+    const payload = details || {};
+    console.debug(
+      `[highlight-perf] ${label} ${duration.toFixed(1)}ms`,
+      payload
+    );
+  }
+
+  function clearHighlightCapNote() {
+    if (!highlightCapNote) {
+      return;
+    }
+    highlightCapNote.textContent = "";
+    highlightCapNote.hidden = true;
+  }
+
+  function showHighlightCapNote(limit, totalHits) {
+    if (!highlightCapNote) {
+      return;
+    }
+    highlightCapNote.textContent = "Showing first " + String(limit) + " highlights out of " + String(totalHits) + ".";
+    highlightCapNote.hidden = false;
+  }
+
+  function sourceFooterText(url) {
+    return SOURCE_FOOTER_LABEL + String(url || "");
   }
 
   function joinMetaParts(parts) {
@@ -419,6 +471,7 @@
     }
     setFallbackVisible(false);
     copyHighlightStatus.textContent = "";
+    clearHighlightCapNote();
     hideCopyToast();
     activeSelectionDetails = null;
     hideContextualShare();
@@ -706,18 +759,27 @@
   }
 
   function highlightFromPayload(payload) {
+    const startedAt = nowMs();
     const match = findBestHighlightMatch(payload);
     if (!match) {
+      logHighlightPerf("anchor_payload", startedAt, { applied: false });
       return false;
     }
 
     const mark = wrapAbsoluteRange(match.index, match.length);
     focusHighlight(mark);
-    return Boolean(mark);
+    const applied = Boolean(mark);
+    logHighlightPerf("anchor_payload", startedAt, {
+      applied,
+      length: match.length
+    });
+    return applied;
   }
 
   function highlightOccurrence(query, occurrence, mode, caseSensitive) {
+    const startedAt = nowMs();
     if (!query || !occurrence) {
+      logHighlightPerf("anchor_occurrence", startedAt, { applied: false, reason: "missing_query_or_occurrence" });
       return false;
     }
 
@@ -728,12 +790,86 @@
     });
     const target = hits[occurrence - 1];
     if (!target) {
+      logHighlightPerf("anchor_occurrence", startedAt, {
+        applied: false,
+        hits: hits.length,
+        occurrence
+      });
       return false;
     }
 
     const mark = wrapAbsoluteRange(target.index, target.length);
     focusHighlight(mark);
-    return Boolean(mark);
+    const applied = Boolean(mark);
+    logHighlightPerf("anchor_occurrence", startedAt, {
+      applied,
+      hits: hits.length,
+      occurrence
+    });
+    return applied;
+  }
+
+  function highlightQueryMatches(query, mode, caseSensitive) {
+    const startedAt = nowMs();
+    if (!query) {
+      logHighlightPerf("anchor_query_only", startedAt, { applied: false, reason: "missing_query" });
+      return {
+        applied: false,
+        totalHits: 0,
+        highlighted: 0,
+        capped: false
+      };
+    }
+
+    const renderedText = sectionContent.textContent || "";
+    const hits = findOccurrencesInText(renderedText, query, {
+      mode,
+      caseSensitive
+    });
+    if (!hits.length) {
+      logHighlightPerf("anchor_query_only", startedAt, {
+        applied: false,
+        totalHits: 0,
+        highlighted: 0,
+        capped: false
+      });
+      return {
+        applied: false,
+        totalHits: 0,
+        highlighted: 0,
+        capped: false
+      };
+    }
+
+    const limit = Math.min(hits.length, MAX_QUERY_ONLY_HIGHLIGHTS);
+    let firstMark = null;
+    for (let index = 0; index < limit; index += 1) {
+      const hit = hits[index];
+      const mark = wrapAbsoluteRange(hit.index, hit.length);
+      if (!firstMark && mark) {
+        firstMark = mark;
+      }
+    }
+
+    if (firstMark) {
+      focusHighlight(firstMark);
+      const result = {
+        applied: true,
+        totalHits: hits.length,
+        highlighted: limit,
+        capped: hits.length > limit
+      };
+      logHighlightPerf("anchor_query_only", startedAt, result);
+      return result;
+    }
+    const result = {
+      applied: false,
+      totalHits: hits.length,
+      highlighted: 0,
+      capped: hits.length > limit
+    };
+    logHighlightPerf("anchor_query_only", startedAt, result);
+    return result;
   }
 
   function highlightAbsoluteRange(start, end) {
@@ -763,7 +899,9 @@
   }
 
   function resolveInitialAnchor() {
+    const startedAt = nowMs();
     clearAutoHighlights();
+    clearHighlightCapNote();
 
     const paragraphAnchor = queryParagraphAnchor();
     const rangeAnchor = queryRangeAnchor();
@@ -774,20 +912,40 @@
     const caseSensitive = queryCaseSensitive();
 
     if (paragraphAnchor && highlightParagraphAnchor(paragraphAnchor)) {
+      logHighlightPerf("resolve_anchor", startedAt, { strategy: "paragraph" });
       return;
     }
 
     if (rangeAnchor && highlightAbsoluteRange(rangeAnchor.start, rangeAnchor.end)) {
+      logHighlightPerf("resolve_anchor", startedAt, { strategy: "range" });
       return;
     }
 
     if (payload && highlightFromPayload(payload)) {
+      logHighlightPerf("resolve_anchor", startedAt, { strategy: "payload" });
       return;
     }
 
     if (query && occurrence && highlightOccurrence(query, occurrence, mode, caseSensitive)) {
+      logHighlightPerf("resolve_anchor", startedAt, { strategy: "occurrence" });
       return;
     }
+
+    if (query) {
+      const result = highlightQueryMatches(query, mode, caseSensitive);
+      if (result.capped) {
+        showHighlightCapNote(result.highlighted, result.totalHits);
+      }
+      logHighlightPerf("resolve_anchor", startedAt, {
+        strategy: "query_only",
+        capped: result.capped,
+        highlighted: result.highlighted,
+        totalHits: result.totalHits
+      });
+      return;
+    }
+
+    logHighlightPerf("resolve_anchor", startedAt, { strategy: "none" });
   }
 
   function setCopyStatus(message, isError, options) {
@@ -964,13 +1122,14 @@
       return;
     }
     const url = buildShareUrl(details);
+    const footer = sourceFooterText(url);
 
     try {
       if (navigator.clipboard && window.isSecureContext) {
-        await navigator.clipboard.writeText(url);
+        await navigator.clipboard.writeText(footer);
       } else {
         const helper = document.createElement("textarea");
-        helper.value = url;
+        helper.value = footer;
         helper.setAttribute("readonly", "readonly");
         helper.style.position = "fixed";
         helper.style.left = "-9999px";
@@ -982,7 +1141,7 @@
           throw new Error("copy failed");
         }
       }
-      setCopyStatus("Link copied.");
+      setCopyStatus("Source link copied.");
       scheduleHideContextualShare(1200);
     } catch (error) {
       setCopyStatus("Try copy again.", true);
@@ -1095,12 +1254,14 @@
     }
 
     const sourceUrl = buildShareUrl(details);
-    const plain = selected.text + "\n\nSource link (" + sourceUrl + ")";
+    const plain = selected.text + "\n\n" + sourceFooterText(sourceUrl);
     event.clipboardData.setData("text/plain", plain);
 
     const selectedHtml = htmlFromRange(selected.range);
     if (selectedHtml) {
-      const sourceHtml = '<p><br><span>Source link: </span><a href="' + escapeHtml(sourceUrl) + '" rel="noopener noreferrer">Renaissance section link</a></p>';
+      const sourceHtml =
+        '<p><br><span>' + escapeHtml(SOURCE_FOOTER_LABEL) + "</span>" +
+        '<a href="' + escapeHtml(sourceUrl) + '" rel="noopener noreferrer">' + escapeHtml(sourceUrl) + "</a></p>";
       event.clipboardData.setData("text/html", selectedHtml + sourceHtml);
     }
 

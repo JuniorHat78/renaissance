@@ -1,0 +1,78 @@
+{
+  "version": 1,
+  "defaults": {
+    "waitMs": 1600
+  },
+  "scenarios": [
+    {
+      "id": "home-desktop-light",
+      "url": "/index.html?q=sand&mode=fuzzy&case=1",
+      "viewport": { "width": 1440, "height": 1200 },
+      "theme": "light",
+      "scroll": "top"
+    },
+    {
+      "id": "essay-desktop-light",
+      "url": "/essay.html?essay=etching-god-into-sand&q=sand&mode=fuzzy&case=1",
+      "viewport": { "width": 1440, "height": 1200 },
+      "theme": "light",
+      "scroll": "top"
+    },
+    {
+      "id": "search-desktop-light",
+      "url": "/search.html?q=sand&mode=fuzzy&sort=relevance&page_size=25&case=1",
+      "viewport": { "width": 1440, "height": 1200 },
+      "theme": "light",
+      "scroll": "top"
+    },
+    {
+      "id": "search-desktop-light-bottom",
+      "url": "/search.html?q=sand&mode=fuzzy&sort=relevance&page_size=25&case=1",
+      "viewport": { "width": 1440, "height": 1200 },
+      "theme": "light",
+      "scroll": "bottom"
+    },
+    {
+      "id": "home-mobile-light",
+      "url": "/index.html?q=sand&mode=fuzzy&case=1",
+      "viewport": { "width": 390, "height": 844 },
+      "theme": "light",
+      "scroll": "top"
+    },
+    {
+      "id": "essay-mobile-light",
+      "url": "/essay.html?essay=etching-god-into-sand&q=sand&mode=fuzzy&case=1",
+      "viewport": { "width": 390, "height": 844 },
+      "theme": "light",
+      "scroll": "top"
+    },
+    {
+      "id": "search-mobile-light",
+      "url": "/search.html?q=sand&mode=fuzzy&sort=relevance&page_size=25&case=1",
+      "viewport": { "width": 390, "height": 844 },
+      "theme": "light",
+      "scroll": "top"
+    },
+    {
+      "id": "search-mobile-light-bottom",
+      "url": "/search.html?q=sand&mode=fuzzy&sort=relevance&page_size=25&case=1",
+      "viewport": { "width": 390, "height": 844 },
+      "theme": "light",
+      "scroll": "bottom"
+    },
+    {
+      "id": "search-desktop-dark",
+      "url": "/search.html?q=sand&mode=fuzzy&sort=relevance&page_size=25&case=1",
+      "viewport": { "width": 1440, "height": 1200 },
+      "theme": "dark",
+      "scroll": "top"
+    },
+    {
+      "id": "search-mobile-dark",
+      "url": "/search.html?q=sand&mode=fuzzy&sort=relevance&page_size=25&case=1",
+      "viewport": { "width": 390, "height": 844 },
+      "theme": "dark",
+      "scroll": "top"
+    }
+  ]
+}

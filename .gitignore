@@ -18,3 +18,12 @@ desktop.ini
 localhost_*.report.html
 .npm-cache/
 .chrome-test*/
+
+# Visual QA runtime artifacts
+qa/visual/current/
+qa/visual/diff/
+qa/visual/report.json
+qa/visual/report.md
+
+node_modules/
+tmp/

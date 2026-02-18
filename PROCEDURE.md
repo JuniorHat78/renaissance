@@ -40,9 +40,10 @@ node scripts/generate-embedded-data.js
 ## 5. Validate Everything Before Commit
 
 ```powershell
-Get-ChildItem scripts\*.js | ForEach-Object { node --check $_.FullName }
+Get-ChildItem -Recurse scripts\*.js | ForEach-Object { node --check $_.FullName }
 node scripts/validate-content.js
 node scripts/generate-embedded-data.js --check
+npm.cmd run test:regression -- --base http://127.0.0.1:8000
 ```
 
 ## 6. Optional Portable Export
@@ -68,4 +69,36 @@ Output:
 git add .
 git commit -m "Update content and validation artifacts"
 git push origin main
+```
+
+## 9. Visual QA Workflow
+
+Install dev tooling once:
+
+```powershell
+npm.cmd install
+```
+
+Capture current screenshots:
+
+```powershell
+npm.cmd run visual:capture -- --base http://127.0.0.1:8000
+```
+
+Compare against baseline:
+
+```powershell
+npm.cmd run visual:diff
+```
+
+Approve current as baseline (intentional visual change only):
+
+```powershell
+npm.cmd run visual:approve
+```
+
+One-shot warning mode:
+
+```powershell
+npm.cmd run visual:check -- --base http://127.0.0.1:8000 --warn-only
 ```
