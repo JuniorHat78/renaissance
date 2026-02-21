@@ -5,7 +5,9 @@ const { chromium } = require("playwright");
 
 function parseArgs(argv) {
   const options = {
-    base: "http://127.0.0.1:8000"
+    base: "http://127.0.0.1:8000",
+    essay: "etching-god-into-sand",
+    section: 1
   };
 
   for (let index = 2; index < argv.length; index += 1) {
@@ -13,16 +15,22 @@ function parseArgs(argv) {
     if (token === "--base" && argv[index + 1]) {
       options.base = argv[index + 1];
       index += 1;
+    } else if (token === "--essay" && argv[index + 1]) {
+      options.essay = argv[index + 1];
+      index += 1;
+    } else if (token === "--section" && argv[index + 1]) {
+      options.section = Number.parseInt(argv[index + 1], 10) || options.section;
+      index += 1;
     }
   }
 
   return options;
 }
 
-function sectionUrl(base) {
+function sectionUrl(base, essay, section) {
   const url = new URL("/section.html", base);
-  url.searchParams.set("essay", "etching-god-into-sand");
-  url.searchParams.set("section", "1");
+  url.searchParams.set("essay", essay);
+  url.searchParams.set("section", String(section));
   return url.toString();
 }
 
@@ -77,7 +85,7 @@ async function main() {
   await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin });
   const page = await context.newPage();
 
-  await openSection(page, sectionUrl(options.base));
+  await openSection(page, sectionUrl(options.base, options.essay, options.section));
   await createSelection(page);
 
   await page.keyboard.press("Control+C");

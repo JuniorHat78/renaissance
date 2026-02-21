@@ -81,6 +81,9 @@ jobs:
             qa/visual/report.json
             qa/visual/report.md
 
+      - name: Resolve Lighthouse Targets
+        run: node scripts/ci/resolve-lighthouse-target.js >> "$GITHUB_ENV"
+
       - name: Lighthouse (warning-only)
         env:
           LIGHTHOUSE_WARN_THRESHOLD: "90"
@@ -106,7 +109,7 @@ jobs:
           }
 
           run_lighthouse "http://127.0.0.1:4173/index.html" ".lighthouseci/index.json" "Home"
-          run_lighthouse "http://127.0.0.1:4173/essay.html?essay=etching-god-into-sand" ".lighthouseci/essay.json" "Essay"
-          run_lighthouse "http://127.0.0.1:4173/section.html?essay=etching-god-into-sand&section=1" ".lighthouseci/section.json" "Section"
+          run_lighthouse "http://127.0.0.1:4173/essay.html?essay=${LIGHTHOUSE_ESSAY_SLUG}" ".lighthouseci/essay.json" "Essay"
+          run_lighthouse "http://127.0.0.1:4173/section.html?essay=${LIGHTHOUSE_ESSAY_SLUG}&section=${LIGHTHOUSE_SECTION_NUMBER}" ".lighthouseci/section.json" "Section"
 
           node scripts/lighthouse-warning-summary.js

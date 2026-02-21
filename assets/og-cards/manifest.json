@@ -1,0 +1,14 @@
+{
+  "cards": [
+    {
+      "slug": "etching-god-into-sand",
+      "html": "assets/og-cards/etching-god-into-sand.html",
+      "image": "assets/og-etching-god-into-sand.png"
+    },
+    {
+      "slug": "shadows",
+      "html": "assets/og-cards/shadows.html",
+      "image": "assets/og-shadows.png"
+    }
+  ]
+}

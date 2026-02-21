@@ -1,6 +1,7 @@
 (function () {
   const ESSAYS_PATH = "data/essays.json";
-  const RAW_MANIFEST_PATH = "raw/manifest.json";
+  const DEFAULT_FALLBACK_SLUG = "default-essay";
+  const DEFAULT_FALLBACK_SOURCE_DIR = "raw";
   const EMBEDDED_CHAPTERS_PATH = "scripts/chapters-data.js";
 
   const EMBEDDED_ESSAYS = Array.isArray(window.RENAISSANCE_EMBEDDED_ESSAYS)
@@ -12,20 +13,60 @@
   let essayCache = null;
   let embeddedChaptersPromise = null;
 
+  function embeddedEssaySlugFallback() {
+    for (const entry of EMBEDDED_ESSAYS) {
+      const slug = String((entry && (entry.slug || entry.id)) || "").trim();
+      if (slug) {
+        return slug;
+      }
+    }
+    return DEFAULT_FALLBACK_SLUG;
+  }
+
+  function embeddedSourceDirFallback() {
+    for (const entry of EMBEDDED_ESSAYS) {
+      const sourceDir = String((entry && entry.source_dir) || "").trim();
+      if (sourceDir) {
+        return sourceDir;
+      }
+    }
+    return DEFAULT_FALLBACK_SOURCE_DIR;
+  }
+
+  function fallbackTitleFromSlug(slug) {
+    return String(slug || "")
+      .replace(/[-_]+/g, " ")
+      .split(/\s+/)
+      .filter((token) => token.length > 0)
+      .map((token) => token.charAt(0).toUpperCase() + token.slice(1))
+      .join(" ")
+      || "Renaissance Essay";
+  }
+
   function embeddedChapters() {
     return Array.isArray(window.RENAISSANCE_EMBEDDED_CHAPTERS)
       ? window.RENAISSANCE_EMBEDDED_CHAPTERS
       : [];
   }
 
+  function embeddedKey(essaySlug, sectionNumber) {
+    return String(essaySlug) + ":" + String(sectionNumber);
+  }
+
   function refreshEmbeddedMap() {
     EMBEDDED_MAP.clear();
     for (const entry of embeddedChapters()) {
-      const chapterNumber = parseNumber(entry && entry.chapterNumber);
-      if (chapterNumber === null) {
+      const sectionNumber = parseNumber(
+        entry && (entry.sectionNumber !== undefined ? entry.sectionNumber : entry.chapterNumber)
+      );
+      if (sectionNumber === null) {
         continue;
       }
-      EMBEDDED_MAP.set(chapterNumber, String(entry.rawText || ""));
+      const essaySlug = String((entry && entry.essaySlug) || embeddedEssaySlugFallback()).trim();
+      if (!essaySlug) {
+        continue;
+      }
+      EMBEDDED_MAP.set(embeddedKey(essaySlug, sectionNumber), String(entry.rawText || ""));
     }
   }
 
@@ -164,13 +205,39 @@
     return normalized;
   }
 
-  function embeddedManifestNumbers() {
-    refreshEmbeddedMap();
-    return Array.from(EMBEDDED_MAP.keys()).sort((a, b) => a - b);
+  function normalizeEssayDisplay(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return { show_subtitles: true };
+    }
+
+    return {
+      show_subtitles: value.show_subtitles !== false
+    };
   }
 
-  async function fallbackManifestNumbers() {
-    const fromMap = embeddedManifestNumbers();
+  function embeddedManifestNumbers(essaySlug) {
+    const fallbackSlug = embeddedEssaySlugFallback();
+    const targetSlug = String(essaySlug || fallbackSlug).trim() || fallbackSlug;
+    const numbers = new Set();
+    for (const entry of embeddedChapters()) {
+      const sectionNumber = parseNumber(
+        entry && (entry.sectionNumber !== undefined ? entry.sectionNumber : entry.chapterNumber)
+      );
+      if (sectionNumber === null) {
+        continue;
+      }
+
+      const entrySlug = String((entry && entry.essaySlug) || fallbackSlug).trim();
+      if (entrySlug === targetSlug) {
+        numbers.add(sectionNumber);
+      }
+    }
+
+    return Array.from(numbers).sort((a, b) => a - b);
+  }
+
+  async function fallbackManifestNumbers(essaySlug) {
+    const fromMap = embeddedManifestNumbers(essaySlug);
     if (fromMap.length > 0) {
       return fromMap;
     }
@@ -181,19 +248,20 @@
       return fromMap;
     }
 
-    return embeddedManifestNumbers();
+    return embeddedManifestNumbers(essaySlug);
   }
 
-  async function loadRawManifestNumbers() {
+  async function loadEssayManifestNumbers(sourceDir, essaySlug) {
+    const manifestPath = String(sourceDir || embeddedSourceDirFallback()).replace(/\/+$/, "") + "/manifest.json";
     try {
-      const manifest = JSON.parse(await fetchAsText(RAW_MANIFEST_PATH));
+      const manifest = JSON.parse(await fetchAsText(manifestPath));
       const numbers = normalizeSectionOrder(manifest.chapters);
       if (numbers.length > 0) {
         return numbers;
       }
-      return fallbackManifestNumbers();
+      return fallbackManifestNumbers(essaySlug);
     } catch (error) {
-      return fallbackManifestNumbers();
+      return fallbackManifestNumbers(essaySlug);
     }
   }
 
@@ -207,16 +275,22 @@
       }
     }
 
-    const sectionOrder = await loadRawManifestNumbers();
+    const fallbackSlug = embeddedEssaySlugFallback();
+    const fallbackSourceDir = embeddedSourceDirFallback();
+    const sectionOrder = await loadEssayManifestNumbers(fallbackSourceDir, fallbackSlug);
     return [
       {
-        id: "etching-god-into-sand",
-        slug: "etching-god-into-sand",
-        title: "Etching God into Sand",
-        summary: "A long-form essay in ten sections tracing sand, silicon, language, and cognition.",
-        source_dir: "raw",
+        id: fallbackSlug,
+        slug: fallbackSlug,
+        title: fallbackTitleFromSlug(fallbackSlug),
+        summary: "",
+        social_image: "assets/og-home.png",
+        source_dir: fallbackSourceDir,
         section_order: sectionOrder,
         section_meta: {},
+        display: {
+          show_subtitles: true
+        },
         published: true
       }
     ];
@@ -235,17 +309,21 @@
     const sourceDir = String(essay.source_dir || "").trim() || "raw";
     const title = String(essay.title || slug).trim();
     const summary = String(essay.summary || "").trim();
+    const socialImage = String(essay.social_image || "").trim();
     const sectionOrder = normalizeSectionOrder(essay.section_order);
     const sectionMeta = normalizeSectionMeta(essay.section_meta);
+    const display = normalizeEssayDisplay(essay.display);
 
     return {
       id: String(essay.id || slug).trim(),
       slug,
       title,
       summary,
+      social_image: socialImage,
       source_dir: sourceDir,
       section_order: sectionOrder,
       section_meta: sectionMeta,
+      display,
       published: essay.published !== false
     };
   }
@@ -441,7 +519,8 @@
     const label = sectionLabel(sectionNumber);
     const meta = getSectionMeta(essay, sectionNumber);
     const title = meta.title || label;
-    const subtitle = meta.subtitle || "";
+    const subtitlesEnabled = !essay || !essay.display || essay.display.show_subtitles !== false;
+    const subtitle = subtitlesEnabled ? (meta.subtitle || "") : "";
     const searchLabel = meta.title ? label + " | " + meta.title : label;
 
     return {
@@ -510,24 +589,23 @@
       SECTION_TEXT_CACHE.set(cacheKey, loaded);
       return loaded;
     } catch (error) {
-      if (essay.source_dir === "raw") {
-        if (EMBEDDED_MAP.has(sectionNumber)) {
-          const embedded = EMBEDDED_MAP.get(sectionNumber);
-          SECTION_TEXT_CACHE.set(cacheKey, embedded);
-          return embedded;
-        }
+      const entryKey = embeddedKey(essay.slug, sectionNumber);
+      if (EMBEDDED_MAP.has(entryKey)) {
+        const embedded = EMBEDDED_MAP.get(entryKey);
+        SECTION_TEXT_CACHE.set(cacheKey, embedded);
+        return embedded;
+      }
 
-        try {
-          await ensureEmbeddedChaptersLoaded();
-        } catch (fallbackError) {
-          // Keep original error as the source failure.
-        }
+      try {
+        await ensureEmbeddedChaptersLoaded();
+      } catch (fallbackError) {
+        // Keep original error as the source failure.
+      }
 
-        if (EMBEDDED_MAP.has(sectionNumber)) {
-          const embedded = EMBEDDED_MAP.get(sectionNumber);
-          SECTION_TEXT_CACHE.set(cacheKey, embedded);
-          return embedded;
-        }
+      if (EMBEDDED_MAP.has(entryKey)) {
+        const embedded = EMBEDDED_MAP.get(entryKey);
+        SECTION_TEXT_CACHE.set(cacheKey, embedded);
+        return embedded;
       }
       throw error;
     }

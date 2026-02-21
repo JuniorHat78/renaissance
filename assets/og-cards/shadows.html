@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OG Card</title>
+  <style>
+    :root {
+      --canvas: #efe5d6;
+      --paper: #f8f2e7;
+      --text: #2a2018;
+      --muted: #6d5d4a;
+      --line: #cdbba3;
+      --accent: #a34f2a;
+      --font-title: "Garamond", "Palatino Linotype", "Book Antiqua", serif;
+      --font-body: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", serif;
+      --font-ui: "Optima", "Gill Sans MT", "Trebuchet MS", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html, body { width: 1200px; height: 630px; margin: 0; overflow: hidden; }
+    body {
+      background-color: var(--canvas);
+      background-image:
+        linear-gradient(to bottom, rgba(255, 255, 255, 0.22), transparent 220px),
+        radial-gradient(circle at 86% -8%, rgba(163, 79, 42, 0.18), transparent 48%),
+        radial-gradient(circle at -10% 100%, rgba(112, 81, 54, 0.14), transparent 42%);
+      color: var(--text);
+      font-family: var(--font-body);
+    }
+    .frame {
+      position: relative;
+      width: calc(100% - 96px);
+      height: calc(100% - 96px);
+      margin: 48px;
+      padding: 58px 64px;
+      border: 1px solid var(--line);
+      background: color-mix(in srgb, var(--paper) 94%, transparent);
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+    .kicker {
+      margin: 0;
+      font-family: var(--font-ui);
+      font-size: 20px;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+    }
+    h1 {
+      margin: 18px 0 0;
+      max-width: 10.5em;
+      font-family: var(--font-title);
+      font-size: 82px;
+      line-height: 1.02;
+      font-weight: 500;
+      letter-spacing: 0.01em;
+    }
+    .dek {
+      margin: 28px 0 0;
+      max-width: 42ch;
+      color: var(--muted);
+      font-size: 30px;
+      line-height: 1.35;
+    }
+    .footer {
+      margin-top: 26px;
+      padding-top: 18px;
+      border-top: 1px solid var(--line);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 20px;
+      font-family: var(--font-ui);
+      color: var(--muted);
+      font-size: 21px;
+      letter-spacing: 0.03em;
+    }
+    .brand { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <main class="frame">
+    <div>
+      <p class="kicker">Renaissance &middot; Essay</p>
+      <h1>SHADOWS</h1>
+      <p class="dek">Read SHADOWS on Renaissance.</p>
+    </div>
+    <p class="footer">
+      <span class="brand">juniorhat78.github.io/renaissance</span>
+      <span>Read Online</span>
+    </p>
+  </main>
+</body>
+</html>

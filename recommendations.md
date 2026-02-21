@@ -1,98 +1,73 @@
 # Recommendations Backlog
 
-Date: 2026-02-18  
-Scope: Search, highlighting, sharing, and visual QA follow-ups.
+Date: 2026-02-21
+Scope: Multi-essay hardcoding audit and de-hardcode plan.
 
 Status key:
-- `Planned`: codified, not started
-- `In Progress`: currently being implemented
-- `Done`: implemented and validated
+- `[ ]` Not started
+- `[-]` In progress
+- `[x]` Done
 
-## Actionables
+## Critical
 
-### R1 `copy-footer-format`
-- Status: `Done`
-- Priority: `Medium`
-- Problem:
-  - Source footer copy format is not fully unified across copy surfaces.
-- Action:
-  - Define one canonical source footer style and use it for:
-    - keyboard copy append path
-    - explicit highlight-link copy path
-- Verification:
-  - Copy from each surface and confirm identical source footer format.
-  - Automated check: `npm run test:copy-footer -- --base http://127.0.0.1:8000`
+- [x] Dynamic metadata for `essay.html`
+  - Replace static Etching meta/title/canonical with runtime values from `data/essays.json`.
+  - Set `document.title`, `<meta name="description">`, `og:title`, `og:description`, `og:url`, and `twitter:*` after essay load.
 
-### R2 `q-only-cap-note`
-- Status: `Done`
-- Priority: `Medium`
-- Problem:
-  - `q`-only highlight mode uses a safety cap, but users are not informed when cap is applied.
-- Action:
-  - Show subtle UI note only when capping occurs (example: `Showing first N highlights`).
-- Verification:
-  - High-hit section with `q` only shows note.
-  - Low-hit section with `q` only shows no note.
-  - Automated check: `npm run test:anchors -- --base http://127.0.0.1:8000`
+- [x] Dynamic metadata for `section.html`
+  - Replace static Etching meta/title with section and essay-aware values.
+  - Include section title in title, OG, and Twitter fields.
 
-### R3 `anchor-regression-suite`
-- Status: `Done`
-- Priority: `High`
-- Problem:
-  - Anchor/highlight behavior can regress quietly.
-- Action:
-  - Add focused automated checks for:
-    - precedence (`p/r/hl` before `q+occ` before `q`)
-    - `q+occ` -> exactly one auto-highlight mark
-    - `q` only -> multiple marks (or capped max)
-- Verification:
-  - Local run passes.
-  - CI run configured to run regression suite.
-  - Command: `npm run test:anchors -- --base http://127.0.0.1:8000`
+- [x] Remove hardcoded legacy redirect target in `chapter.html`
+  - Current redirect always points to `essay=etching-god-into-sand`.
+  - Support `?essay=<slug>&chapter=<n>` and a safe default when essay is omitted.
 
-### R4 `highlight-perf-metric`
-- Status: `Done`
-- Priority: `Low`
-- Problem:
-  - Large multi-highlight operations may regress performance over time.
-- Action:
-  - Add dev-only timing metric for highlight pass duration.
-- Verification:
-  - Metric appears in development mode logs.
-  - Metric is host-gated to localhost/127.0.0.1/file runtime.
-  - Automated check: included in `npm run test:anchors -- --base http://127.0.0.1:8000`
+## High Priority
 
-### R5 `visual-qa-routine`
-- Status: `Done`
-- Priority: `High`
-- Problem:
-  - UI polish can drift without deterministic screenshot + diff checks.
-- Action:
-  - Implement codified visual QA architecture:
-    - scenario registry
-    - capture runner
-    - diff runner
-    - approve runner
-    - CI artifact reporting
-- Verification:
-  - `visual:check` produces current images, diffs, and reports.
-  - CI workflow uploads visual artifacts in warning mode.
-  - Commands:
-    - `npm run visual:capture -- --base http://127.0.0.1:8000`
-    - `npm run visual:diff`
-    - `npm run visual:approve`
-    - `npm run visual:check -- --base http://127.0.0.1:8000 --warn-only`
+- [x] Parameterize regression tests away from a single slug
+  - `scripts/tests/anchor-regression.js` and `scripts/tests/copy-footer-regression.js` should support configurable essay slug and section.
+  - Add at least one SHADOWS smoke case.
+
+- [x] Expand visual scenario coverage for multi-essay states
+  - Add SHADOWS scenarios (desktop and mobile) in `qa/visual/scenarios.json`.
+  - Keep existing Etching baselines, but stop relying on one essay for all checks.
+
+- [x] Make CI Lighthouse targets data-driven
+  - Replace fixed URLs for Etching in `.github/workflows/ci.yml`.
+  - Resolve target essay and section from `data/essays.json` (first published essay and first section).
+
+## Medium Priority
+
+- [x] Reduce hardcoded fallback identity in `scripts/content.js`
+  - Current defaults are Etching-specific.
+  - Prefer first embedded essay or first metadata essay as fallback identity.
+
+- [x] Create essay-aware OG card pipeline
+  - Keep current home card.
+  - Add a script/template flow that can generate per-essay OG cards from metadata.
+
+- [x] Clean doc examples that imply a single canonical essay
+  - Keep Etching examples where helpful, but add neutral patterns (`<essay-slug>`, `<section-number>`).
+
+## Nice to Have
+
+- [ ] Add a metadata consistency check for social cards
+  - Validate each published essay has title/summary/OG image mapping, or an explicit fallback policy.
+
+- [ ] Add a small router utility for defaults
+  - Single source of truth for "default essay" and "default section" behavior shared across pages.
+
+## Verification Checklist
+
+- [x] `node scripts/validate-content.js`
+- [x] `node scripts/generate-embedded-data.js --check`
+- [x] `node scripts/tests/regression-check.js --base http://127.0.0.1:8000`
+- [x] `npm.cmd run visual:check -- --base http://127.0.0.1:8000 --warn-only`
 
 ## Suggested Execution Order
 
-1. `R3 anchor-regression-suite`
-2. `R1 copy-footer-format`
-3. `R2 q-only-cap-note`
-4. `R5 visual-qa-routine`
-5. `R4 highlight-perf-metric`
-
-## Completion Criteria
-
-- [x] All actionables marked `Done`.
-- [x] Verification checks documented and reproducible.
-- [x] Behavior and visual QA coverage are included in routine pre-merge checks.
+1. Dynamic metadata (`essay.html`, `section.html`)
+2. `chapter.html` redirect de-hardcode
+3. Regression test parameterization
+4. Visual scenarios and CI Lighthouse data-driven URLs
+5. Fallback/generalization cleanup and docs

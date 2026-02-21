@@ -3,8 +3,6 @@ const path = require("path");
 
 const rootDir = path.join(__dirname, "..");
 const essaysPath = path.join(rootDir, "data", "essays.json");
-const rawDir = path.join(rootDir, "raw");
-const rawManifestPath = path.join(rawDir, "manifest.json");
 
 function readJson(filePath) {
   const text = fs.readFileSync(filePath, "utf8");
@@ -28,6 +26,13 @@ function sectionFilesInDir(dirPath) {
     .sort((a, b) => a - b);
 }
 
+function numberSetKey(values) {
+  return Array.from(new Set(values))
+    .filter((value) => Number.isFinite(value) && value > 0)
+    .sort((a, b) => a - b)
+    .join(",");
+}
+
 function uniqueNumbers(values) {
   const seen = new Set();
   const out = [];
@@ -42,38 +47,27 @@ function uniqueNumbers(values) {
   return out;
 }
 
-function validateManifest(errors) {
-  if (!fs.existsSync(rawManifestPath)) {
-    errors.push("Missing raw/manifest.json");
-    return;
+function sourceManifestSections(sourcePath, slug, sourceDir, errors) {
+  const manifestPath = path.join(sourcePath, "manifest.json");
+  if (!fs.existsSync(manifestPath)) {
+    errors.push("Essay " + slug + " is missing manifest: " + sourceDir + "/manifest.json");
+    return [];
   }
 
   let manifest;
   try {
-    manifest = readJson(rawManifestPath);
+    manifest = readJson(manifestPath);
   } catch (error) {
-    errors.push("Invalid JSON in raw/manifest.json");
-    return;
+    errors.push("Essay " + slug + " has invalid JSON in " + sourceDir + "/manifest.json");
+    return [];
   }
 
-  const manifestSections = uniqueNumbers(Array.isArray(manifest.chapters) ? manifest.chapters : []);
-  if (manifestSections.length === 0) {
-    errors.push("raw/manifest.json has no valid chapter numbers");
-    return;
+  const sections = uniqueNumbers(Array.isArray(manifest.chapters) ? manifest.chapters : []);
+  if (sections.length === 0) {
+    errors.push("Essay " + slug + " has no valid chapter numbers in " + sourceDir + "/manifest.json");
+    return [];
   }
-
-  const rawSections = sectionFilesInDir(rawDir);
-  if (rawSections.length === 0) {
-    errors.push("No section files found in raw/");
-    return;
-  }
-
-  if (manifestSections.join(",") !== rawSections.join(",")) {
-    errors.push(
-      "raw/manifest.json chapters do not match raw/*.txt files " +
-      "(manifest: " + manifestSections.join(",") + "; files: " + rawSections.join(",") + ")"
-    );
-  }
+  return sections;
 }
 
 function validateEssays(errors) {
@@ -123,6 +117,28 @@ function validateEssays(errors) {
       continue;
     }
 
+    if (Object.prototype.hasOwnProperty.call(essay || {}, "social_image")) {
+      if (typeof essay.social_image !== "string") {
+        errors.push("Essay " + slug + " has non-string social_image");
+      } else if (!String(essay.social_image).trim()) {
+        errors.push("Essay " + slug + " has empty social_image");
+      }
+    }
+
+    const sectionFiles = sectionFilesInDir(sourcePath);
+    if (sectionFiles.length === 0) {
+      errors.push("Essay " + slug + " has no section files in source_dir: " + sourceDir);
+      continue;
+    }
+
+    if (numberSetKey(sectionFiles) !== numberSetKey(sections)) {
+      errors.push(
+        "Essay " + slug +
+        " section_order does not match section files in " + sourceDir +
+        " (section_order: " + sections.join(",") + "; files: " + sectionFiles.join(",") + ")"
+      );
+    }
+
     for (const sectionNumber of sections) {
       const filePath = path.join(sourcePath, String(sectionNumber) + ".txt");
       if (!fs.existsSync(filePath)) {
@@ -131,6 +147,15 @@ function validateEssays(errors) {
           " references missing section file: " + sourceDir + "/" + String(sectionNumber) + ".txt"
         );
       }
+    }
+
+    const manifestSections = sourceManifestSections(sourcePath, slug, sourceDir, errors);
+    if (manifestSections.length > 0 && numberSetKey(manifestSections) !== numberSetKey(sections)) {
+      errors.push(
+        "Essay " + slug +
+        " manifest chapters do not match section_order " +
+        "(manifest: " + manifestSections.join(",") + "; section_order: " + sections.join(",") + ")"
+      );
     }
 
     const sectionMeta = essay && essay.section_meta && typeof essay.section_meta === "object"
@@ -150,12 +175,20 @@ function validateEssays(errors) {
         );
       }
     }
+
+    const display = essay && essay.display && typeof essay.display === "object"
+      ? essay.display
+      : null;
+    if (display && Object.prototype.hasOwnProperty.call(display, "show_subtitles")) {
+      if (typeof display.show_subtitles !== "boolean") {
+        errors.push("Essay " + slug + " has non-boolean display.show_subtitles");
+      }
+    }
   }
 }
 
 function main() {
   const errors = [];
-  validateManifest(errors);
   validateEssays(errors);
 
   if (errors.length > 0) {

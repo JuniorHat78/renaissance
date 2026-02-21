@@ -8,12 +8,30 @@
     (function () {
       var params = new URLSearchParams(window.location.search);
       var chapter = params.get("chapter");
-      if (chapter) {
-        var target = "section.html?essay=etching-god-into-sand&section=" + encodeURIComponent(chapter);
-        window.location.replace(target);
-      } else {
-        window.location.replace("index.html");
+      var essay = (params.get("essay") || "").trim();
+
+      if (chapter && essay) {
+        window.location.replace(
+          "section.html?essay=" + encodeURIComponent(essay) + "&section=" + encodeURIComponent(chapter)
+        );
+        return;
       }
+
+      if (chapter) {
+        window.location.replace(
+          "section.html?section=" + encodeURIComponent(chapter)
+        );
+        return;
+      }
+
+      if (essay) {
+        window.location.replace(
+          "essay.html?essay=" + encodeURIComponent(essay)
+        );
+        return;
+      }
+
+      window.location.replace("index.html");
     })();
   </script>
 </head>

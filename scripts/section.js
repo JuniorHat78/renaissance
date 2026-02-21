@@ -54,6 +54,114 @@
     return host === "localhost" || host === "127.0.0.1";
   })();
 
+  function siteRootUrl() {
+    const canonical = document.querySelector('link[rel="canonical"]');
+    if (canonical) {
+      try {
+        const url = new URL(canonical.href);
+        url.search = "";
+        url.hash = "";
+        url.pathname = url.pathname.replace(/[^/]*$/, "");
+        return url.toString();
+      } catch (error) {
+        // Fall through to runtime URL fallback.
+      }
+    }
+
+    const fallback = new URL("./", window.location.href);
+    fallback.search = "";
+    fallback.hash = "";
+    return fallback.toString();
+  }
+
+  const SITE_ROOT = siteRootUrl();
+
+  function toAbsoluteUrl(relativePath) {
+    return new URL(relativePath, SITE_ROOT).toString();
+  }
+
+  function canonicalSectionUrl(slug, sectionNumber) {
+    return toAbsoluteUrl(
+      "section.html?essay=" + encodeURIComponent(slug) + "&section=" + String(sectionNumber)
+    );
+  }
+
+  function setMetaByName(name, content) {
+    const element = document.querySelector('meta[name="' + name + '"]');
+    if (element) {
+      element.setAttribute("content", content);
+    }
+  }
+
+  function setMetaByProperty(property, content) {
+    const element = document.querySelector('meta[property="' + property + '"]');
+    if (element) {
+      element.setAttribute("content", content);
+    }
+  }
+
+  function setCanonical(url) {
+    const canonical = document.querySelector('link[rel="canonical"]');
+    if (canonical) {
+      canonical.setAttribute("href", url);
+    }
+  }
+
+  function socialImageForEssay(essay) {
+    const explicit = String((essay && essay.social_image) || "").trim();
+    if (explicit) {
+      return explicit;
+    }
+    return "assets/og-home.png";
+  }
+
+  function cleanSpaces(text) {
+    return String(text || "").replace(/\s+/g, " ").trim();
+  }
+
+  function truncateText(text, maxLength) {
+    const cleaned = cleanSpaces(text);
+    if (!cleaned) {
+      return "";
+    }
+    if (cleaned.length <= maxLength) {
+      return cleaned;
+    }
+    return cleaned.slice(0, maxLength).trimEnd() + "...";
+  }
+
+  function descriptionForSection(essay, display, payload) {
+    const blocks = Array.isArray(payload && payload.contentBlocks)
+      ? payload.contentBlocks
+      : Array.isArray(payload && payload.blocks)
+        ? payload.blocks
+        : [];
+    const firstParagraph = blocks.find((block) => block && block.type === "p" && cleanSpaces(block.text));
+    if (firstParagraph) {
+      return truncateText(firstParagraph.text, 200);
+    }
+
+    return "Read " + display.label + " of " + String(essay.title || "this essay") + " on Renaissance.";
+  }
+
+  function applySectionMetadata(essay, display, sectionNumber, payload) {
+    const title = display.title + " | " + essay.title + " | Renaissance";
+    const description = descriptionForSection(essay, display, payload);
+    const canonical = canonicalSectionUrl(essay.slug, sectionNumber);
+    const image = toAbsoluteUrl(socialImageForEssay(essay));
+
+    document.title = title;
+    setCanonical(canonical);
+    setMetaByName("description", description);
+    setMetaByProperty("og:title", title);
+    setMetaByProperty("og:description", description);
+    setMetaByProperty("og:url", canonical);
+    setMetaByProperty("og:image", image);
+    setMetaByName("twitter:title", title);
+    setMetaByName("twitter:description", description);
+    setMetaByName("twitter:image", image);
+  }
+
   function escapeHtml(text) {
     return String(text)
       .replaceAll("&", "&amp;")
@@ -365,6 +473,12 @@
     return new URLSearchParams(window.location.search);
   }
 
+  function setSectionSubtitle(text) {
+    const value = String(text || "").trim();
+    sectionSubtitle.textContent = value ? "(" + value + ")" : "";
+    sectionSubtitle.hidden = !value;
+  }
+
   function queryEssaySlug() {
     const value = queryParams().get("essay");
     return value ? value.trim() : "";
@@ -461,7 +575,7 @@
     essayLine.textContent = "Renaissance";
     sectionKicker.textContent = "Reader";
     sectionTitle.textContent = message;
-    sectionSubtitle.textContent = "";
+    setSectionSubtitle("");
     sectionMeta.textContent = "";
     sectionContent.innerHTML = '<p><a href="index.html">Return to Home</a></p>';
     backToEssay.href = "index.html";
@@ -1416,14 +1530,14 @@
       essayLine.textContent = essay.title;
       sectionKicker.textContent = display.label;
       sectionTitle.textContent = display.title;
-      sectionSubtitle.textContent = display.subtitle ? "(" + display.subtitle + ")" : "";
+      setSectionSubtitle(display.subtitle);
       sectionMeta.innerHTML = joinMetaParts([
         formatWordCount(payload.wordCount),
         formatReadMinutes(payload.readMinutes)
       ]);
       renderBlocks(sectionContent, blocks);
       annotateParagraphIndices();
-      document.title = display.title + " | " + essay.title + " | Renaissance";
+      applySectionMetadata(essay, display, sectionNumber, payload);
 
       const currentIndex = essay.section_order.indexOf(sectionNumber);
       const previous = essay.section_order[currentIndex - 1];

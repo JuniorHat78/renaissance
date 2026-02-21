@@ -16,6 +16,7 @@ function run(script, args) {
 
 function main() {
   const forwardedArgs = process.argv.slice(2);
+  run(path.resolve(__dirname, "chapter-redirect-regression.js"), forwardedArgs);
   run(path.resolve(__dirname, "anchor-regression.js"), forwardedArgs);
   run(path.resolve(__dirname, "copy-footer-regression.js"), forwardedArgs);
 }

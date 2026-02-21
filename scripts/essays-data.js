@@ -4,7 +4,8 @@ window.RENAISSANCE_EMBEDDED_ESSAYS = [
     "slug": "etching-god-into-sand",
     "title": "Etching God into Sand",
     "summary": "A long-form essay in ten sections tracing sand, silicon, language, and cognition.",
-    "source_dir": "raw",
+    "social_image": "assets/og-etching-god-into-sand.png",
+    "source_dir": "raw/etching-god-into-sand",
     "section_order": [
       1,
       2,
@@ -60,5 +61,45 @@ window.RENAISSANCE_EMBEDDED_ESSAYS = [
       }
     },
     "published": true
+  },
+  {
+    "id": "shadows",
+    "slug": "shadows",
+    "title": "SHADOWS",
+    "summary": "",
+    "social_image": "assets/og-shadows.png",
+    "source_dir": "raw/shadows",
+    "section_order": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
+    "section_meta": {
+      "1": {
+        "title": "SPEED"
+      },
+      "2": {
+        "title": "LIGHT"
+      },
+      "3": {
+        "title": "POWER"
+      },
+      "4": {
+        "title": "SELF"
+      },
+      "5": {
+        "title": "MASS"
+      },
+      "6": {
+        "title": "BRIGHT"
+      }
+    },
+    "display": {
+      "show_subtitles": false
+    },
+    "published": false
   }
 ];

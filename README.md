@@ -24,9 +24,14 @@ Open:
 ## Routes
 
 - Home archive: `index.html`
-- Essay page: `essay.html?essay=etching-god-into-sand`
-- Section reader: `section.html?essay=etching-god-into-sand&section=1`
+- Essay page: `essay.html?essay=<essay-slug>`
+- Section reader: `section.html?essay=<essay-slug>&section=<section-number>`
 - Full search: `search.html`
+
+Examples:
+- `essay.html?essay=etching-god-into-sand`
+- `essay.html?essay=shadows`
+- `section.html?essay=shadows&section=1`
 
 ## Reader Shortcuts
 
@@ -41,6 +46,7 @@ Run these before commit:
 Get-ChildItem -Recurse scripts\*.js | ForEach-Object { node --check $_.FullName }
 node scripts/validate-content.js
 node scripts/generate-embedded-data.js --check
+node scripts/tests/meta-regression.js --base http://127.0.0.1:8000
 npm run test:regression -- --base http://127.0.0.1:8000
 ```
 
@@ -84,9 +90,15 @@ Visual QA architecture files:
 ## Content Workflow
 
 1. Edit content:
-- `raw/*.txt`
-- `raw/manifest.json`
 - `data/essays.json`
+- `raw/<essay-slug>/manifest.json`
+- `raw/<essay-slug>/<section>.txt`
+
+Example layout:
+- `raw/etching-god-into-sand/1.txt`
+- `raw/etching-god-into-sand/manifest.json`
+- `raw/shadows/1.txt`
+- `raw/shadows/manifest.json`
 2. Validate content:
 
 ```powershell
@@ -107,7 +119,21 @@ node scripts/export-essay-text.js
 
 Output:
 
-`exports/etching-god-into-sand.txt`
+`exports/<essay-slug>.txt` (for each essay in `data/essays.json`)
+
+Note:
+- Current examples include `exports/etching-god-into-sand.txt` and `exports/shadows.txt`.
+
+5. Optional essay OG card generation:
+
+```powershell
+node scripts/og/generate-cards.js
+```
+
+Output:
+
+- `assets/og-<essay-slug>.png`
+- `assets/og-cards/<essay-slug>.html`
 
 ## CI
 

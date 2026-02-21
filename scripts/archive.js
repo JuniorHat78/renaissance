@@ -57,11 +57,14 @@
       .map((essay) => {
         const sectionCount = essay.section_order.length;
         const sectionCopy = sectionCount === 1 ? "1 section" : String(sectionCount) + " sections";
+        const summaryHtml = essay.summary
+          ? '<p class="essay-summary">' + escapeHtml(essay.summary) + "</p>"
+          : "";
         return (
           '<li class="essay-item">' +
             '<a href="' + essayLink(essay.slug) + '">' +
               '<h3 class="essay-title">' + escapeHtml(essay.title) + "</h3>" +
-              '<p class="essay-summary">' + escapeHtml(essay.summary || "") + "</p>" +
+              summaryHtml +
               '<p class="essay-meta">' + escapeHtml(sectionCopy) + "</p>" +
             "</a>" +
           "</li>"

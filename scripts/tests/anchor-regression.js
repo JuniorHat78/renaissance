@@ -5,13 +5,53 @@ const { chromium } = require("playwright");
 
 function parseArgs(argv) {
   const options = {
-    base: "http://127.0.0.1:8000"
+    base: "http://127.0.0.1:8000",
+    essay: "etching-god-into-sand",
+    section: 1,
+    lowHitSection: 7,
+    occurrenceQuery: "sand",
+    lowHitQuery: "verdun",
+    cappedQuery: "a",
+    payloadText: "first surprise",
+    smokeEssay: "shadows",
+    smokeSection: 1,
+    smokeQuery: "shadow"
   };
 
   for (let index = 2; index < argv.length; index += 1) {
     const token = argv[index];
     if (token === "--base" && argv[index + 1]) {
       options.base = argv[index + 1];
+      index += 1;
+    } else if (token === "--essay" && argv[index + 1]) {
+      options.essay = argv[index + 1];
+      index += 1;
+    } else if (token === "--section" && argv[index + 1]) {
+      options.section = Number.parseInt(argv[index + 1], 10) || options.section;
+      index += 1;
+    } else if (token === "--low-hit-section" && argv[index + 1]) {
+      options.lowHitSection = Number.parseInt(argv[index + 1], 10) || options.lowHitSection;
+      index += 1;
+    } else if (token === "--occ-query" && argv[index + 1]) {
+      options.occurrenceQuery = argv[index + 1];
+      index += 1;
+    } else if (token === "--low-hit-query" && argv[index + 1]) {
+      options.lowHitQuery = argv[index + 1];
+      index += 1;
+    } else if (token === "--capped-query" && argv[index + 1]) {
+      options.cappedQuery = argv[index + 1];
+      index += 1;
+    } else if (token === "--payload-text" && argv[index + 1]) {
+      options.payloadText = argv[index + 1];
+      index += 1;
+    } else if (token === "--smoke-essay" && argv[index + 1]) {
+      options.smokeEssay = argv[index + 1];
+      index += 1;
+    } else if (token === "--smoke-section" && argv[index + 1]) {
+      options.smokeSection = Number.parseInt(argv[index + 1], 10) || options.smokeSection;
+      index += 1;
+    } else if (token === "--smoke-query" && argv[index + 1]) {
+      options.smokeQuery = argv[index + 1];
       index += 1;
     }
   }
@@ -85,22 +125,26 @@ async function main() {
 
   await runCase("q+occ highlights exactly one mark", async () => {
     const url = sectionUrl(options.base, {
-      essay: "etching-god-into-sand",
-      section: 1,
-      q: "sand",
+      essay: options.essay,
+      section: options.section,
+      q: options.occurrenceQuery,
       occ: 3
     });
     await openSection(page, url);
     const snapshot = await getHighlightSnapshot(page);
     assert.equal(snapshot.marks.length, 1, "Expected exactly one highlighted mark for q+occ");
-    assert.match(snapshot.marks[0].toLowerCase(), /sand/, "Expected occurrence highlight to match query");
+    assert.match(
+      snapshot.marks[0].toLowerCase(),
+      new RegExp(options.occurrenceQuery.toLowerCase()),
+      "Expected occurrence highlight to match query"
+    );
   }, failures);
 
   await runCase("q-only low-hit mode does not show cap note", async () => {
     const url = sectionUrl(options.base, {
-      essay: "etching-god-into-sand",
-      section: 7,
-      q: "verdun"
+      essay: options.essay,
+      section: options.lowHitSection,
+      q: options.lowHitQuery
     });
     await openSection(page, url);
     const snapshot = await getHighlightSnapshot(page);
@@ -117,9 +161,9 @@ async function main() {
     page.on("console", onConsole);
 
     const url = sectionUrl(options.base, {
-      essay: "etching-god-into-sand",
-      section: 1,
-      q: "sand"
+      essay: options.essay,
+      section: options.section,
+      q: options.occurrenceQuery
     });
     await openSection(page, url);
     await page.waitForTimeout(120);
@@ -133,20 +177,20 @@ async function main() {
 
   await runCase("q-only capped mode shows cap note", async () => {
     const url = sectionUrl(options.base, {
-      essay: "etching-god-into-sand",
-      section: 1,
-      q: "a"
+      essay: options.essay,
+      section: options.section,
+      q: options.cappedQuery
     });
     await openSection(page, url);
 
-    const totals = await page.evaluate(() => {
+    const totals = await page.evaluate((searchQuery) => {
       const text = document.getElementById("section-content").textContent || "";
-      const matches = window.RenaissanceSearch.findOccurrencesInText(text, "a", {
+      const matches = window.RenaissanceSearch.findOccurrencesInText(text, searchQuery, {
         mode: "contains",
         caseSensitive: false
       });
       return { total: matches.length };
-    });
+    }, options.cappedQuery);
     const snapshot = await getHighlightSnapshot(page);
 
     assert.ok(totals.total > 160, "Expected a query with more than cap-sized match count");
@@ -157,24 +201,28 @@ async function main() {
 
   await runCase("hl payload has precedence over q+occ", async () => {
     const url = sectionUrl(options.base, {
-      essay: "etching-god-into-sand",
-      section: 1,
-      hl: "first surprise",
-      q: "sand",
+      essay: options.essay,
+      section: options.section,
+      hl: options.payloadText,
+      q: options.occurrenceQuery,
       occ: 1
     });
     await openSection(page, url);
     const snapshot = await getHighlightSnapshot(page);
     assert.equal(snapshot.marks.length, 1, "Expected one mark when payload resolves");
-    assert.match(snapshot.marks[0].toLowerCase(), /first surprise/, "Expected payload text to drive anchor");
+    assert.match(
+      snapshot.marks[0].toLowerCase(),
+      new RegExp(options.payloadText.toLowerCase()),
+      "Expected payload text to drive anchor"
+    );
   }, failures);
 
   await runCase("paragraph anchor has precedence over q+occ", async () => {
     const url = sectionUrl(options.base, {
-      essay: "etching-god-into-sand",
-      section: 1,
+      essay: options.essay,
+      section: options.section,
       p: "2",
-      q: "sand",
+      q: options.occurrenceQuery,
       occ: 1
     });
     await openSection(page, url);
@@ -185,14 +233,13 @@ async function main() {
 
   await runCase("range anchor has precedence over q+occ", async () => {
     const baseUrl = sectionUrl(options.base, {
-      essay: "etching-god-into-sand",
-      section: 1
+      essay: options.essay,
+      section: options.section
     });
     await openSection(page, baseUrl);
 
-    const range = await page.evaluate(() => {
+    const range = await page.evaluate((needle) => {
       const text = document.getElementById("section-content").textContent || "";
-      const needle = "first surprise";
       const start = text.toLowerCase().indexOf(needle);
       if (start < 0) {
         return null;
@@ -201,20 +248,35 @@ async function main() {
         start,
         end: start + needle.length
       };
-    });
+    }, options.payloadText.toLowerCase());
     assert.ok(range, "Could not resolve deterministic range anchor text");
 
     const url = sectionUrl(options.base, {
-      essay: "etching-god-into-sand",
-      section: 1,
+      essay: options.essay,
+      section: options.section,
       r: `${range.start.toString(36)}-${range.end.toString(36)}`,
-      q: "sand",
+      q: options.occurrenceQuery,
       occ: 1
     });
     await openSection(page, url);
     const snapshot = await getHighlightSnapshot(page);
     assert.equal(snapshot.marks.length, 1, "Expected one mark for range anchor");
-    assert.match(snapshot.marks[0].toLowerCase(), /first surprise/, "Expected range anchor to win over occurrence");
+    assert.match(
+      snapshot.marks[0].toLowerCase(),
+      new RegExp(options.payloadText.toLowerCase()),
+      "Expected range anchor to win over occurrence"
+    );
+  }, failures);
+
+  await runCase("secondary essay smoke: query highlights in SHADOWS", async () => {
+    const url = sectionUrl(options.base, {
+      essay: options.smokeEssay,
+      section: options.smokeSection,
+      q: options.smokeQuery
+    });
+    await openSection(page, url);
+    const snapshot = await getHighlightSnapshot(page);
+    assert.ok(snapshot.marks.length >= 1, "Expected at least one highlight in secondary essay smoke case");
   }, failures);
 
   await context.close();

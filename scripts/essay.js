@@ -48,6 +48,91 @@
     caseSensitive: false
   };
 
+  function siteRootUrl() {
+    const canonical = document.querySelector('link[rel="canonical"]');
+    if (canonical) {
+      try {
+        const url = new URL(canonical.href);
+        url.search = "";
+        url.hash = "";
+        url.pathname = url.pathname.replace(/[^/]*$/, "");
+        return url.toString();
+      } catch (error) {
+        // Fall through to runtime URL fallback.
+      }
+    }
+
+    const fallback = new URL("./", window.location.href);
+    fallback.search = "";
+    fallback.hash = "";
+    return fallback.toString();
+  }
+
+  const SITE_ROOT = siteRootUrl();
+
+  function toAbsoluteUrl(relativePath) {
+    return new URL(relativePath, SITE_ROOT).toString();
+  }
+
+  function canonicalEssayUrl(slug) {
+    return toAbsoluteUrl("essay.html?essay=" + encodeURIComponent(slug));
+  }
+
+  function setMetaByName(name, content) {
+    const element = document.querySelector('meta[name="' + name + '"]');
+    if (element) {
+      element.setAttribute("content", content);
+    }
+  }
+
+  function setMetaByProperty(property, content) {
+    const element = document.querySelector('meta[property="' + property + '"]');
+    if (element) {
+      element.setAttribute("content", content);
+    }
+  }
+
+  function setCanonical(url) {
+    const canonical = document.querySelector('link[rel="canonical"]');
+    if (canonical) {
+      canonical.setAttribute("href", url);
+    }
+  }
+
+  function socialImageForEssay(essay) {
+    const explicit = String((essay && essay.social_image) || "").trim();
+    if (explicit) {
+      return explicit;
+    }
+    return "assets/og-home.png";
+  }
+
+  function descriptionForEssay(essay) {
+    const summary = String((essay && essay.summary) || "").trim();
+    if (summary) {
+      return summary;
+    }
+    return "Read " + String(essay.title || "this essay") + " on Renaissance.";
+  }
+
+  function applyEssayMetadata(essay) {
+    const title = String(essay.title || "Essay").trim() + " | Renaissance";
+    const description = descriptionForEssay(essay);
+    const canonical = canonicalEssayUrl(essay.slug);
+    const image = toAbsoluteUrl(socialImageForEssay(essay));
+
+    document.title = title;
+    setCanonical(canonical);
+    setMetaByName("description", description);
+    setMetaByProperty("og:title", title);
+    setMetaByProperty("og:description", description);
+    setMetaByProperty("og:url", canonical);
+    setMetaByProperty("og:image", image);
+    setMetaByName("twitter:title", title);
+    setMetaByName("twitter:description", description);
+    setMetaByName("twitter:image", image);
+  }
+
   function joinMetaParts(parts) {
     return parts
       .map((part) => '<span>' + escapeHtml(part) + "</span>")
@@ -373,6 +458,7 @@
 
       essayTitle.textContent = currentEssay.title;
       essaySummary.textContent = currentEssay.summary;
+      essaySummary.hidden = !currentEssay.summary;
       const sectionCount = currentSections.length;
       const sectionLabel = sectionCount === 1 ? "1 section" : String(sectionCount) + " sections";
       essayStats.innerHTML = joinMetaParts([
@@ -381,7 +467,7 @@
         formatReadDuration(payload.stats.totalReadMinutes)
       ]);
       renderSectionList(currentEssay, currentSections);
-      document.title = currentEssay.title + " | Renaissance";
+      applyEssayMetadata(currentEssay);
 
       applyState(parseInitialSearchState());
       syncControlsFromState();
@@ -395,6 +481,7 @@
     } catch (error) {
       essayTitle.textContent = "Unable to load this essay.";
       essaySummary.textContent = "";
+      essaySummary.hidden = true;
       essayStats.textContent = "";
       sectionList.innerHTML = '<li class="muted">Sections unavailable.</li>';
       clearSearchView();
