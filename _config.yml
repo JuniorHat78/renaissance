@@ -1,0 +1,7 @@
+exclude:
+  - raw
+  - scripts
+  - qa
+  - node_modules
+  - package.json
+  - package-lock.json
