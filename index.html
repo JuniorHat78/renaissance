@@ -101,11 +101,17 @@
     <section id="continue-reading-panel" class="continue-panel" aria-labelledby="continue-reading-heading" hidden>
       <a id="continue-reading-link" class="continue-link" href="#">
         <span class="continue-copy">
-          <span class="eyebrow">Continue Reading</span>
+          <span class="continue-kicker">
+            <span class="eyebrow">Continue Reading</span>
+            <span id="continue-reading-status" class="continue-status"></span>
+          </span>
           <span id="continue-reading-heading" class="continue-title"></span>
           <span id="continue-reading-detail" class="continue-detail muted"></span>
+          <span class="continue-meter" aria-hidden="true">
+            <span id="continue-reading-meter"></span>
+          </span>
         </span>
-        <span id="continue-reading-status" class="continue-status"></span>
+        <span id="continue-reading-action" class="continue-action"></span>
       </a>
     </section>
 

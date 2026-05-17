@@ -218,7 +218,7 @@ async function main() {
     });
     assert.match(snapshot.href, /section\.html\?essay=etching-god-into-sand&section=2$/);
     assert.match(snapshot.detail, /^Next: Section II/);
-    assert.equal(snapshot.status, "Ready");
+    assert.equal(snapshot.status, "Up next");
   }, failures);
 
   await runCase("essay table of contents shows section progress", browser, stateWithRecord({

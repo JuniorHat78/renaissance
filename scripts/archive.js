@@ -20,6 +20,8 @@
   const continueTitle = document.getElementById("continue-reading-heading");
   const continueDetail = document.getElementById("continue-reading-detail");
   const continueStatus = document.getElementById("continue-reading-status");
+  const continueMeter = document.getElementById("continue-reading-meter");
+  const continueAction = document.getElementById("continue-reading-action");
   const essayList = document.getElementById("essay-list");
   const searchForm = document.getElementById("global-search-form");
   const searchInput = document.getElementById("global-search-input");
@@ -72,11 +74,24 @@
     continueTitle.textContent = target.essay.title || "Renaissance";
 
     if (target.action === "next") {
-      continueDetail.textContent = "Next: " + target.sectionLabel + " - " + target.sectionTitle;
-      continueStatus.textContent = "Ready";
+      continueDetail.textContent = "Next: " + target.sectionLabel + " / " + target.sectionTitle;
+      continueStatus.textContent = "Up next";
+      if (continueAction) {
+        continueAction.textContent = "Start";
+      }
+      if (continueMeter) {
+        continueMeter.style.width = "100%";
+      }
     } else {
-      continueDetail.textContent = target.sectionLabel + " - " + target.sectionTitle;
-      continueStatus.textContent = String(progressPercent(target.progress)) + "%";
+      const percent = progressPercent(target.progress);
+      continueDetail.textContent = target.sectionLabel + " / " + target.sectionTitle;
+      continueStatus.textContent = String(percent) + "%";
+      if (continueAction) {
+        continueAction.textContent = "Resume";
+      }
+      if (continueMeter) {
+        continueMeter.style.width = String(percent) + "%";
+      }
     }
 
     continuePanel.hidden = false;
