@@ -5,6 +5,9 @@
   "description": "Renaissance is a warm, book-style static website for long-form essays.",
   "type": "commonjs",
   "scripts": {
+    "dev": "python -m http.server 8000",
+    "check": "npm run check:syntax && npm run validate:content && npm run validate:embedded:check",
+    "check:syntax": "node scripts/check-js-syntax.js",
     "test:anchors": "node scripts/tests/anchor-regression.js",
     "test:chapter-redirect": "node scripts/tests/chapter-redirect-regression.js",
     "test:content-fallback": "node scripts/tests/content-fallback-regression.js",

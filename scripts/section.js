@@ -10,6 +10,12 @@
     sectionDisplay
   } = window.RenaissanceContent;
   const { findOccurrencesInText, normalizeMode, parseBooleanFlag } = window.RenaissanceSearch;
+  const {
+    canonicalSectionUrl,
+    setPageMetadata,
+    socialImageForEssay,
+    toAbsoluteUrl
+  } = window.RenaissanceMeta;
 
   const backToEssay = document.getElementById("back-to-essay");
   const essayLine = document.getElementById("essay-line");
@@ -54,67 +60,6 @@
     return host === "localhost" || host === "127.0.0.1";
   })();
 
-  function siteRootUrl() {
-    const canonical = document.querySelector('link[rel="canonical"]');
-    if (canonical) {
-      try {
-        const url = new URL(canonical.href);
-        url.search = "";
-        url.hash = "";
-        url.pathname = url.pathname.replace(/[^/]*$/, "");
-        return url.toString();
-      } catch (error) {
-        // Fall through to runtime URL fallback.
-      }
-    }
-
-    const fallback = new URL("./", window.location.href);
-    fallback.search = "";
-    fallback.hash = "";
-    return fallback.toString();
-  }
-
-  const SITE_ROOT = siteRootUrl();
-
-  function toAbsoluteUrl(relativePath) {
-    return new URL(relativePath, SITE_ROOT).toString();
-  }
-
-  function canonicalSectionUrl(slug, sectionNumber) {
-    return toAbsoluteUrl(
-      "section.html?essay=" + encodeURIComponent(slug) + "&section=" + String(sectionNumber)
-    );
-  }
-
-  function setMetaByName(name, content) {
-    const element = document.querySelector('meta[name="' + name + '"]');
-    if (element) {
-      element.setAttribute("content", content);
-    }
-  }
-
-  function setMetaByProperty(property, content) {
-    const element = document.querySelector('meta[property="' + property + '"]');
-    if (element) {
-      element.setAttribute("content", content);
-    }
-  }
-
-  function setCanonical(url) {
-    const canonical = document.querySelector('link[rel="canonical"]');
-    if (canonical) {
-      canonical.setAttribute("href", url);
-    }
-  }
-
-  function socialImageForEssay(essay) {
-    const explicit = String((essay && essay.social_image) || "").trim();
-    if (explicit) {
-      return explicit;
-    }
-    return "assets/og-home.png";
-  }
-
   function cleanSpaces(text) {
     return String(text || "").replace(/\s+/g, " ").trim();
   }
@@ -150,16 +95,12 @@
     const canonical = canonicalSectionUrl(essay.slug, sectionNumber);
     const image = toAbsoluteUrl(socialImageForEssay(essay));
 
-    document.title = title;
-    setCanonical(canonical);
-    setMetaByName("description", description);
-    setMetaByProperty("og:title", title);
-    setMetaByProperty("og:description", description);
-    setMetaByProperty("og:url", canonical);
-    setMetaByProperty("og:image", image);
-    setMetaByName("twitter:title", title);
-    setMetaByName("twitter:description", description);
-    setMetaByName("twitter:image", image);
+    setPageMetadata({
+      title,
+      description,
+      canonical,
+      image
+    });
   }
 
   function escapeHtml(text) {

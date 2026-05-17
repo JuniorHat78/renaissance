@@ -16,6 +16,12 @@
     normalizeMode,
     parseBooleanFlag
   } = window.RenaissanceSearch;
+  const {
+    canonicalEssayUrl,
+    setPageMetadata,
+    socialImageForEssay,
+    toAbsoluteUrl
+  } = window.RenaissanceMeta;
 
   const PREVIEW_LIMIT = 3;
 
@@ -48,65 +54,6 @@
     caseSensitive: false
   };
 
-  function siteRootUrl() {
-    const canonical = document.querySelector('link[rel="canonical"]');
-    if (canonical) {
-      try {
-        const url = new URL(canonical.href);
-        url.search = "";
-        url.hash = "";
-        url.pathname = url.pathname.replace(/[^/]*$/, "");
-        return url.toString();
-      } catch (error) {
-        // Fall through to runtime URL fallback.
-      }
-    }
-
-    const fallback = new URL("./", window.location.href);
-    fallback.search = "";
-    fallback.hash = "";
-    return fallback.toString();
-  }
-
-  const SITE_ROOT = siteRootUrl();
-
-  function toAbsoluteUrl(relativePath) {
-    return new URL(relativePath, SITE_ROOT).toString();
-  }
-
-  function canonicalEssayUrl(slug) {
-    return toAbsoluteUrl("essay.html?essay=" + encodeURIComponent(slug));
-  }
-
-  function setMetaByName(name, content) {
-    const element = document.querySelector('meta[name="' + name + '"]');
-    if (element) {
-      element.setAttribute("content", content);
-    }
-  }
-
-  function setMetaByProperty(property, content) {
-    const element = document.querySelector('meta[property="' + property + '"]');
-    if (element) {
-      element.setAttribute("content", content);
-    }
-  }
-
-  function setCanonical(url) {
-    const canonical = document.querySelector('link[rel="canonical"]');
-    if (canonical) {
-      canonical.setAttribute("href", url);
-    }
-  }
-
-  function socialImageForEssay(essay) {
-    const explicit = String((essay && essay.social_image) || "").trim();
-    if (explicit) {
-      return explicit;
-    }
-    return "assets/og-home.png";
-  }
-
   function descriptionForEssay(essay) {
     const summary = String((essay && essay.summary) || "").trim();
     if (summary) {
@@ -121,16 +68,12 @@
     const canonical = canonicalEssayUrl(essay.slug);
     const image = toAbsoluteUrl(socialImageForEssay(essay));
 
-    document.title = title;
-    setCanonical(canonical);
-    setMetaByName("description", description);
-    setMetaByProperty("og:title", title);
-    setMetaByProperty("og:description", description);
-    setMetaByProperty("og:url", canonical);
-    setMetaByProperty("og:image", image);
-    setMetaByName("twitter:title", title);
-    setMetaByName("twitter:description", description);
-    setMetaByName("twitter:image", image);
+    setPageMetadata({
+      title,
+      description,
+      canonical,
+      image
+    });
   }
 
   function joinMetaParts(parts) {
