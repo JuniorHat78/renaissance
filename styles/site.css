@@ -121,6 +121,59 @@ h2 {
   max-width: 64rem;
 }
 
+.continue-panel {
+  margin: 0 0 1.4rem;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.continue-link {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.86rem 0.25rem 0.9rem;
+  text-decoration: none;
+  transition: background-color 140ms ease, color 140ms ease;
+}
+
+.continue-link:hover {
+  background: var(--accent-wash);
+}
+
+.continue-copy {
+  min-width: 0;
+  display: grid;
+  gap: 0.14rem;
+}
+
+.continue-title {
+  font-family: var(--font-title);
+  font-size: clamp(1.15rem, 1.08rem + 0.28vw, 1.36rem);
+  line-height: 1.25;
+}
+
+.continue-detail {
+  font-family: var(--font-ui);
+  font-size: 0.74rem;
+  letter-spacing: 0.02em;
+  overflow-wrap: anywhere;
+}
+
+.continue-status {
+  flex: 0 0 auto;
+  min-width: 3.1rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 38%, var(--line) 62%);
+  border-radius: 999px;
+  color: var(--accent);
+  font-family: var(--font-ui);
+  font-size: 0.72rem;
+  letter-spacing: 0.035em;
+  line-height: 1;
+  padding: 0.34rem 0.52rem;
+  text-align: center;
+}
+
 .search-layout {
   max-width: 72rem;
 }
@@ -600,10 +653,61 @@ select::-ms-expand {
   opacity: 0.82;
 }
 
+.chapter-item-progress {
+  display: grid;
+  grid-template-columns: minmax(2.2rem, 3.8rem) auto;
+  align-items: center;
+  gap: 0.5rem;
+  width: min(13rem, 100%);
+  margin-top: 0.32rem;
+  color: var(--muted);
+  font-family: var(--font-ui);
+  font-size: 0.66rem;
+  letter-spacing: 0.025em;
+}
+
+.chapter-item-progress-track {
+  position: relative;
+  height: 2px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--line) 74%, transparent);
+}
+
+.chapter-item-progress-track span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--accent) 74%, var(--line) 26%);
+}
+
+.chapter-item-progress.is-complete {
+  color: var(--accent);
+}
+
 .reader-layout {
   margin: 0 auto;
   max-width: 76ch;
   padding: 1.35rem 1rem 3.8rem;
+}
+
+.reader-progress {
+  position: fixed;
+  inset: 0 0 auto;
+  z-index: 160;
+  height: 2px;
+  background: transparent;
+  pointer-events: none;
+}
+
+.reader-progress span {
+  display: block;
+  width: 100%;
+  height: 100%;
+  transform: scaleX(0);
+  transform-origin: 0 50%;
+  background: color-mix(in srgb, var(--accent) 72%, var(--line) 28%);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 28%, transparent);
 }
 
 .reader-header-links {
@@ -1079,6 +1183,17 @@ mark.reader-highlight-target.reader-highlight-arrival {
   .search-panel-home,
   .search-panel {
     margin-bottom: 1.6rem;
+  }
+
+  .continue-link {
+    align-items: flex-start;
+    padding-left: 0.12rem;
+    padding-right: 0.12rem;
+  }
+
+  .continue-status {
+    min-width: 2.8rem;
+    margin-top: 0.08rem;
   }
 
   .chapter-list a {

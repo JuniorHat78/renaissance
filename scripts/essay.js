@@ -22,6 +22,7 @@
     socialImageForEssay,
     toAbsoluteUrl
   } = window.RenaissanceMeta;
+  const readingState = window.RenaissanceReadingState;
 
   const PREVIEW_LIMIT = 3;
 
@@ -86,6 +87,41 @@
     return "section.html?essay=" + encodeURIComponent(slug) + "&section=" + String(sectionNumber);
   }
 
+  function progressPercent(value) {
+    return Math.max(1, Math.min(100, Math.round(Number(value || 0) * 100)));
+  }
+
+  function renderSectionProgress(essay, sectionNumber) {
+    if (!readingState) {
+      return "";
+    }
+
+    const record = readingState.getSectionRecord(essay.slug, sectionNumber);
+    if (!record) {
+      return "";
+    }
+
+    const percent = progressPercent(record.maxProgress || record.progress);
+    const label = record.completed
+      ? "Completed"
+      : percent >= 4
+        ? String(percent) + "% read"
+        : "Started";
+    const width = record.completed ? 100 : Math.max(8, Math.min(100, percent));
+    const className = record.completed
+      ? "chapter-item-progress is-complete"
+      : "chapter-item-progress";
+
+    return (
+      '<span class="' + className + '">' +
+        '<span class="chapter-item-progress-track" aria-hidden="true">' +
+          '<span style="width: ' + String(width) + '%"></span>' +
+        "</span>" +
+        '<span class="chapter-item-progress-label">' + escapeHtml(label) + "</span>" +
+      "</span>"
+    );
+  }
+
   function renderSectionList(essay, sections) {
     sectionList.innerHTML = sections
       .map((section) => {
@@ -94,6 +130,7 @@
           ? '<span class="chapter-item-subtitle">(' + escapeHtml(display.subtitle) + ")</span>"
           : "";
         const sectionStatsHtml = '<span class="chapter-item-meta">' + escapeHtml(formatWordCount(section.wordCount)) + "</span>";
+        const progressHtml = renderSectionProgress(essay, section.sectionNumber);
         return (
           '<li class="toc-item">' +
             '<a href="' + sectionUrl(essay.slug, section.sectionNumber) + '">' +
@@ -102,6 +139,7 @@
                 '<span class="chapter-item-title">' + escapeHtml(display.title) + "</span>" +
                 subtitleHtml +
                 sectionStatsHtml +
+                progressHtml +
               "</span>" +
             "</a>" +
           "</li>"

@@ -16,6 +16,7 @@
     socialImageForEssay,
     toAbsoluteUrl
   } = window.RenaissanceMeta;
+  const readingState = window.RenaissanceReadingState;
 
   const backToEssay = document.getElementById("back-to-essay");
   const essayLine = document.getElementById("essay-line");
@@ -31,6 +32,7 @@
   const copyHighlightButton = document.getElementById("copy-highlight-link");
   const copyHighlightStatus = document.getElementById("copy-highlight-status");
   const highlightCapNote = document.getElementById("highlight-cap-note");
+  const readerProgressBar = document.getElementById("reader-progress-bar");
   let selectionCopyChip = document.getElementById("selection-copy-chip");
   let selectionCopyBar = document.getElementById("selection-copy-bar");
   let selectionCopyBarButton = document.getElementById("selection-copy-bar-button");
@@ -39,12 +41,17 @@
 
   let currentEssay = null;
   let currentSectionNumber = null;
+  let currentDisplay = null;
   let clearStatusTimer = null;
   let hideContextualTimer = null;
   let copyToastTimer = null;
   let selectionSyncFrame = null;
+  let progressFrame = null;
+  let progressSaveTimer = null;
   let activeSelectionDetails = null;
   let isSelectingPointer = false;
+  let progressEventsBound = false;
+  let suppressProgressSave = false;
   const CONTEXTUAL_LABEL_DEFAULT = "Copy link";
   const CONTEXTUAL_LABEL_COPIED = "Copied";
   const CONTEXTUAL_LABEL_ERROR = "Try copy again";
@@ -499,6 +506,18 @@
     return { start, end };
   }
 
+  function hasReaderAnchorIntent() {
+    const params = queryParams();
+    return (
+      params.has("p") ||
+      params.has("r") ||
+      params.has("hl") ||
+      params.has("occ") ||
+      params.has("q") ||
+      String(window.location.hash || "").includes(":~:text=")
+    );
+  }
+
   async function resolveEssaySlug() {
     const explicit = queryEssaySlug();
     if (explicit) {
@@ -533,6 +552,145 @@
     setLink(prevLink, null, "");
     setLink(nextLink, null, "");
     setLink(nextCta, null, "");
+    setReaderProgress(0);
+  }
+
+  function clamp(value, min, max) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) {
+      return min;
+    }
+    return Math.min(max, Math.max(min, number));
+  }
+
+  function documentScrollY() {
+    return window.scrollY || window.pageYOffset || 0;
+  }
+
+  function computeReadingProgress() {
+    if (!sectionContent || !sectionContent.childElementCount) {
+      return 0;
+    }
+
+    const viewportHeight = Math.max(1, window.innerHeight || document.documentElement.clientHeight || 1);
+    const scrollY = documentScrollY();
+    const rect = sectionContent.getBoundingClientRect();
+    const contentTop = rect.top + scrollY;
+    const contentBottom = rect.bottom + scrollY;
+    const start = Math.max(0, contentTop - (viewportHeight * 0.18));
+    const end = Math.max(start + 1, contentBottom - (viewportHeight * 0.62));
+    return clamp((scrollY - start) / (end - start), 0, 1);
+  }
+
+  function setReaderProgress(progress) {
+    if (!readerProgressBar) {
+      return;
+    }
+
+    const value = clamp(progress, 0, 1);
+    readerProgressBar.style.transform = "scaleX(" + value.toFixed(4) + ")";
+  }
+
+  function saveReadingProgress(progress) {
+    if (!readingState || !currentEssay || !currentSectionNumber || !currentDisplay || suppressProgressSave) {
+      return;
+    }
+
+    readingState.saveSectionProgress({
+      essaySlug: currentEssay.slug,
+      sectionNumber: currentSectionNumber,
+      progress,
+      scrollY: documentScrollY(),
+      essayTitle: currentEssay.title,
+      sectionTitle: currentDisplay.title,
+      sectionLabel: currentDisplay.label
+    });
+  }
+
+  function syncReadingProgress(options) {
+    const settings = options || {};
+    const progress = computeReadingProgress();
+    setReaderProgress(progress);
+    if (settings.save !== false) {
+      saveReadingProgress(progress);
+    }
+    return progress;
+  }
+
+  function scheduleReadingProgressSync() {
+    if (progressFrame) {
+      return;
+    }
+
+    progressFrame = requestAnimationFrame(() => {
+      progressFrame = null;
+      const progress = syncReadingProgress({ save: false });
+      if (progressSaveTimer) {
+        clearTimeout(progressSaveTimer);
+      }
+      progressSaveTimer = setTimeout(() => {
+        progressSaveTimer = null;
+        saveReadingProgress(progress);
+      }, 180);
+    });
+  }
+
+  function flushReadingProgress() {
+    if (progressFrame) {
+      cancelAnimationFrame(progressFrame);
+      progressFrame = null;
+    }
+    if (progressSaveTimer) {
+      clearTimeout(progressSaveTimer);
+      progressSaveTimer = null;
+    }
+    syncReadingProgress();
+  }
+
+  function bindReadingProgressEvents() {
+    if (progressEventsBound) {
+      return;
+    }
+    progressEventsBound = true;
+
+    window.addEventListener("scroll", scheduleReadingProgressSync, { passive: true });
+    window.addEventListener("resize", scheduleReadingProgressSync);
+    window.addEventListener("pagehide", flushReadingProgress);
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) {
+        flushReadingProgress();
+      }
+    });
+  }
+
+  function restoreReadingPosition() {
+    if (!readingState || !currentEssay || !currentSectionNumber) {
+      return false;
+    }
+
+    const record = readingState.getSectionRecord(currentEssay.slug, currentSectionNumber);
+    if (!readingState.shouldRestore(record)) {
+      return false;
+    }
+
+    const maxScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+    const targetY = Math.min(maxScroll, Math.max(0, Number(record.scrollY) || 0));
+    suppressProgressSave = true;
+    requestAnimationFrame(() => {
+      window.scrollTo({ top: targetY, left: 0, behavior: "auto" });
+      syncReadingProgress({ save: false });
+      window.setTimeout(() => {
+        suppressProgressSave = false;
+        syncReadingProgress();
+      }, 120);
+    });
+    return true;
+  }
+
+  function initializeReadingProgress(display) {
+    currentDisplay = display;
+    bindReadingProgressEvents();
+    syncReadingProgress({ save: false });
   }
 
   function clearAutoHighlights() {
@@ -1460,6 +1618,7 @@
       const blocks = payload.contentBlocks.length ? payload.contentBlocks : payload.blocks;
       currentEssay = essay;
       currentSectionNumber = sectionNumber;
+      currentDisplay = display;
       activeSelectionDetails = null;
       hideContextualShare();
       if (copyHighlightButton) {
@@ -1479,6 +1638,7 @@
       renderBlocks(sectionContent, blocks);
       annotateParagraphIndices();
       applySectionMetadata(essay, display, sectionNumber, payload);
+      initializeReadingProgress(display);
 
       const currentIndex = essay.section_order.indexOf(sectionNumber);
       const previous = essay.section_order[currentIndex - 1];
@@ -1488,7 +1648,14 @@
       setLink(nextLink, next ? sectionUrl(essay.slug, next) : null, "Next Section");
       setLink(nextCta, next ? sectionUrl(essay.slug, next) : null, "Next Section");
 
+      const hasAnchor = hasReaderAnchorIntent();
+      if (!hasAnchor) {
+        restoreReadingPosition();
+      }
       resolveInitialAnchor();
+      window.setTimeout(() => {
+        syncReadingProgress();
+      }, hasAnchor ? 900 : 180);
     } catch (error) {
       showMessage("Unable to load this section.");
     }

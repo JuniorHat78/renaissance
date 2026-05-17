@@ -1,6 +1,6 @@
 (function () {
   const { initThemeToggle } = window.RenaissanceTheme;
-  const { loadEssays } = window.RenaissanceContent;
+  const { loadEssays, sectionDisplay } = window.RenaissanceContent;
   const {
     buildSearchUrl,
     buildSectionUrl,
@@ -11,9 +11,15 @@
     normalizeScope,
     parseBooleanFlag
   } = window.RenaissanceSearch;
+  const readingState = window.RenaissanceReadingState;
 
   const PREVIEW_LIMIT = 3;
 
+  const continuePanel = document.getElementById("continue-reading-panel");
+  const continueLink = document.getElementById("continue-reading-link");
+  const continueTitle = document.getElementById("continue-reading-heading");
+  const continueDetail = document.getElementById("continue-reading-detail");
+  const continueStatus = document.getElementById("continue-reading-status");
   const essayList = document.getElementById("essay-list");
   const searchForm = document.getElementById("global-search-form");
   const searchInput = document.getElementById("global-search-input");
@@ -45,6 +51,35 @@
 
   function essayLink(slug) {
     return "essay.html?essay=" + encodeURIComponent(slug);
+  }
+
+  function progressPercent(value) {
+    return Math.max(1, Math.min(99, Math.round(Number(value || 0) * 100)));
+  }
+
+  function renderContinueReading(essays) {
+    if (!readingState || !continuePanel || !continueLink) {
+      return;
+    }
+
+    const target = readingState.continueTarget(essays, { sectionDisplay });
+    if (!target) {
+      continuePanel.hidden = true;
+      return;
+    }
+
+    continueLink.href = target.href;
+    continueTitle.textContent = target.essay.title || "Renaissance";
+
+    if (target.action === "next") {
+      continueDetail.textContent = "Next: " + target.sectionLabel + " - " + target.sectionTitle;
+      continueStatus.textContent = "Ready";
+    } else {
+      continueDetail.textContent = target.sectionLabel + " - " + target.sectionTitle;
+      continueStatus.textContent = String(progressPercent(target.progress)) + "%";
+    }
+
+    continuePanel.hidden = false;
   }
 
   function renderEssays(essays) {
@@ -363,6 +398,7 @@
     try {
       const essays = await loadEssays();
       publishedEssays = essays.filter((essay) => essay.published !== false);
+      renderContinueReading(publishedEssays);
       renderEssays(publishedEssays);
       populateScopeOptions(publishedEssays);
 

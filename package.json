@@ -15,6 +15,7 @@
     "test:lighthouse-target": "node scripts/tests/lighthouse-target-resolver-regression.js",
     "test:meta": "node scripts/tests/meta-regression.js",
     "test:og-cards": "node scripts/tests/og-card-generation-regression.js",
+    "test:reading-state": "node scripts/tests/reading-state-regression.js",
     "test:regression": "node scripts/tests/regression-check.js",
     "og:generate": "node scripts/og/generate-cards.js",
     "visual:capture": "node scripts/visual/capture.js",

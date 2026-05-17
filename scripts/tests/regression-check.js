@@ -19,6 +19,7 @@ function main() {
   run(path.resolve(__dirname, "chapter-redirect-regression.js"), forwardedArgs);
   run(path.resolve(__dirname, "anchor-regression.js"), forwardedArgs);
   run(path.resolve(__dirname, "copy-footer-regression.js"), forwardedArgs);
+  run(path.resolve(__dirname, "reading-state-regression.js"), forwardedArgs);
 }
 
 main();

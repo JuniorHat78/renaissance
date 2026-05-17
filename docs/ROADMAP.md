@@ -11,11 +11,11 @@
 
 ## Phase 2: Continuity Foundation
 
-- [ ] Track last-read essay, section, and reader position.
-- [ ] Add a quiet Continue Reading affordance on the archive page.
-- [ ] Show section progress in the reader.
-- [ ] Surface touched/completed section state on essay pages.
-- [ ] Ensure highlight links and manual scroll restoration do not fight each other.
+- [x] Track last-read essay, section, and reader position.
+- [x] Add a quiet Continue Reading affordance on the archive page.
+- [x] Show section progress in the reader.
+- [x] Surface touched/completed section state on essay pages.
+- [x] Ensure highlight links and manual scroll restoration do not fight each other.
 
 ## Phase 3: Spotlight Search
 

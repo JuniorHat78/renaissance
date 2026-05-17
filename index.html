@@ -98,6 +98,17 @@
   </header>
 
   <main class="layout archive-layout">
+    <section id="continue-reading-panel" class="continue-panel" aria-labelledby="continue-reading-heading" hidden>
+      <a id="continue-reading-link" class="continue-link" href="#">
+        <span class="continue-copy">
+          <span class="eyebrow">Continue Reading</span>
+          <span id="continue-reading-heading" class="continue-title"></span>
+          <span id="continue-reading-detail" class="continue-detail muted"></span>
+        </span>
+        <span id="continue-reading-status" class="continue-status"></span>
+      </a>
+    </section>
+
     <section id="global-search-panel" class="search-panel search-results-panel" aria-labelledby="global-search-heading" hidden>
       <h2 id="global-search-heading">Search Preview</h2>
       <p id="global-search-hint" class="muted search-hint">Search across all published essays.</p>
@@ -118,6 +129,7 @@
   <script src="scripts/theme.js" defer></script>
   <script src="scripts/essays-data.js" defer></script>
   <script src="scripts/content.js" defer></script>
+  <script src="scripts/reading-state.js" defer></script>
   <script src="scripts/search-engine.js" defer></script>
   <script src="scripts/archive.js" defer></script>
 </body>
