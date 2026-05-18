@@ -6,9 +6,17 @@ on:
       - main
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   validate:
     runs-on: ubuntu-latest
+    timeout-minutes: 35
 
     steps:
       - name: Checkout
@@ -18,54 +26,23 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: npm
 
       - name: Install Node Dependencies
         run: npm ci
 
+      - name: Static Validation and Standalone Regressions
+        run: npm run ci:standalone
+
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium
 
-      - name: JavaScript Syntax Check
-        run: |
-          find scripts -name "*.js" -print0 | while IFS= read -r -d '' file; do
-            node --check "$file"
-          done
-
-      - name: Validate Content
-        run: node scripts/validate-content.js
-
-      - name: Validate Generated Embedded Data
-        run: node scripts/generate-embedded-data.js --check
-
-      - name: Anchor and Copy Regression Suite
-        run: |
-          set -u
-          python3 -m http.server 4173 > /tmp/renaissance-http-regression.log 2>&1 &
-          SERVER_PID=$!
-          trap 'kill $SERVER_PID || true' EXIT
-          for i in $(seq 1 20); do
-            if curl -fsS http://127.0.0.1:4173/index.html > /dev/null; then
-              break
-            fi
-            sleep 0.5
-          done
-
-          npm run test:regression -- --base http://127.0.0.1:4173
+      - name: Browser Regression Suite
+        run: npm run ci:regression
 
       - name: Visual QA Check (warning-only)
         run: |
-          set -u
-          python3 -m http.server 4173 > /tmp/renaissance-http-visual.log 2>&1 &
-          SERVER_PID=$!
-          trap 'kill $SERVER_PID || true' EXIT
-          for i in $(seq 1 20); do
-            if curl -fsS http://127.0.0.1:4173/index.html > /dev/null; then
-              break
-            fi
-            sleep 0.5
-          done
-
-          if ! npm run visual:check -- --base http://127.0.0.1:4173 --warn-only; then
+          if ! npm run ci:visual; then
             echo "::warning title=Visual QA check failed::Unable to run screenshot capture/diff workflow"
           fi
 
@@ -81,35 +58,18 @@ jobs:
             qa/visual/report.json
             qa/visual/report.md
 
-      - name: Resolve Lighthouse Targets
-        run: node scripts/ci/resolve-lighthouse-target.js >> "$GITHUB_ENV"
-
       - name: Lighthouse (warning-only)
         env:
           LIGHTHOUSE_WARN_THRESHOLD: "90"
         run: |
-          set -u
-          mkdir -p .lighthouseci
-          python3 -m http.server 4173 > /tmp/renaissance-http.log 2>&1 &
-          SERVER_PID=$!
-          trap 'kill $SERVER_PID || true' EXIT
+          if ! npm run ci:lighthouse; then
+            echo "::warning title=Lighthouse check failed::Unable to run Lighthouse warning workflow"
+          fi
 
-          run_lighthouse() {
-            local url="$1"
-            local out="$2"
-            local label="$3"
-            if ! npx --yes lighthouse "$url" \
-              --only-categories=performance \
-              --quiet \
-              --chrome-flags="--headless=new --no-sandbox --disable-dev-shm-usage" \
-              --output=json \
-              --output-path="$out"; then
-              echo "::warning title=Lighthouse run failed ($label)::Could not run Lighthouse for $url"
-            fi
-          }
-
-          run_lighthouse "http://127.0.0.1:4173/index.html" ".lighthouseci/index.json" "Home"
-          run_lighthouse "http://127.0.0.1:4173/essay.html?essay=${LIGHTHOUSE_ESSAY_SLUG}" ".lighthouseci/essay.json" "Essay"
-          run_lighthouse "http://127.0.0.1:4173/section.html?essay=${LIGHTHOUSE_ESSAY_SLUG}&section=${LIGHTHOUSE_SECTION_NUMBER}" ".lighthouseci/section.json" "Section"
-
-          node scripts/lighthouse-warning-summary.js
+      - name: Upload Lighthouse Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lighthouse-reports
+          if-no-files-found: warn
+          path: .lighthouseci/**
