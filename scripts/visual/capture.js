@@ -14,6 +14,35 @@ const {
 const DEFAULT_BASE = "http://127.0.0.1:8000";
 const DEFAULT_SCENARIOS = "qa/visual/scenarios.json";
 const DEFAULT_OUT = "qa/visual/current";
+const READING_STATE_KEY = "renaissance-reading-state:v1";
+
+function stateFromRecord(record) {
+  const clean = {
+    essaySlug: "etching-god-into-sand",
+    sectionNumber: 1,
+    progress: 0.42,
+    maxProgress: 0.42,
+    scrollY: 900,
+    completed: false,
+    updatedAt: 1700000000000,
+    resumeParagraphIndex: 3,
+    resumeParagraphRatio: 0.46,
+    essayTitle: "Etching God into Sand",
+    sectionTitle: "The Oldest Material",
+    sectionLabel: "Section I",
+    ...(record || {})
+  };
+
+  return {
+    version: 1,
+    last: clean,
+    essays: {
+      [clean.essaySlug]: {
+        [String(clean.sectionNumber)]: clean
+      }
+    }
+  };
+}
 
 async function captureScenario(browser, base, outDir, scenario) {
   const context = await browser.newContext({
@@ -24,14 +53,21 @@ async function captureScenario(browser, base, outDir, scenario) {
     reducedMotion: "reduce"
   });
 
-  await context.addInitScript((theme) => {
+  await context.addInitScript(({ theme, readingState, readingStateKey }) => {
     try {
       localStorage.setItem("renaissance-theme", theme);
+      if (readingState) {
+        localStorage.setItem(readingStateKey, JSON.stringify(readingState));
+      }
     } catch (error) {
       // Ignore localStorage failures.
     }
     document.documentElement.setAttribute("data-theme", theme === "dark" ? "dark" : "light");
-  }, scenario.theme);
+  }, {
+    theme: scenario.theme,
+    readingStateKey: READING_STATE_KEY,
+    readingState: scenario.readingStateRecord ? stateFromRecord(scenario.readingStateRecord) : null
+  });
 
   const page = await context.newPage();
   const targetUrl = toTargetUrl(base, scenario.url);
@@ -46,12 +82,16 @@ async function captureScenario(browser, base, outDir, scenario) {
     await page.waitForTimeout(scenario.waitMs);
   }
 
+  if (scenario.waitForSelector) {
+    await page.waitForSelector(String(scenario.waitForSelector), { timeout: 30000 });
+  }
+
   if (scenario.scroll === "bottom") {
     await page.evaluate(() => {
       window.scrollTo(0, document.body.scrollHeight);
     });
     await page.waitForTimeout(450);
-  } else {
+  } else if (scenario.scroll !== "preserve") {
     await page.evaluate(() => {
       window.scrollTo(0, 0);
     });

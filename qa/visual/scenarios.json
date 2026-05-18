@@ -19,6 +19,21 @@
       "scroll": "top"
     },
     {
+      "id": "reader-resume-desktop-light",
+      "url": "/section.html?essay=etching-god-into-sand&section=1",
+      "viewport": { "width": 1440, "height": 1200 },
+      "theme": "light",
+      "scroll": "preserve",
+      "waitForSelector": ".reader-resume-bookmark",
+      "readingStateRecord": {
+        "progress": 0.42,
+        "maxProgress": 0.42,
+        "scrollY": 900,
+        "resumeParagraphIndex": 3,
+        "resumeParagraphRatio": 0.46
+      }
+    },
+    {
       "id": "essay-desktop-shadows-light",
       "url": "/essay.html?essay=shadows&q=shadow&mode=contains",
       "viewport": { "width": 1440, "height": 1200 },
@@ -52,6 +67,21 @@
       "viewport": { "width": 390, "height": 844 },
       "theme": "light",
       "scroll": "top"
+    },
+    {
+      "id": "reader-resume-mobile-light",
+      "url": "/section.html?essay=etching-god-into-sand&section=1",
+      "viewport": { "width": 390, "height": 844 },
+      "theme": "light",
+      "scroll": "preserve",
+      "waitForSelector": ".reader-resume-bookmark",
+      "readingStateRecord": {
+        "progress": 0.42,
+        "maxProgress": 0.42,
+        "scrollY": 900,
+        "resumeParagraphIndex": 3,
+        "resumeParagraphRatio": 0.46
+      }
     },
     {
       "id": "essay-mobile-shadows-light",

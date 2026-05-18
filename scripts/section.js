@@ -38,6 +38,10 @@
   let selectionCopyBarButton = document.getElementById("selection-copy-bar-button");
   const MAX_QUERY_ONLY_HIGHLIGHTS = 160;
   const SOURCE_FOOTER_LABEL = "[Source] ";
+  const READING_LINE_RATIO = 0.36;
+  const MIN_READING_LINE_Y = 80;
+  const RESTORE_SAVE_SUPPRESS_MS = 720;
+  const BOOKMARK_AUTO_CLEAR_MS = 5600;
 
   let currentEssay = null;
   let currentSectionNumber = null;
@@ -52,6 +56,9 @@
   let resumeBookmarkFadeTimer = null;
   let resumeBookmarkRemoveTimer = null;
   let resumeBookmarkDismissArmed = false;
+  let restoreSaveSuppressTimer = null;
+  let lastRestoreDebug = null;
+  let readingStateDebugPanel = null;
   let activeSelectionDetails = null;
   let isSelectingPointer = false;
   let progressEventsBound = false;
@@ -460,6 +467,11 @@
     return parseBooleanFlag(queryParams().get("case"));
   }
 
+  function queryReadingStateDebug() {
+    const value = String(queryParams().get("debugReadingState") || "").toLowerCase();
+    return value === "1" || value === "true";
+  }
+
   function queryHighlightPayload() {
     const params = queryParams();
     const text = String(params.get("hl") || "").trim();
@@ -587,12 +599,24 @@
     return clamp((scrollY - start) / (end - start), 0, 1);
   }
 
+  function readingLineY() {
+    return Math.max(MIN_READING_LINE_Y, (window.innerHeight || 0) * READING_LINE_RATIO);
+  }
+
   function paragraphIndexFromElement(paragraph) {
     if (!paragraph || !paragraph.dataset) {
       return null;
     }
     const index = Number.parseInt(paragraph.dataset.paragraphIndex, 10);
     return Number.isFinite(index) && index > 0 ? index : null;
+  }
+
+  function normalizeParagraphRatio(value) {
+    if (value === null || value === undefined || value === "") {
+      return null;
+    }
+    const number = Number(value);
+    return Number.isFinite(number) ? clamp(number, 0, 1) : null;
   }
 
   function paragraphByIndex(index) {
@@ -603,13 +627,23 @@
     return sectionContent.querySelector('p[data-paragraph-index="' + String(safeIndex) + '"]');
   }
 
+  function paragraphRatioAtY(paragraph, viewportY) {
+    if (!paragraph) {
+      return null;
+    }
+
+    const rect = paragraph.getBoundingClientRect();
+    const height = Math.max(1, rect.height);
+    return clamp((viewportY - rect.top) / height, 0, 1);
+  }
+
   function nearestParagraphToReadingLine() {
     const paragraphs = Array.from(sectionContent.querySelectorAll("p[data-paragraph-index]"));
     if (!paragraphs.length) {
       return null;
     }
 
-    const targetY = Math.max(80, (window.innerHeight || 0) * 0.36);
+    const targetY = readingLineY();
     let nearest = null;
     let nearestDistance = Number.POSITIVE_INFINITY;
 
@@ -629,8 +663,17 @@
     return nearest;
   }
 
-  function currentResumeParagraphIndex() {
-    return paragraphIndexFromElement(nearestParagraphToReadingLine());
+  function currentResumePointer() {
+    const paragraph = nearestParagraphToReadingLine();
+    if (!paragraph) {
+      return null;
+    }
+
+    return {
+      paragraph,
+      paragraphIndex: paragraphIndexFromElement(paragraph),
+      paragraphRatio: paragraphRatioAtY(paragraph, readingLineY())
+    };
   }
 
   function setReaderProgress(progress) {
@@ -644,19 +687,23 @@
 
   function saveReadingProgress(progress) {
     if (!readingState || !currentEssay || !currentSectionNumber || !currentDisplay || suppressProgressSave) {
+      updateReadingStateDebug();
       return;
     }
 
+    const pointer = currentResumePointer();
     readingState.saveSectionProgress({
       essaySlug: currentEssay.slug,
       sectionNumber: currentSectionNumber,
       progress,
       scrollY: documentScrollY(),
-      resumeParagraphIndex: currentResumeParagraphIndex(),
+      resumeParagraphIndex: pointer ? pointer.paragraphIndex : null,
+      resumeParagraphRatio: pointer ? pointer.paragraphRatio : null,
       essayTitle: currentEssay.title,
       sectionTitle: currentDisplay.title,
       sectionLabel: currentDisplay.label
     });
+    updateReadingStateDebug();
   }
 
   function syncReadingProgress(options) {
@@ -720,6 +767,119 @@
     });
   }
 
+  function maxDocumentScrollY() {
+    return Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+  }
+
+  function ratioFromSavedScroll(record, paragraph) {
+    if (!record || !paragraph || !(Number(record.scrollY) > 0)) {
+      return null;
+    }
+
+    const rect = paragraph.getBoundingClientRect();
+    const height = Math.max(1, rect.height);
+    const paragraphTop = rect.top + documentScrollY();
+    const paragraphBottom = paragraphTop + height;
+    const savedReadingLine = Number(record.scrollY) + readingLineY();
+    if (savedReadingLine < paragraphTop || savedReadingLine > paragraphBottom) {
+      return null;
+    }
+
+    return clamp((savedReadingLine - paragraphTop) / height, 0, 1);
+  }
+
+  function scrollTargetForParagraph(paragraph, ratio) {
+    const rect = paragraph.getBoundingClientRect();
+    const paragraphTop = rect.top + documentScrollY();
+    const paragraphHeight = Math.max(1, rect.height);
+    const paragraphRatio = normalizeParagraphRatio(ratio) || 0;
+    const documentTarget = paragraphTop + (paragraphHeight * paragraphRatio);
+    return clamp(documentTarget - readingLineY(), 0, maxDocumentScrollY());
+  }
+
+  function resolveRestoreTarget(record) {
+    const savedScrollY = clamp(Number(record && record.scrollY) || 0, 0, maxDocumentScrollY());
+    const savedParagraph = record && record.resumeParagraphIndex
+      ? paragraphByIndex(record.resumeParagraphIndex)
+      : null;
+
+    if (savedParagraph) {
+      const recordRatio = normalizeParagraphRatio(record.resumeParagraphRatio);
+      const derivedRatio = ratioFromSavedScroll(record, savedParagraph);
+      const paragraphRatio = recordRatio !== null
+        ? recordRatio
+        : derivedRatio !== null ? derivedRatio : 0;
+      const paragraphIndex = paragraphIndexFromElement(savedParagraph);
+
+      return {
+        mode: recordRatio !== null ? "semantic" : derivedRatio !== null ? "semantic-derived" : "paragraph-top",
+        paragraphElement: savedParagraph,
+        paragraphIndex,
+        paragraphRatio,
+        scrollY: scrollTargetForParagraph(savedParagraph, paragraphRatio)
+      };
+    }
+
+    if (savedScrollY > 0) {
+      return {
+        mode: "scroll-fallback",
+        paragraphElement: null,
+        paragraphIndex: null,
+        paragraphRatio: null,
+        scrollY: savedScrollY
+      };
+    }
+
+    return null;
+  }
+
+  function targetFromCurrentReadingLine(mode) {
+    const pointer = currentResumePointer();
+    if (!pointer) {
+      return null;
+    }
+
+    return {
+      mode,
+      paragraphElement: pointer.paragraph,
+      paragraphIndex: pointer.paragraphIndex,
+      paragraphRatio: pointer.paragraphRatio,
+      scrollY: documentScrollY()
+    };
+  }
+
+  function startRestoreSaveSuppression() {
+    suppressProgressSave = true;
+    if (restoreSaveSuppressTimer) {
+      clearTimeout(restoreSaveSuppressTimer);
+      restoreSaveSuppressTimer = null;
+    }
+  }
+
+  function releaseRestoreSaveSuppressionSoon() {
+    if (restoreSaveSuppressTimer) {
+      clearTimeout(restoreSaveSuppressTimer);
+    }
+    restoreSaveSuppressTimer = setTimeout(() => {
+      restoreSaveSuppressTimer = null;
+      suppressProgressSave = false;
+      updateReadingStateDebug();
+    }, RESTORE_SAVE_SUPPRESS_MS);
+  }
+
+  function restoreDebugSnapshot(target) {
+    if (!target) {
+      return null;
+    }
+
+    return {
+      mode: target.mode,
+      paragraphIndex: target.paragraphIndex,
+      paragraphRatio: target.paragraphRatio,
+      scrollY: Math.round(target.scrollY)
+    };
+  }
+
   function restoreReadingPosition() {
     if (!readingState || !currentEssay || !currentSectionNumber) {
       return false;
@@ -730,16 +890,31 @@
       return false;
     }
 
-    const maxScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
-    const targetY = Math.min(maxScroll, Math.max(0, Number(record.scrollY) || 0));
-    suppressProgressSave = true;
+    const initialTarget = resolveRestoreTarget(record);
+    if (!initialTarget) {
+      return false;
+    }
+
+    startRestoreSaveSuppression();
+    lastRestoreDebug = restoreDebugSnapshot(initialTarget);
+    updateReadingStateDebug();
+
     requestAnimationFrame(() => {
-      window.scrollTo({ top: targetY, left: 0, behavior: "auto" });
+      const target = resolveRestoreTarget(record) || initialTarget;
+      window.scrollTo({ top: target.scrollY, left: 0, behavior: "auto" });
       syncReadingProgress({ save: false });
       window.setTimeout(() => {
-        suppressProgressSave = false;
-        syncReadingProgress();
-        showResumeBookmark(record);
+        const settledTarget = target.mode === "scroll-fallback"
+          ? targetFromCurrentReadingLine("scroll-fallback")
+          : resolveRestoreTarget(record) || target;
+        if (settledTarget && Math.abs(settledTarget.scrollY - documentScrollY()) > 2) {
+          window.scrollTo({ top: settledTarget.scrollY, left: 0, behavior: "auto" });
+        }
+        syncReadingProgress({ save: false });
+        lastRestoreDebug = restoreDebugSnapshot(settledTarget || target);
+        showResumeBookmark(settledTarget || target);
+        updateReadingStateDebug();
+        releaseRestoreSaveSuppressionSoon();
       }, 120);
     });
     return true;
@@ -770,9 +945,11 @@
 
     const remove = () => {
       target.classList.remove("reader-resume-bookmark", "is-fading");
+      target.style.removeProperty("--reader-bookmark-offset");
       if (resumeBookmarkElement === target) {
         resumeBookmarkElement = null;
       }
+      updateReadingStateDebug();
     };
 
     if (settings.fade === false) {
@@ -784,35 +961,105 @@
     resumeBookmarkRemoveTimer = setTimeout(remove, 560);
   }
 
-  function resumeBookmarkTarget(record) {
-    if (record && record.resumeParagraphIndex) {
-      const saved = paragraphByIndex(record.resumeParagraphIndex);
+  function resumeBookmarkTarget(reference) {
+    if (reference && reference.paragraphElement) {
+      return reference.paragraphElement;
+    }
+    if (reference && reference.resumeParagraphIndex) {
+      const saved = paragraphByIndex(reference.resumeParagraphIndex);
       if (saved) {
         return saved;
       }
     }
-    return nearestParagraphToReadingLine();
+    const pointer = currentResumePointer();
+    return pointer ? pointer.paragraph : null;
   }
 
-  function showResumeBookmark(record) {
-    const target = resumeBookmarkTarget(record);
+  function bookmarkOffsetForTarget(target, reference) {
+    const rect = target.getBoundingClientRect();
+    const paragraphHeight = Math.max(1, rect.height);
+    const ratio = normalizeParagraphRatio(reference && reference.paragraphRatio);
+    const resolvedRatio = ratio !== null ? ratio : paragraphRatioAtY(target, readingLineY()) || 0;
+    const maxOffset = Math.max(0, paragraphHeight - 42);
+    return clamp((paragraphHeight * resolvedRatio) - 14, 0, maxOffset);
+  }
+
+  function showResumeBookmark(reference) {
+    const target = resumeBookmarkTarget(reference);
     if (!target) {
       return;
     }
 
     clearResumeBookmark({ fade: false });
     resumeBookmarkElement = target;
+    target.style.setProperty("--reader-bookmark-offset", bookmarkOffsetForTarget(target, reference).toFixed(1) + "px");
     target.classList.add("reader-resume-bookmark");
 
     resumeBookmarkFadeTimer = setTimeout(() => {
       clearResumeBookmark({ fade: true });
-    }, 5600);
+    }, BOOKMARK_AUTO_CLEAR_MS);
 
     setTimeout(() => {
       if (resumeBookmarkElement === target) {
         resumeBookmarkDismissArmed = true;
       }
     }, 900);
+  }
+
+  function ensureReadingStateDebugPanel() {
+    if (!queryReadingStateDebug()) {
+      return null;
+    }
+    if (readingStateDebugPanel) {
+      return readingStateDebugPanel;
+    }
+
+    readingStateDebugPanel = document.createElement("aside");
+    readingStateDebugPanel.className = "reading-state-debug";
+    readingStateDebugPanel.setAttribute("aria-label", "Reading state debug");
+    document.body.appendChild(readingStateDebugPanel);
+    return readingStateDebugPanel;
+  }
+
+  function formatDebugValue(value) {
+    if (value === null || value === undefined || value === "") {
+      return "-";
+    }
+    if (typeof value === "number") {
+      return Number.isInteger(value) ? String(value) : value.toFixed(3);
+    }
+    return String(value);
+  }
+
+  function updateReadingStateDebug() {
+    const panel = ensureReadingStateDebugPanel();
+    if (!panel) {
+      return;
+    }
+
+    const record = readingState && currentEssay && currentSectionNumber
+      ? readingState.getSectionRecord(currentEssay.slug, currentSectionNumber)
+      : null;
+    const pointer = currentResumePointer();
+    const bookmarkIndex = resumeBookmarkElement ? paragraphIndexFromElement(resumeBookmarkElement) : null;
+    const bookmarkOffset = resumeBookmarkElement
+      ? resumeBookmarkElement.style.getPropertyValue("--reader-bookmark-offset")
+      : "";
+
+    panel.textContent = [
+      "Reading state",
+      "saved p: " + formatDebugValue(record && record.resumeParagraphIndex),
+      "saved ratio: " + formatDebugValue(record && record.resumeParagraphRatio),
+      "saved y: " + formatDebugValue(record && Math.round(record.scrollY)),
+      "current p: " + formatDebugValue(pointer && pointer.paragraphIndex),
+      "current ratio: " + formatDebugValue(pointer && pointer.paragraphRatio),
+      "restore: " + formatDebugValue(lastRestoreDebug && lastRestoreDebug.mode),
+      "restore p: " + formatDebugValue(lastRestoreDebug && lastRestoreDebug.paragraphIndex),
+      "restore ratio: " + formatDebugValue(lastRestoreDebug && lastRestoreDebug.paragraphRatio),
+      "bookmark p: " + formatDebugValue(bookmarkIndex),
+      "bookmark offset: " + formatDebugValue(bookmarkOffset),
+      "saving: " + (suppressProgressSave ? "suppressed" : "active")
+    ].join("\n");
   }
 
   function clearAutoHighlights() {
@@ -1772,13 +2019,12 @@
       setLink(nextCta, next ? sectionUrl(essay.slug, next) : null, "Next Section");
 
       const hasAnchor = hasReaderAnchorIntent();
-      if (!hasAnchor) {
-        restoreReadingPosition();
-      }
+      const didRestore = !hasAnchor && restoreReadingPosition();
       resolveInitialAnchor();
       window.setTimeout(() => {
-        syncReadingProgress();
-      }, hasAnchor ? 900 : 180);
+        syncReadingProgress({ save: didRestore ? false : undefined });
+        updateReadingStateDebug();
+      }, hasAnchor ? 900 : didRestore ? RESTORE_SAVE_SUPPRESS_MS + 160 : 180);
     } catch (error) {
       showMessage("Unable to load this section.");
     }

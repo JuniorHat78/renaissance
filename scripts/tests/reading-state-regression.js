@@ -51,6 +51,7 @@ function stateWithRecord(record) {
     completed: false,
     updatedAt: 1700000000000,
     resumeParagraphIndex: 3,
+    resumeParagraphRatio: 0.46,
     essayTitle: "Etching God into Sand",
     sectionTitle: "The Oldest Material",
     sectionLabel: "Section I",
@@ -68,11 +69,12 @@ function stateWithRecord(record) {
   };
 }
 
-async function newContext(browser, state) {
+async function newContext(browser, state, overrides) {
+  const settings = overrides || {};
   const context = await browser.newContext({
     locale: "en-US",
     timezoneId: "UTC",
-    viewport: { width: 1440, height: 1200 },
+    viewport: settings.viewport || { width: 1440, height: 1200 },
     colorScheme: "light",
     reducedMotion: "reduce"
   });
@@ -113,10 +115,53 @@ async function openReadyArchive(page, url) {
   await page.waitForSelector("#essay-list .essay-item", { timeout: 30000 });
 }
 
-async function runCase(name, browser, state, callback, failures) {
+async function readerRestoreSnapshot(page) {
+  return page.evaluate((key) => {
+    const lineY = Math.max(80, window.innerHeight * 0.36);
+    const bookmark = document.querySelector(".reader-resume-bookmark");
+    const rect = bookmark ? bookmark.getBoundingClientRect() : null;
+    const offset = bookmark
+      ? Number.parseFloat(bookmark.style.getPropertyValue("--reader-bookmark-offset") || "0")
+      : null;
+    const parsed = JSON.parse(window.localStorage.getItem(key) || "null");
+    const record = parsed && parsed.essays &&
+      parsed.essays["etching-god-into-sand"] &&
+      parsed.essays["etching-god-into-sand"]["1"]
+        ? parsed.essays["etching-god-into-sand"]["1"]
+        : null;
+
+    return {
+      scrollY: window.scrollY,
+      lineY,
+      bookmarkCount: document.querySelectorAll(".reader-resume-bookmark").length,
+      paragraphIndex: bookmark ? bookmark.getAttribute("data-paragraph-index") : "",
+      ratioAtLine: rect ? (lineY - rect.top) / Math.max(1, rect.height) : null,
+      cueY: rect && offset !== null ? rect.top + offset : null,
+      bookmarkOffset: offset,
+      savedParagraphIndex: record ? record.resumeParagraphIndex : null,
+      savedParagraphRatio: record ? record.resumeParagraphRatio : null
+    };
+  }, STORAGE_KEY);
+}
+
+function assertRestoreGeometry(snapshot, expectedRatio, label) {
+  assert.equal(snapshot.bookmarkCount, 1, label + " should show one resume bookmark");
+  assert.equal(snapshot.paragraphIndex, "3", label + " should target paragraph 3");
+  assert.ok(snapshot.scrollY > 100, label + " should not rely on top-of-page scroll");
+  assert.ok(
+    Math.abs(snapshot.ratioAtLine - expectedRatio) < 0.09,
+    label + " should place the saved ratio near the reading line"
+  );
+  assert.ok(
+    Math.abs(snapshot.cueY - snapshot.lineY) < 42,
+    label + " should place the visible cue near the reading line"
+  );
+}
+
+async function runCase(name, browser, state, callback, failures, contextOptions) {
   let context;
   try {
-    context = await newContext(browser, state);
+    context = await newContext(browser, state, contextOptions);
     await callback(context);
     console.log("PASS " + name);
   } catch (error) {
@@ -146,50 +191,107 @@ async function main() {
         progress: parsed.essays["etching-god-into-sand"]["1"].progress,
         maxProgress: parsed.essays["etching-god-into-sand"]["1"].maxProgress,
         resumeParagraphIndex: parsed.essays["etching-god-into-sand"]["1"].resumeParagraphIndex,
+        resumeParagraphRatio: parsed.essays["etching-god-into-sand"]["1"].resumeParagraphRatio,
         transform: bar ? String(bar.style.transform || "") : ""
       };
     }, STORAGE_KEY);
     assert.ok(snapshot.progress > 0.05, "progress should be saved after scrolling");
     assert.ok(snapshot.maxProgress >= snapshot.progress, "high-water progress should be retained");
     assert.ok(snapshot.resumeParagraphIndex > 0, "nearest paragraph should be saved");
+    assert.ok(snapshot.resumeParagraphRatio >= 0 && snapshot.resumeParagraphRatio <= 1, "paragraph ratio should be saved");
     assert.match(snapshot.transform, /scaleX\((?!0\.0000)/);
   }, failures);
 
-  await runCase("unfinished reader position restores on normal section open", browser, stateWithRecord({
+  await runCase("semantic reader position restores on normal section open", browser, stateWithRecord({
     progress: 0.42,
     maxProgress: 0.42,
-    scrollY: 900
+    scrollY: 0,
+    resumeParagraphIndex: 3,
+    resumeParagraphRatio: 0.46
   }), async (context) => {
     const page = await context.newPage();
     await openReadySection(page, sectionUrl(options.base, 1));
-    const snapshot = await page.evaluate(() => {
-      const bookmark = document.querySelector(".reader-resume-bookmark");
-      return {
-        scrollY: window.scrollY,
-        bookmarkCount: document.querySelectorAll(".reader-resume-bookmark").length,
-        paragraphIndex: bookmark ? bookmark.getAttribute("data-paragraph-index") : ""
-      };
-    });
-    assert.ok(snapshot.scrollY > 600, "saved section position should restore");
-    assert.equal(snapshot.bookmarkCount, 1, "restored section should show one resume bookmark");
-    assert.equal(snapshot.paragraphIndex, "3", "bookmark should use the saved paragraph index");
+    const snapshot = await readerRestoreSnapshot(page);
+    assertRestoreGeometry(snapshot, 0.46, "semantic restore");
+    assert.equal(snapshot.savedParagraphIndex, 3, "restore should not rewrite the saved paragraph immediately");
+    assert.equal(snapshot.savedParagraphRatio, 0.46, "restore should not rewrite the saved ratio immediately");
   }, failures);
 
-  await runCase("reader bookmark does not appear for occurrence links", browser, stateWithRecord({
+  await runCase("semantic reader position survives mobile layout", browser, stateWithRecord({
     progress: 0.42,
     maxProgress: 0.42,
     scrollY: 900,
-    resumeParagraphIndex: 3
+    resumeParagraphIndex: 3,
+    resumeParagraphRatio: 0.46
   }), async (context) => {
     const page = await context.newPage();
-    await openReadySection(page, sectionUrl(options.base, 1, { q: "sand", occ: 1 }));
-    await page.waitForTimeout(450);
-    const snapshot = await page.evaluate(() => ({
-      bookmarkCount: document.querySelectorAll(".reader-resume-bookmark").length,
-      highlightCount: document.querySelectorAll('mark[data-auto-highlight="1"]').length
-    }));
-    assert.equal(snapshot.bookmarkCount, 0, "anchor-driven arrivals should not show resume bookmark");
-    assert.equal(snapshot.highlightCount, 1, "occurrence link should keep its normal highlight");
+    await openReadySection(page, sectionUrl(options.base, 1));
+    const snapshot = await readerRestoreSnapshot(page);
+    assertRestoreGeometry(snapshot, 0.46, "mobile semantic restore");
+  }, failures, {
+    viewport: { width: 390, height: 844 }
+  });
+
+  await runCase("missing paragraph resume target falls back to scroll", browser, stateWithRecord({
+    progress: 0.42,
+    maxProgress: 0.42,
+    scrollY: 900,
+    resumeParagraphIndex: 999,
+    resumeParagraphRatio: 0.46
+  }), async (context) => {
+    const page = await context.newPage();
+    await openReadySection(page, sectionUrl(options.base, 1));
+    const snapshot = await readerRestoreSnapshot(page);
+    assert.ok(snapshot.scrollY > 600, "scroll fallback should restore saved vertical position");
+    assert.equal(snapshot.bookmarkCount, 1, "scroll fallback should still show one resume bookmark");
+    assert.notEqual(snapshot.paragraphIndex, "999", "scroll fallback should not mark a missing paragraph");
+    assert.ok(snapshot.ratioAtLine >= 0 && snapshot.ratioAtLine <= 1, "scroll fallback should resolve a readable paragraph");
+  }, failures);
+
+  await runCase("reader anchors bypass resume restore", browser, stateWithRecord({
+    progress: 0.42,
+    maxProgress: 0.42,
+    scrollY: 900,
+    resumeParagraphIndex: 3,
+    resumeParagraphRatio: 0.46
+  }), async (context) => {
+    const cases = [
+      { label: "occurrence", params: { q: "sand", occ: 1 }, expectHighlight: true },
+      { label: "paragraph", params: { p: "3" }, expectHighlight: true },
+      { label: "range", params: { r: "0-4" }, expectHighlight: true },
+      { label: "payload", params: { hl: "Sand" }, expectHighlight: true }
+    ];
+
+    for (const entry of cases) {
+      const page = await context.newPage();
+      await openReadySection(page, sectionUrl(options.base, 1, entry.params));
+      await page.waitForTimeout(450);
+      const snapshot = await page.evaluate(() => ({
+        bookmarkCount: document.querySelectorAll(".reader-resume-bookmark").length,
+        highlightCount: document.querySelectorAll('mark[data-auto-highlight="1"]').length
+      }));
+      assert.equal(snapshot.bookmarkCount, 0, entry.label + " anchors should not show resume bookmark");
+      if (entry.expectHighlight) {
+        assert.ok(snapshot.highlightCount >= 1, entry.label + " anchors should keep their normal highlight");
+      }
+      await page.close();
+    }
+  }, failures);
+
+  await runCase("debug inspector reports semantic restore state", browser, stateWithRecord({
+    progress: 0.42,
+    maxProgress: 0.42,
+    scrollY: 0,
+    resumeParagraphIndex: 3,
+    resumeParagraphRatio: 0.46
+  }), async (context) => {
+    const page = await context.newPage();
+    await openReadySection(page, sectionUrl(options.base, 1, { debugReadingState: 1 }));
+    await page.waitForSelector(".reading-state-debug", { timeout: 30000 });
+    const text = await page.locator(".reading-state-debug").textContent();
+    assert.match(text, /restore: semantic/, "debug inspector should report semantic restore mode");
+    assert.match(text, /saved p: 3/, "debug inspector should report saved paragraph");
+    assert.match(text, /bookmark p: 3/, "debug inspector should report bookmark paragraph");
   }, failures);
 
   await runCase("completed reader position does not restore to the end", browser, stateWithRecord({

@@ -1067,6 +1067,25 @@ select::-ms-expand {
   color: var(--accent);
 }
 
+.reading-state-debug {
+  position: fixed;
+  right: 0.75rem;
+  bottom: 0.75rem;
+  z-index: 220;
+  max-width: min(19rem, calc(100vw - 1.5rem));
+  border: 1px solid color-mix(in srgb, var(--line) 78%, var(--text) 22%);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--paper) 94%, transparent);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 0.68rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  padding: 0.62rem 0.7rem;
+  box-shadow: 0 12px 28px rgba(24, 14, 8, 0.16);
+  backdrop-filter: blur(8px);
+}
+
 .selection-copy-chip:active,
 .selection-copy-bar .button:active {
   transform: scale(0.98);
@@ -1085,7 +1104,7 @@ select::-ms-expand {
   content: "";
   position: absolute;
   left: -1.48rem;
-  top: 0.32em;
+  top: var(--reader-bookmark-offset, 0.32em);
   z-index: 1;
   width: 0.46rem;
   height: 2.78rem;

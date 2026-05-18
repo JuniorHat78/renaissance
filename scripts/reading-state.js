@@ -40,6 +40,14 @@
     return Number.isFinite(number) && number > 0 ? number : null;
   }
 
+  function normalizeRatio(value) {
+    if (value === null || value === undefined || value === "") {
+      return null;
+    }
+    const number = Number(value);
+    return Number.isFinite(number) ? clamp(number, 0, 1) : null;
+  }
+
   function sectionKey(sectionNumber) {
     return String(sectionNumber);
   }
@@ -61,6 +69,7 @@
     const scrollY = Math.max(0, Number(raw.scrollY) || 0);
     const updatedAt = Math.max(0, Number(raw.updatedAt) || 0);
     const resumeParagraphIndex = normalizePositiveInteger(raw.resumeParagraphIndex);
+    const resumeParagraphRatio = normalizeRatio(raw.resumeParagraphRatio);
 
     return {
       essaySlug,
@@ -71,6 +80,7 @@
       completed,
       updatedAt,
       resumeParagraphIndex,
+      resumeParagraphRatio,
       essayTitle: String(raw.essayTitle || "").trim(),
       sectionTitle: String(raw.sectionTitle || "").trim(),
       sectionLabel: String(raw.sectionLabel || "").trim()
@@ -171,6 +181,10 @@
     const updatedAt = Number.isFinite(source.updatedAt) ? Number(source.updatedAt) : Date.now();
     const resumeParagraphIndex = normalizePositiveInteger(source.resumeParagraphIndex) ||
       (previous ? previous.resumeParagraphIndex : null);
+    const resumeParagraphRatio = normalizeRatio(source.resumeParagraphRatio);
+    const resolvedResumeParagraphRatio = resumeParagraphRatio !== null
+      ? resumeParagraphRatio
+      : previous ? previous.resumeParagraphRatio : null;
 
     const record = {
       essaySlug,
@@ -181,6 +195,7 @@
       completed,
       updatedAt,
       resumeParagraphIndex,
+      resumeParagraphRatio: resolvedResumeParagraphRatio,
       essayTitle: String(source.essayTitle || (previous && previous.essayTitle) || "").trim(),
       sectionTitle: String(source.sectionTitle || (previous && previous.sectionTitle) || "").trim(),
       sectionLabel: String(source.sectionLabel || (previous && previous.sectionLabel) || "").trim()
@@ -202,7 +217,7 @@
     return (
       normalized.progress >= MIN_RESTORE_PROGRESS &&
       normalized.progress <= MAX_RESTORE_PROGRESS &&
-      normalized.scrollY > 80
+      (normalized.scrollY > 80 || normalized.resumeParagraphIndex !== null)
     );
   }
 
