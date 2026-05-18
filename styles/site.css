@@ -154,7 +154,18 @@ h2 {
 }
 
 .continue-link:hover {
-  background: var(--accent-wash);
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--accent) 13%, transparent) 0%,
+      color-mix(in srgb, var(--accent) 8%, transparent) 26%,
+      transparent 64%
+    );
+}
+
+.continue-link:hover::before {
+  background: var(--accent);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 22%, transparent);
 }
 
 .continue-copy {
@@ -206,6 +217,7 @@ h2 {
 }
 
 .continue-meter span {
+  position: relative;
   display: block;
   width: 0;
   height: 100%;
@@ -213,16 +225,27 @@ h2 {
   background: color-mix(in srgb, var(--accent) 76%, var(--line) 24%);
 }
 
+.continue-meter span::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 3px;
+  height: 100%;
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--accent) 92%, #fff 8%);
+}
+
 .continue-action {
   flex: 0 0 auto;
-  border: 1px solid color-mix(in srgb, var(--accent) 48%, var(--line) 52%);
+  border: 1px solid color-mix(in srgb, var(--accent) 36%, var(--line) 64%);
   border-radius: 999px;
   color: var(--accent);
   font-family: var(--font-ui);
   font-size: 0.74rem;
   letter-spacing: 0.035em;
   line-height: 1;
-  padding: 0.42rem 0.62rem;
+  padding: 0.38rem 0.68rem;
   transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease;
 }
 
