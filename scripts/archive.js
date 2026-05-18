@@ -72,13 +72,19 @@
 
     continueLink.href = target.href;
     continueTitle.textContent = target.essay.title || "Renaissance";
+    const setActionLabel = (label) => {
+      if (!continueAction) {
+        return;
+      }
+      continueAction.innerHTML =
+        '<span class="continue-action-label">' + escapeHtml(label) + "</span>" +
+        '<span class="continue-action-glyph" aria-hidden="true">&rsaquo;</span>';
+    };
 
     if (target.action === "next") {
       continueDetail.textContent = "Next: " + target.sectionLabel + ", " + target.sectionTitle;
       continueStatus.textContent = "Up next";
-      if (continueAction) {
-        continueAction.textContent = "Next ->";
-      }
+      setActionLabel("Next");
       if (continueMeter) {
         continueMeter.style.width = "100%";
       }
@@ -86,9 +92,7 @@
       const percent = progressPercent(target.progress);
       continueDetail.textContent = target.sectionLabel + ", " + target.sectionTitle;
       continueStatus.textContent = String(percent) + "%";
-      if (continueAction) {
-        continueAction.textContent = "Resume ->";
-      }
+      setActionLabel("Resume");
       if (continueMeter) {
         continueMeter.style.width = String(percent) + "%";
       }

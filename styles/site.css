@@ -126,8 +126,19 @@ h2 {
   border-top: 1px solid color-mix(in srgb, var(--line) 82%, var(--accent) 18%);
   border-bottom: 1px solid var(--line);
   background:
-    linear-gradient(90deg, var(--accent-wash), transparent 22rem),
-    color-mix(in srgb, var(--paper) 44%, transparent);
+    linear-gradient(
+      to bottom,
+      color-mix(in srgb, #fff 12%, transparent) 0%,
+      transparent 38%,
+      color-mix(in srgb, var(--line) 16%, transparent) 100%
+    ),
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--accent) 9%, transparent) 0%,
+      color-mix(in srgb, var(--accent) 5%, transparent) 38%,
+      transparent 84%
+    ),
+    color-mix(in srgb, var(--paper) 52%, transparent);
 }
 
 .continue-link {
@@ -139,7 +150,7 @@ h2 {
   min-height: 6.25rem;
   padding: 0.9rem 0.92rem 0.95rem 1.08rem;
   text-decoration: none;
-  transition: background-color 140ms ease, color 140ms ease;
+  transition: background-color 160ms ease, color 160ms ease;
 }
 
 .continue-link::before {
@@ -157,9 +168,10 @@ h2 {
   background:
     linear-gradient(
       90deg,
-      color-mix(in srgb, var(--accent) 13%, transparent) 0%,
-      color-mix(in srgb, var(--accent) 8%, transparent) 26%,
-      transparent 64%
+      color-mix(in srgb, var(--accent) 20%, transparent) 0%,
+      color-mix(in srgb, var(--accent) 12%, transparent) 44%,
+      color-mix(in srgb, var(--accent) 4%, transparent) 72%,
+      transparent 92%
     );
 }
 
@@ -234,25 +246,66 @@ h2 {
   height: 100%;
   border-radius: inherit;
   background: color-mix(in srgb, var(--accent) 92%, #fff 8%);
+  box-shadow: 0 0 7px color-mix(in srgb, var(--accent) 38%, transparent);
 }
 
 .continue-action {
   flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.42rem;
   border: 1px solid color-mix(in srgb, var(--accent) 36%, var(--line) 64%);
   border-radius: 999px;
+  background:
+    linear-gradient(
+      to bottom,
+      color-mix(in srgb, #fff 18%, transparent),
+      transparent 44%
+    ),
+    color-mix(in srgb, var(--paper) 76%, var(--accent) 8%);
   color: var(--accent);
   font-family: var(--font-ui);
   font-size: 0.74rem;
   letter-spacing: 0.035em;
   line-height: 1;
   padding: 0.38rem 0.68rem;
-  transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 26%, transparent),
+    0 1px 2px color-mix(in srgb, #1e1209 10%, transparent);
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    color 160ms ease;
 }
 
 .continue-link:hover .continue-action {
-  background: var(--accent);
-  border-color: var(--accent);
+  background:
+    linear-gradient(
+      to bottom,
+      color-mix(in srgb, #fff 16%, transparent),
+      transparent 46%
+    ),
+    color-mix(in srgb, var(--accent) 86%, var(--paper) 14%);
+  border-color: color-mix(in srgb, var(--accent) 82%, #fff 18%);
   color: var(--accent-ink);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 24%, transparent),
+    0 2px 5px color-mix(in srgb, #1e1209 13%, transparent);
+}
+
+.continue-action-glyph {
+  display: inline-block;
+  font-size: 1.14em;
+  line-height: 0.72;
+  opacity: 0.68;
+  transform: translateY(-0.01em);
+  transition: opacity 160ms ease, transform 160ms ease;
+}
+
+.continue-link:hover .continue-action-glyph {
+  opacity: 1;
+  transform: translate(1px, -0.01em);
 }
 
 .search-layout {
