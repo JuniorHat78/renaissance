@@ -1076,6 +1076,73 @@ select::-ms-expand {
   margin: 0 0 1.2rem;
 }
 
+.chapter-content p.reader-resume-bookmark {
+  position: relative;
+  isolation: isolate;
+}
+
+.chapter-content p.reader-resume-bookmark::before {
+  content: "";
+  position: absolute;
+  left: -1.48rem;
+  top: 0.32em;
+  z-index: 1;
+  width: 0.46rem;
+  height: 2.78rem;
+  border-radius: 999px 999px 2px 2px;
+  border: 1px solid color-mix(in srgb, var(--accent-hover) 54%, transparent);
+  background:
+    linear-gradient(
+      to right,
+      color-mix(in srgb, #fff 20%, transparent),
+      transparent 36%,
+      color-mix(in srgb, #1e1209 13%, transparent)
+    ),
+    repeating-linear-gradient(
+      to bottom,
+      transparent 0 6px,
+      color-mix(in srgb, #fff 11%, transparent) 6px 7px
+    ),
+    linear-gradient(
+      to right,
+      color-mix(in srgb, var(--accent-hover) 78%, #24160d 22%),
+      var(--accent) 52%,
+      color-mix(in srgb, var(--accent) 62%, #fff 38%)
+    );
+  box-shadow:
+    inset 1px 0 0 color-mix(in srgb, #fff 24%, transparent),
+    inset -1px 0 0 color-mix(in srgb, #1e1209 14%, transparent),
+    0 3px 8px color-mix(in srgb, #1e1209 18%, transparent);
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 82%, 0 100%);
+  transform-origin: 50% 0;
+  pointer-events: none;
+  animation: resume-bookmark-drop 520ms cubic-bezier(0.19, 0.86, 0.28, 1) both;
+}
+
+.chapter-content p.reader-resume-bookmark::after {
+  content: "";
+  position: absolute;
+  top: -0.14rem;
+  right: clamp(1.2rem, 18vw, 7rem);
+  bottom: -0.14rem;
+  left: -0.58rem;
+  z-index: -1;
+  border-radius: 8px;
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--accent) 15%, transparent) 0%,
+      color-mix(in srgb, var(--accent) 8%, transparent) 42%,
+      transparent 100%
+    );
+  pointer-events: none;
+  animation: resume-bookmark-wash 2600ms ease-out forwards;
+}
+
+.chapter-content p.reader-resume-bookmark.is-fading::before {
+  animation: resume-bookmark-fade 520ms ease forwards;
+}
+
 .chapter-content h2,
 .chapter-content h3 {
   margin: 1.7rem 0 0.72rem;
@@ -1237,6 +1304,47 @@ mark.reader-highlight-target.reader-highlight-arrival {
   }
 }
 
+@keyframes resume-bookmark-drop {
+  0% {
+    opacity: 0;
+    transform: translateY(-7px) scaleY(0.78);
+  }
+  72% {
+    opacity: 1;
+    transform: translateY(1px) scaleY(1.02);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scaleY(1);
+  }
+}
+
+@keyframes resume-bookmark-wash {
+  0% {
+    opacity: 0;
+    transform: translateX(-0.35rem);
+  }
+  18% {
+    opacity: 1;
+  }
+  72% {
+    opacity: 0.72;
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(0);
+  }
+}
+
+@keyframes resume-bookmark-fade {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .selection-copy-chip.is-visible,
   .selection-copy-bar.is-visible,
@@ -1246,6 +1354,14 @@ mark.reader-highlight-target.reader-highlight-arrival {
   .selection-copy-bar .button.is-copied .selection-copy-icon-svg path,
   mark.reader-highlight-target.reader-highlight-arrival {
     animation: none !important;
+  }
+
+  .chapter-content p.reader-resume-bookmark::before {
+    animation: none !important;
+  }
+
+  .chapter-content p.reader-resume-bookmark::after {
+    animation: resume-bookmark-wash 1ms linear forwards;
   }
 
   .copy-toast {
@@ -1369,6 +1485,19 @@ mark.reader-highlight-target.reader-highlight-arrival {
     bottom: calc(3.9rem + env(safe-area-inset-bottom));
     max-width: none;
     text-align: center;
+  }
+
+  .chapter-content p.reader-resume-bookmark::before {
+    left: -0.68rem;
+    width: 0.34rem;
+    height: 2.28rem;
+  }
+
+  .chapter-content p.reader-resume-bookmark::after {
+    top: -0.16rem;
+    right: 0.75rem;
+    bottom: -0.16rem;
+    left: -0.32rem;
   }
 }
 

@@ -50,6 +50,7 @@ function stateWithRecord(record) {
     scrollY: 850,
     completed: false,
     updatedAt: 1700000000000,
+    resumeParagraphIndex: 3,
     essayTitle: "Etching God into Sand",
     sectionTitle: "The Oldest Material",
     sectionLabel: "Section I",
@@ -144,11 +145,13 @@ async function main() {
       return {
         progress: parsed.essays["etching-god-into-sand"]["1"].progress,
         maxProgress: parsed.essays["etching-god-into-sand"]["1"].maxProgress,
+        resumeParagraphIndex: parsed.essays["etching-god-into-sand"]["1"].resumeParagraphIndex,
         transform: bar ? String(bar.style.transform || "") : ""
       };
     }, STORAGE_KEY);
     assert.ok(snapshot.progress > 0.05, "progress should be saved after scrolling");
     assert.ok(snapshot.maxProgress >= snapshot.progress, "high-water progress should be retained");
+    assert.ok(snapshot.resumeParagraphIndex > 0, "nearest paragraph should be saved");
     assert.match(snapshot.transform, /scaleX\((?!0\.0000)/);
   }, failures);
 
@@ -159,8 +162,34 @@ async function main() {
   }), async (context) => {
     const page = await context.newPage();
     await openReadySection(page, sectionUrl(options.base, 1));
-    const scrollY = await page.evaluate(() => window.scrollY);
-    assert.ok(scrollY > 600, "saved section position should restore");
+    const snapshot = await page.evaluate(() => {
+      const bookmark = document.querySelector(".reader-resume-bookmark");
+      return {
+        scrollY: window.scrollY,
+        bookmarkCount: document.querySelectorAll(".reader-resume-bookmark").length,
+        paragraphIndex: bookmark ? bookmark.getAttribute("data-paragraph-index") : ""
+      };
+    });
+    assert.ok(snapshot.scrollY > 600, "saved section position should restore");
+    assert.equal(snapshot.bookmarkCount, 1, "restored section should show one resume bookmark");
+    assert.equal(snapshot.paragraphIndex, "3", "bookmark should use the saved paragraph index");
+  }, failures);
+
+  await runCase("reader bookmark does not appear for occurrence links", browser, stateWithRecord({
+    progress: 0.42,
+    maxProgress: 0.42,
+    scrollY: 900,
+    resumeParagraphIndex: 3
+  }), async (context) => {
+    const page = await context.newPage();
+    await openReadySection(page, sectionUrl(options.base, 1, { q: "sand", occ: 1 }));
+    await page.waitForTimeout(450);
+    const snapshot = await page.evaluate(() => ({
+      bookmarkCount: document.querySelectorAll(".reader-resume-bookmark").length,
+      highlightCount: document.querySelectorAll('mark[data-auto-highlight="1"]').length
+    }));
+    assert.equal(snapshot.bookmarkCount, 0, "anchor-driven arrivals should not show resume bookmark");
+    assert.equal(snapshot.highlightCount, 1, "occurrence link should keep its normal highlight");
   }, failures);
 
   await runCase("completed reader position does not restore to the end", browser, stateWithRecord({

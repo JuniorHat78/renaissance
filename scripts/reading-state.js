@@ -35,6 +35,11 @@
     return Number.isFinite(sectionNumber) && sectionNumber > 0 ? sectionNumber : null;
   }
 
+  function normalizePositiveInteger(value) {
+    const number = Number.parseInt(value, 10);
+    return Number.isFinite(number) && number > 0 ? number : null;
+  }
+
   function sectionKey(sectionNumber) {
     return String(sectionNumber);
   }
@@ -55,6 +60,7 @@
     const completed = Boolean(raw.completed) || maxProgress >= COMPLETE_THRESHOLD;
     const scrollY = Math.max(0, Number(raw.scrollY) || 0);
     const updatedAt = Math.max(0, Number(raw.updatedAt) || 0);
+    const resumeParagraphIndex = normalizePositiveInteger(raw.resumeParagraphIndex);
 
     return {
       essaySlug,
@@ -64,6 +70,7 @@
       scrollY,
       completed,
       updatedAt,
+      resumeParagraphIndex,
       essayTitle: String(raw.essayTitle || "").trim(),
       sectionTitle: String(raw.sectionTitle || "").trim(),
       sectionLabel: String(raw.sectionLabel || "").trim()
@@ -162,6 +169,8 @@
     const maxProgress = Math.max(progress, previous ? previous.maxProgress : 0);
     const completed = maxProgress >= COMPLETE_THRESHOLD;
     const updatedAt = Number.isFinite(source.updatedAt) ? Number(source.updatedAt) : Date.now();
+    const resumeParagraphIndex = normalizePositiveInteger(source.resumeParagraphIndex) ||
+      (previous ? previous.resumeParagraphIndex : null);
 
     const record = {
       essaySlug,
@@ -171,6 +180,7 @@
       scrollY: Math.max(0, Number(source.scrollY) || 0),
       completed,
       updatedAt,
+      resumeParagraphIndex,
       essayTitle: String(source.essayTitle || (previous && previous.essayTitle) || "").trim(),
       sectionTitle: String(source.sectionTitle || (previous && previous.sectionTitle) || "").trim(),
       sectionLabel: String(source.sectionLabel || (previous && previous.sectionLabel) || "").trim()

@@ -48,6 +48,10 @@
   let selectionSyncFrame = null;
   let progressFrame = null;
   let progressSaveTimer = null;
+  let resumeBookmarkElement = null;
+  let resumeBookmarkFadeTimer = null;
+  let resumeBookmarkRemoveTimer = null;
+  let resumeBookmarkDismissArmed = false;
   let activeSelectionDetails = null;
   let isSelectingPointer = false;
   let progressEventsBound = false;
@@ -547,6 +551,7 @@
     copyHighlightStatus.textContent = "";
     clearHighlightCapNote();
     hideCopyToast();
+    clearResumeBookmark({ fade: false });
     activeSelectionDetails = null;
     hideContextualShare();
     setLink(prevLink, null, "");
@@ -582,6 +587,52 @@
     return clamp((scrollY - start) / (end - start), 0, 1);
   }
 
+  function paragraphIndexFromElement(paragraph) {
+    if (!paragraph || !paragraph.dataset) {
+      return null;
+    }
+    const index = Number.parseInt(paragraph.dataset.paragraphIndex, 10);
+    return Number.isFinite(index) && index > 0 ? index : null;
+  }
+
+  function paragraphByIndex(index) {
+    const safeIndex = Number.parseInt(index, 10);
+    if (!Number.isFinite(safeIndex) || safeIndex <= 0) {
+      return null;
+    }
+    return sectionContent.querySelector('p[data-paragraph-index="' + String(safeIndex) + '"]');
+  }
+
+  function nearestParagraphToReadingLine() {
+    const paragraphs = Array.from(sectionContent.querySelectorAll("p[data-paragraph-index]"));
+    if (!paragraphs.length) {
+      return null;
+    }
+
+    const targetY = Math.max(80, (window.innerHeight || 0) * 0.36);
+    let nearest = null;
+    let nearestDistance = Number.POSITIVE_INFINITY;
+
+    for (const paragraph of paragraphs) {
+      const rect = paragraph.getBoundingClientRect();
+      if (rect.top <= targetY && rect.bottom >= targetY) {
+        return paragraph;
+      }
+
+      const distance = Math.min(Math.abs(rect.top - targetY), Math.abs(rect.bottom - targetY));
+      if (distance < nearestDistance) {
+        nearest = paragraph;
+        nearestDistance = distance;
+      }
+    }
+
+    return nearest;
+  }
+
+  function currentResumeParagraphIndex() {
+    return paragraphIndexFromElement(nearestParagraphToReadingLine());
+  }
+
   function setReaderProgress(progress) {
     if (!readerProgressBar) {
       return;
@@ -601,6 +652,7 @@
       sectionNumber: currentSectionNumber,
       progress,
       scrollY: documentScrollY(),
+      resumeParagraphIndex: currentResumeParagraphIndex(),
       essayTitle: currentEssay.title,
       sectionTitle: currentDisplay.title,
       sectionLabel: currentDisplay.label
@@ -653,7 +705,12 @@
     }
     progressEventsBound = true;
 
-    window.addEventListener("scroll", scheduleReadingProgressSync, { passive: true });
+    window.addEventListener("scroll", () => {
+      scheduleReadingProgressSync();
+      if (resumeBookmarkDismissArmed) {
+        clearResumeBookmark({ fade: true });
+      }
+    }, { passive: true });
     window.addEventListener("resize", scheduleReadingProgressSync);
     window.addEventListener("pagehide", flushReadingProgress);
     document.addEventListener("visibilitychange", () => {
@@ -682,6 +739,7 @@
       window.setTimeout(() => {
         suppressProgressSave = false;
         syncReadingProgress();
+        showResumeBookmark(record);
       }, 120);
     });
     return true;
@@ -691,6 +749,70 @@
     currentDisplay = display;
     bindReadingProgressEvents();
     syncReadingProgress({ save: false });
+  }
+
+  function clearResumeBookmark(options) {
+    const settings = options || {};
+    resumeBookmarkDismissArmed = false;
+    if (resumeBookmarkFadeTimer) {
+      clearTimeout(resumeBookmarkFadeTimer);
+      resumeBookmarkFadeTimer = null;
+    }
+    if (resumeBookmarkRemoveTimer) {
+      clearTimeout(resumeBookmarkRemoveTimer);
+      resumeBookmarkRemoveTimer = null;
+    }
+
+    const target = resumeBookmarkElement;
+    if (!target) {
+      return;
+    }
+
+    const remove = () => {
+      target.classList.remove("reader-resume-bookmark", "is-fading");
+      if (resumeBookmarkElement === target) {
+        resumeBookmarkElement = null;
+      }
+    };
+
+    if (settings.fade === false) {
+      remove();
+      return;
+    }
+
+    target.classList.add("is-fading");
+    resumeBookmarkRemoveTimer = setTimeout(remove, 560);
+  }
+
+  function resumeBookmarkTarget(record) {
+    if (record && record.resumeParagraphIndex) {
+      const saved = paragraphByIndex(record.resumeParagraphIndex);
+      if (saved) {
+        return saved;
+      }
+    }
+    return nearestParagraphToReadingLine();
+  }
+
+  function showResumeBookmark(record) {
+    const target = resumeBookmarkTarget(record);
+    if (!target) {
+      return;
+    }
+
+    clearResumeBookmark({ fade: false });
+    resumeBookmarkElement = target;
+    target.classList.add("reader-resume-bookmark");
+
+    resumeBookmarkFadeTimer = setTimeout(() => {
+      clearResumeBookmark({ fade: true });
+    }, 5600);
+
+    setTimeout(() => {
+      if (resumeBookmarkElement === target) {
+        resumeBookmarkDismissArmed = true;
+      }
+    }, 900);
   }
 
   function clearAutoHighlights() {
@@ -1621,6 +1743,7 @@
       currentDisplay = display;
       activeSelectionDetails = null;
       hideContextualShare();
+      clearResumeBookmark({ fade: false });
       if (copyHighlightButton) {
         copyHighlightButton.disabled = false;
       }
