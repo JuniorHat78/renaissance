@@ -1156,6 +1156,24 @@ select::-ms-expand {
   line-height: inherit;
 }
 
+.chapter-content p.pull-quote {
+  margin: 1.5rem 0 1.7rem 0.6rem;
+  font-family: var(--font-title);
+  font-size: 1.18em;
+  line-height: 1.42;
+  color: color-mix(in srgb, var(--text) 88%, var(--muted) 12%);
+  text-indent: -0.32em;
+}
+
+.chapter-content > p.pull-quote:first-of-type::first-letter {
+  font-size: inherit;
+  font-family: inherit;
+  float: none;
+  margin: 0;
+  color: inherit;
+  font-weight: inherit;
+}
+
 .chapter-content p.reader-resume-bookmark {
   position: relative;
   isolation: isolate;

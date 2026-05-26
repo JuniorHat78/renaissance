@@ -412,10 +412,16 @@
       if (paragraphLines.length === 0) {
         return;
       }
-      blocks.push({
-        type: "p",
-        text: paragraphLines.join("\n")
-      });
+      const text = paragraphLines.join("\n");
+      const stripped = text.replace(/\x01/g, "").trim();
+      const isPullQuote = !text.includes("\n") &&
+        /^["“]/.test(stripped) &&
+        /["”]$/.test(stripped);
+      const block = { type: "p", text };
+      if (isPullQuote) {
+        block.pullQuote = true;
+      }
+      blocks.push(block);
       paragraphLines = [];
     };
 
@@ -688,7 +694,8 @@
           return "<" + block.type + ">" + safeText + "</" + block.type + ">";
         }
 
-        return "<p>" + safeText + "</p>";
+        const cls = block.pullQuote ? ' class="pull-quote"' : "";
+        return "<p" + cls + ">" + safeText + "</p>";
       })
       .join("");
 
