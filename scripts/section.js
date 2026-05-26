@@ -331,17 +331,6 @@
     return window.matchMedia("(max-width: 760px)").matches;
   }
 
-  function isMobileOrTouchDevice() {
-    if (isMobileLayout()) {
-      return true;
-    }
-    return Boolean(
-      ("ontouchstart" in window) ||
-      (navigator.maxTouchPoints > 0) ||
-      (window.matchMedia && window.matchMedia("(pointer: coarse)").matches)
-    );
-  }
-
   function clamp(value, min, max) {
     return Math.min(Math.max(value, min), max);
   }
@@ -1832,10 +1821,6 @@
 
   function decorateClipboardWithSource(event) {
     if (!event.clipboardData || !currentEssay || !currentSectionNumber) {
-      return;
-    }
-
-    if (isMobileOrTouchDevice()) {
       return;
     }
 

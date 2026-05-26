@@ -99,29 +99,6 @@ async function main() {
   const linkCopy = await readClipboard(page);
   assert.match(linkCopy, /^\[Source\]\s+https?:\/\/.+section\.html\?/, "Explicit highlight copy should use source footer format");
 
-  // Mobile / touch screen context regression check
-  const mobileContext = await browser.newContext({
-    locale: "en-US",
-    timezoneId: "UTC",
-    viewport: { width: 375, height: 812 },
-    hasTouch: true,
-    isMobile: true,
-    colorScheme: "light",
-    reducedMotion: "reduce"
-  });
-  await mobileContext.grantPermissions(["clipboard-read", "clipboard-write"], { origin });
-  const mobilePage = await mobileContext.newPage();
-
-  await openSection(mobilePage, sectionUrl(options.base, options.essay, options.section));
-  await createSelection(mobilePage);
-
-  await mobilePage.keyboard.press("Control+C");
-  await mobilePage.waitForTimeout(140);
-  const mobileCopy = await readClipboard(mobilePage);
-  assert.ok(!mobileCopy.includes("[Source]"), "Mobile/touch copy should NOT append canonical source footer");
-  assert.match(mobileCopy, /sand/i, "Mobile/touch copy should preserve selection text");
-
-  await mobileContext.close();
   await context.close();
   await browser.close();
   console.log("Copy footer regression checks passed.");
