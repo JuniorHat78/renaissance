@@ -2,11 +2,15 @@
   const { initThemeToggle } = window.RenaissanceTheme;
   const { loadEssays, sectionDisplay } = window.RenaissanceContent;
   const {
+    buildSearchUrl,
+    buildSectionUrl,
     createSearchEngine,
     escapeHtml,
-    highlightSnippet
+    highlightSnippet,
+    normalizeMode,
+    normalizeScope,
+    parseBooleanFlag
   } = window.RenaissanceSearch;
-  const router = window.RenaissanceRouter;
   const readingState = window.RenaissanceReadingState;
 
   const PREVIEW_LIMIT = 3;
@@ -48,7 +52,7 @@
   }
 
   function essayLink(slug) {
-    return router.buildUrl("essay", { essaySlug: slug });
+    return "essay.html?essay=" + encodeURIComponent(slug);
   }
 
   function progressPercent(value) {
@@ -132,19 +136,19 @@
   }
 
   function parseInitialState() {
-    const route = router.parseCurrentRoute();
+    const params = new URLSearchParams(window.location.search);
     return {
-      query: route.query,
-      mode: route.mode,
-      scope: route.essaySlug || "all",
-      caseSensitive: route.caseSensitive
+      query: String(params.get("q") || "").trim(),
+      mode: normalizeMode(params.get("mode")),
+      scope: normalizeScope(params.get("scope"), allowedScopes()),
+      caseSensitive: parseBooleanFlag(params.get("case"))
     };
   }
 
   function applyState(nextState) {
-    state.query = nextState.query;
-    state.mode = nextState.mode;
-    state.scope = nextState.scope || "all";
+    state.query = String(nextState.query || "").trim();
+    state.mode = normalizeMode(nextState.mode);
+    state.scope = normalizeScope(nextState.scope, allowedScopes());
     state.caseSensitive = Boolean(nextState.caseSensitive);
   }
 
@@ -157,8 +161,8 @@
 
   function syncStateFromControls() {
     state.query = searchInput.value.trim();
-    state.mode = searchMode.value;
-    state.scope = searchScope.value || "all";
+    state.mode = normalizeMode(searchMode.value);
+    state.scope = normalizeScope(searchScope.value, allowedScopes());
     state.caseSensitive = searchCase.checked;
   }
 
@@ -172,15 +176,25 @@
   }
 
   function updateUrlState() {
-    router.transitionTo("archive", {
-      query: state.query,
-      essaySlug: state.scope !== "all" ? state.scope : "",
-      mode: state.mode,
-      caseSensitive: state.caseSensitive
-    }, {
-      replace: true,
-      throttle: true
-    });
+    const params = new URLSearchParams(window.location.search);
+    ["q", "mode", "scope", "case", "sort", "page", "page_size"].forEach((key) => params.delete(key));
+
+    if (state.query) {
+      params.set("q", state.query);
+      if (state.scope !== "all") {
+        params.set("scope", state.scope);
+      }
+      if (state.mode !== "contains") {
+        params.set("mode", state.mode);
+      }
+      if (state.caseSensitive) {
+        params.set("case", "1");
+      }
+    }
+
+    const query = params.toString();
+    const nextUrl = window.location.pathname + (query ? "?" + query : "");
+    window.history.replaceState(null, "", nextUrl);
   }
 
   function clearSearchView() {
@@ -194,11 +208,13 @@
     searchPanel.hidden = false;
     searchHint.textContent = "0 hits in 0 essays and 0 sections.";
     searchResults.innerHTML = '<p class="muted">No matches found.</p>';
-    searchViewFull.href = router.buildUrl("search", {
+    searchViewFull.href = buildSearchUrl({
       query: state.query,
-      essaySlug: state.scope !== "all" ? state.scope : "",
+      scope: state.scope,
       mode: state.mode,
       caseSensitive: state.caseSensitive
+    }, {
+      allowedScopes: allowedScopes()
     });
   }
 
@@ -259,19 +275,13 @@
     searchResults.innerHTML = grouped
       .map((group) => {
         const sectionCountCopy = group.total === 1 ? "1 hit" : String(group.total) + " hits";
-        const sectionLink = router.buildUrl("section", {
-          essaySlug: group.essaySlug,
-          sectionNumber: group.sectionNumber,
-          query: state.query,
+        const sectionLink = buildSectionUrl(group.essaySlug, group.sectionNumber, state.query, {
           mode: state.mode,
           caseSensitive: state.caseSensitive
         });
         const previewHitsHtml = group.hits
           .map((hit) => {
-            const occurrenceLink = router.buildUrl("section", {
-              essaySlug: hit.essaySlug,
-              sectionNumber: hit.sectionNumber,
-              query: state.query,
+            const occurrenceLink = buildSectionUrl(hit.essaySlug, hit.sectionNumber, state.query, {
               occurrence: hit.occurrence,
               mode: state.mode,
               caseSensitive: state.caseSensitive
@@ -305,11 +315,13 @@
       })
       .join("");
 
-    searchViewFull.href = router.buildUrl("search", {
+    searchViewFull.href = buildSearchUrl({
       query: state.query,
-      essaySlug: state.scope !== "all" ? state.scope : "",
+      scope: state.scope,
       mode: state.mode,
       caseSensitive: state.caseSensitive
+    }, {
+      allowedScopes: allowedScopes()
     });
   }
 
@@ -412,22 +424,6 @@
       applyState(parseInitialState());
       syncControlsFromState();
       setAdvancedOpen(hasAdvancedState());
-
-      router.subscribe(searchForm, (nextRoute) => {
-        state.query = nextRoute.query;
-        state.mode = nextRoute.mode;
-        state.scope = nextRoute.essaySlug || "all";
-        state.caseSensitive = nextRoute.caseSensitive;
-
-        syncControlsFromState();
-        setAdvancedOpen(hasAdvancedState());
-
-        if (state.query) {
-          executeSearch();
-        } else {
-          clearSearchView();
-        }
-      });
 
       if (state.query) {
         await executeSearch();
