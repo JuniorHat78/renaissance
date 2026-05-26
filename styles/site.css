@@ -49,6 +49,7 @@ body {
   color: var(--text);
   font-family: var(--font-body);
   line-height: 1.82;
+  font-variant-numeric: oldstyle-nums;
 }
 
 a {
@@ -878,6 +879,16 @@ select::-ms-expand {
   font-size: 1rem;
 }
 
+#section-kicker {
+  margin-top: 0.6rem;
+  margin-bottom: 0.4rem;
+  font-family: var(--font-title);
+  font-size: 0.92rem;
+  letter-spacing: 0.32em;
+  color: var(--muted);
+  font-variant-numeric: oldstyle-nums;
+}
+
 .section-meta {
   margin: 0.42rem 0 0;
   font-family: var(--font-ui);
@@ -903,6 +914,7 @@ select::-ms-expand {
   margin-top: 1.25rem;
   font-size: clamp(1.06rem, 1.02rem + 0.25vw, 1.18rem);
   line-height: 1.86;
+  hanging-punctuation: first last;
 }
 
 .section-tools {
@@ -1095,6 +1107,16 @@ select::-ms-expand {
   margin: 0 0 1.2rem;
 }
 
+.chapter-content > p:first-of-type::first-letter {
+  font-family: var(--font-title);
+  font-size: 3.8em;
+  line-height: 0.88;
+  float: left;
+  margin: 0.08em 0.14em 0 -0.04em;
+  color: var(--accent);
+  font-weight: 500;
+}
+
 .chapter-content p.reader-resume-bookmark {
   position: relative;
   isolation: isolate;
@@ -1168,9 +1190,22 @@ select::-ms-expand {
 }
 
 .chapter-content hr {
-  margin: 1.7rem 0;
+  margin: 2.4rem 0;
   border: 0;
-  border-top: 1px solid var(--line);
+  text-align: center;
+  overflow: visible;
+  height: 0;
+}
+
+.chapter-content hr::after {
+  content: "\00B7  \00B7  \00B7";
+  display: inline-block;
+  color: var(--muted);
+  font-family: var(--font-title);
+  font-size: 1.4em;
+  letter-spacing: 0.5em;
+  padding-left: 0.5em;
+  opacity: 0.75;
 }
 
 .chapter-nav-bottom {
