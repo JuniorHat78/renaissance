@@ -335,7 +335,11 @@
     if (isMobileLayout()) {
       return true;
     }
-    return Boolean(window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
+    return Boolean(
+      ("ontouchstart" in window) ||
+      (navigator.maxTouchPoints > 0) ||
+      (window.matchMedia && window.matchMedia("(pointer: coarse)").matches)
+    );
   }
 
   function clamp(value, min, max) {
