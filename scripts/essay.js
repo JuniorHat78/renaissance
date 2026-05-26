@@ -8,14 +8,11 @@
     sectionDisplay
   } = window.RenaissanceContent;
   const {
-    buildSearchUrl,
-    buildSectionUrl,
     createSearchEngine,
     escapeHtml,
-    highlightSnippet,
-    normalizeMode,
-    parseBooleanFlag
+    highlightSnippet
   } = window.RenaissanceSearch;
+  const router = window.RenaissanceRouter;
   const {
     canonicalEssayUrl,
     setPageMetadata,
@@ -84,7 +81,7 @@
   }
 
   function sectionUrl(slug, sectionNumber) {
-    return "section.html?essay=" + encodeURIComponent(slug) + "&section=" + String(sectionNumber);
+    return router.buildUrl("section", { essaySlug: slug, sectionNumber });
   }
 
   function progressPercent(value) {
@@ -149,23 +146,21 @@
   }
 
   function queryEssaySlug() {
-    const params = new URLSearchParams(window.location.search);
-    const value = params.get("essay");
-    return value ? value.trim() : "";
+    return router.parseCurrentRoute().essaySlug || "";
   }
 
   function parseInitialSearchState() {
-    const params = new URLSearchParams(window.location.search);
+    const route = router.parseCurrentRoute();
     return {
-      query: String(params.get("q") || "").trim(),
-      mode: normalizeMode(params.get("mode")),
-      caseSensitive: parseBooleanFlag(params.get("case"))
+      query: route.query,
+      mode: route.mode,
+      caseSensitive: route.caseSensitive
     };
   }
 
   function applyState(nextState) {
-    state.query = String(nextState.query || "").trim();
-    state.mode = normalizeMode(nextState.mode);
+    state.query = nextState.query;
+    state.mode = nextState.mode;
     state.caseSensitive = Boolean(nextState.caseSensitive);
   }
 
@@ -177,7 +172,7 @@
 
   function syncStateFromControls() {
     state.query = searchInput.value.trim();
-    state.mode = normalizeMode(searchMode.value);
+    state.mode = searchMode.value;
     state.caseSensitive = searchCase.checked;
   }
 
@@ -196,22 +191,15 @@
       return;
     }
 
-    const params = new URLSearchParams(window.location.search);
-    params.set("essay", essaySlug);
-    ["q", "mode", "case", "sort", "page", "page_size", "scope"].forEach((key) => params.delete(key));
-
-    if (state.query) {
-      params.set("q", state.query);
-      if (state.mode !== "contains") {
-        params.set("mode", state.mode);
-      }
-      if (state.caseSensitive) {
-        params.set("case", "1");
-      }
-    }
-
-    const next = "essay.html?" + params.toString();
-    window.history.replaceState(null, "", next);
+    router.transitionTo("essay", {
+      essaySlug,
+      query: state.query,
+      mode: state.mode,
+      caseSensitive: state.caseSensitive
+    }, {
+      replace: true,
+      throttle: true
+    });
   }
 
   function clearSearchView() {
@@ -219,7 +207,7 @@
     searchHint.textContent = "Search preview is grouped by section and shows the first few hits.";
     searchResults.innerHTML = "";
     searchViewFull.href = currentEssay
-      ? buildSearchUrl({ query: "", scope: currentEssay.slug })
+      ? router.buildUrl("search", { essaySlug: currentEssay.slug })
       : "search.html";
   }
 
@@ -228,13 +216,11 @@
     searchHint.textContent = "0 hits in 0 sections.";
     searchResults.innerHTML = '<p class="muted">No matches found.</p>';
     if (currentEssay) {
-      searchViewFull.href = buildSearchUrl({
+      searchViewFull.href = router.buildUrl("search", {
         query: state.query,
-        scope: currentEssay.slug,
+        essaySlug: currentEssay.slug,
         mode: state.mode,
         caseSensitive: state.caseSensitive
-      }, {
-        allowedScopes: [currentEssay.slug]
       });
     }
   }
@@ -453,6 +439,21 @@
       applyState(parseInitialSearchState());
       syncControlsFromState();
       setAdvancedOpen(hasAdvancedState());
+
+      router.subscribe(searchForm, (nextRoute) => {
+        state.query = nextRoute.query;
+        state.mode = nextRoute.mode;
+        state.caseSensitive = nextRoute.caseSensitive;
+
+        syncControlsFromState();
+        setAdvancedOpen(hasAdvancedState());
+
+        if (state.query) {
+          executeSearch();
+        } else {
+          clearSearchView();
+        }
+      });
 
       if (state.query) {
         await executeSearch();
