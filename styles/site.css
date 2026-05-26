@@ -740,10 +740,10 @@ select::-ms-expand {
 
 .chapter-list a {
   display: grid;
-  grid-template-columns: 2.3rem minmax(0, 1fr);
-  gap: 0.7rem;
+  grid-template-columns: 3.2rem minmax(0, 1fr);
+  gap: 0.9rem;
   align-items: baseline;
-  padding: 0.78rem 0.25rem;
+  padding: 0.86rem 0.25rem;
   text-decoration: none;
   transition: background-color 120ms ease, color 120ms ease;
 }
@@ -755,15 +755,19 @@ select::-ms-expand {
 
 .chapter-item-number {
   color: var(--muted);
-  font-family: var(--font-ui);
-  font-size: 0.8rem;
-  letter-spacing: 0.08em;
+  font-family: var(--font-title);
+  font-size: 0.96rem;
+  letter-spacing: 0.18em;
+  font-variant-numeric: oldstyle-nums;
+  text-align: right;
+  padding-right: 0.1rem;
 }
 
 .chapter-item-title {
   font-family: var(--font-title);
-  font-size: 1.09rem;
-  line-height: 1.35;
+  font-size: 1.14rem;
+  line-height: 1.32;
+  letter-spacing: 0.005em;
 }
 
 .chapter-item-title-wrap {
@@ -772,8 +776,10 @@ select::-ms-expand {
 
 .chapter-item-subtitle {
   display: block;
-  margin-top: 0.18rem;
+  margin-top: 0.2rem;
   color: var(--muted);
+  font-style: italic;
+  font-family: var(--font-body);
   font-size: 0.95rem;
   line-height: 1.45;
 }
@@ -1115,6 +1121,39 @@ select::-ms-expand {
   margin: 0.08em 0.14em 0 -0.04em;
   color: var(--accent);
   font-weight: 500;
+}
+
+.chapter-content > p:first-of-type:has(em:only-child)::first-letter {
+  font-size: inherit;
+  font-family: inherit;
+  float: none;
+  margin: 0;
+  color: inherit;
+  font-weight: inherit;
+}
+
+.chapter-content em {
+  font-style: italic;
+  letter-spacing: 0.005em;
+}
+
+.chapter-content p:has(em:only-child) {
+  margin: 0.6rem 0 1.6rem;
+  padding-left: 2.4rem;
+  font-size: 0.97em;
+  line-height: 1.55;
+}
+
+.chapter-content p:has(em:only-child) + p:has(em:only-child) {
+  margin-top: 0.2rem;
+}
+
+.chapter-content p:has(em:only-child):has(+ p:has(em:only-child)) {
+  margin-bottom: 0.2rem;
+}
+
+.chapter-content p:has(em:only-child) br {
+  line-height: inherit;
 }
 
 .chapter-content p.reader-resume-bookmark {
@@ -1507,9 +1546,9 @@ mark.reader-highlight-target.reader-highlight-arrival {
   }
 
   .chapter-list a {
-    grid-template-columns: 2rem minmax(0, 1fr);
-    gap: 0.58rem;
-    padding: 0.76rem 0.12rem;
+    grid-template-columns: 2.7rem minmax(0, 1fr);
+    gap: 0.68rem;
+    padding: 0.78rem 0.12rem;
   }
 
   .chapter-nav-top {

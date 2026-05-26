@@ -79,7 +79,7 @@
   })();
 
   function cleanSpaces(text) {
-    return String(text || "").replace(/\s+/g, " ").trim();
+    return String(text || "").replace(//g, "").replace(/\s+/g, " ").trim();
   }
 
   function truncateText(text, maxLength) {

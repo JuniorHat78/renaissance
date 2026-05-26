@@ -123,7 +123,11 @@
 
   function formatInlineMarkdown(text) {
     const escaped = escapeHtml(text);
-    return escaped.replace(/\*([^*\n]+)\*/g, "<em>$1</em>");
+    return escaped
+      .replace(/\*([^*]+)\*/g, "<em>$1</em>")
+      .replace(/\s*—\s*/g, " — ")
+      .replace(/\n/g, "<br>")
+      .replace(/\n/g, " ");
   }
 
   function encodingQualityScore(text) {
@@ -390,12 +394,14 @@
         if (block.type === "hr") {
           return " ";
         }
-        return String(block.text || "").replace(/\*([^*\n]+)\*/g, "$1");
+        return String(block.text || "")
+          .replace(//g, "")
+          .replace(/\*([^*]+)\*/g, "$1");
       })
       .join(" ")
       .replace(/\s+/g, " ")
       .trim();
-  }
+    }
 
   function parseBlocks(rawText) {
     const lines = rawText.split("\n");
@@ -408,7 +414,7 @@
       }
       blocks.push({
         type: "p",
-        text: paragraphLines.join(" ").replace(/\s+/g, " ").trim()
+        text: paragraphLines.join("\n")
       });
       paragraphLines = [];
     };
@@ -437,7 +443,8 @@
         continue;
       }
 
-      paragraphLines.push(trimmed);
+      const hasHardBreak = /  +$/.test(line);
+      paragraphLines.push(hasHardBreak ? trimmed + "" : trimmed);
     }
 
     flushParagraph();

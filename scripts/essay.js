@@ -134,7 +134,7 @@
         return (
           '<li class="toc-item">' +
             '<a href="' + sectionUrl(essay.slug, section.sectionNumber) + '">' +
-              '<span class="chapter-item-number">' + escapeHtml(String(section.sectionNumber).padStart(2, "0")) + "</span>" +
+              '<span class="chapter-item-number">' + escapeHtml(display.label.replace(/^Section\s+/i, "")) + "</span>" +
               '<span class="chapter-item-title-wrap">' +
                 '<span class="chapter-item-title">' + escapeHtml(display.title) + "</span>" +
                 subtitleHtml +
