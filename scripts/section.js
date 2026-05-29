@@ -10,6 +10,7 @@
     sectionDisplay
   } = window.RenaissanceContent;
   const { findOccurrencesInText, normalizeMode, parseBooleanFlag } = window.RenaissanceSearch;
+  const router = window.RenaissanceRouter;
   const {
     canonicalSectionUrl,
     setPageMetadata,
@@ -177,11 +178,11 @@
   }
 
   function essayUrl(slug) {
-    return "essay.html?essay=" + encodeURIComponent(slug);
+    return router.build("essay", { essaySlug: slug });
   }
 
   function sectionUrl(slug, sectionNumber) {
-    return "section.html?essay=" + encodeURIComponent(slug) + "&section=" + String(sectionNumber);
+    return router.build("section", { essaySlug: slug, sectionNumber });
   }
 
   function setLink(link, url, label) {

@@ -8,14 +8,12 @@
     sectionDisplay
   } = window.RenaissanceContent;
   const {
-    buildSearchUrl,
-    buildSectionUrl,
     createSearchEngine,
     escapeHtml,
     highlightSnippet,
-    normalizeMode,
-    parseBooleanFlag
+    normalizeMode
   } = window.RenaissanceSearch;
+  const router = window.RenaissanceRouter;
   const {
     canonicalEssayUrl,
     setPageMetadata,
@@ -84,7 +82,7 @@
   }
 
   function sectionUrl(slug, sectionNumber) {
-    return "section.html?essay=" + encodeURIComponent(slug) + "&section=" + String(sectionNumber);
+    return router.build("section", { essaySlug: slug, sectionNumber });
   }
 
   function progressPercent(value) {
@@ -149,17 +147,15 @@
   }
 
   function queryEssaySlug() {
-    const params = new URLSearchParams(window.location.search);
-    const value = params.get("essay");
-    return value ? value.trim() : "";
+    return router.parse().essaySlug;
   }
 
   function parseInitialSearchState() {
-    const params = new URLSearchParams(window.location.search);
+    const route = router.parse();
     return {
-      query: String(params.get("q") || "").trim(),
-      mode: normalizeMode(params.get("mode")),
-      caseSensitive: parseBooleanFlag(params.get("case"))
+      query: route.query,
+      mode: route.mode,
+      caseSensitive: route.caseSensitive
     };
   }
 
@@ -196,22 +192,12 @@
       return;
     }
 
-    const params = new URLSearchParams(window.location.search);
-    params.set("essay", essaySlug);
-    ["q", "mode", "case", "sort", "page", "page_size", "scope"].forEach((key) => params.delete(key));
-
-    if (state.query) {
-      params.set("q", state.query);
-      if (state.mode !== "contains") {
-        params.set("mode", state.mode);
-      }
-      if (state.caseSensitive) {
-        params.set("case", "1");
-      }
-    }
-
-    const next = "essay.html?" + params.toString();
-    window.history.replaceState(null, "", next);
+    router.go("essay", {
+      essaySlug,
+      query: state.query,
+      mode: state.mode,
+      caseSensitive: state.caseSensitive
+    }, { replace: true, throttle: true });
   }
 
   function clearSearchView() {
@@ -219,8 +205,8 @@
     searchHint.textContent = "Search preview is grouped by section and shows the first few hits.";
     searchResults.innerHTML = "";
     searchViewFull.href = currentEssay
-      ? buildSearchUrl({ query: "", scope: currentEssay.slug })
-      : "search.html";
+      ? router.build("search", { scope: currentEssay.slug })
+      : router.build("search", {});
   }
 
   function renderNoResults() {
@@ -228,13 +214,11 @@
     searchHint.textContent = "0 hits in 0 sections.";
     searchResults.innerHTML = '<p class="muted">No matches found.</p>';
     if (currentEssay) {
-      searchViewFull.href = buildSearchUrl({
+      searchViewFull.href = router.build("search", {
         query: state.query,
         scope: currentEssay.slug,
         mode: state.mode,
         caseSensitive: state.caseSensitive
-      }, {
-        allowedScopes: [currentEssay.slug]
       });
     }
   }
@@ -282,13 +266,19 @@
     searchResults.innerHTML = grouped
       .map((group) => {
         const sectionCountCopy = group.total === 1 ? "1 hit" : String(group.total) + " hits";
-        const sectionLink = buildSectionUrl(currentEssay.slug, group.sectionNumber, state.query, {
+        const sectionLink = router.build("section", {
+          essaySlug: currentEssay.slug,
+          sectionNumber: group.sectionNumber,
+          query: state.query,
           mode: state.mode,
           caseSensitive: state.caseSensitive
         });
         const previewHitsHtml = group.hits
           .map((hit) => {
-            const occurrenceLink = buildSectionUrl(currentEssay.slug, hit.sectionNumber, state.query, {
+            const occurrenceLink = router.build("section", {
+              essaySlug: currentEssay.slug,
+              sectionNumber: hit.sectionNumber,
+              query: state.query,
               occurrence: hit.occurrence,
               mode: state.mode,
               caseSensitive: state.caseSensitive
@@ -320,13 +310,11 @@
       })
       .join("");
 
-    searchViewFull.href = buildSearchUrl({
+    searchViewFull.href = router.build("search", {
       query: state.query,
       scope: currentEssay.slug,
       mode: state.mode,
       caseSensitive: state.caseSensitive
-    }, {
-      allowedScopes: [currentEssay.slug]
     });
   }
 

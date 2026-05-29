@@ -3,7 +3,6 @@
   const { loadEssays } = window.RenaissanceContent;
   const {
     DEFAULT_PAGE_SIZE,
-    buildSectionUrl,
     createSearchEngine,
     escapeHtml,
     highlightSnippet,
@@ -12,9 +11,9 @@
     normalizePageSize,
     normalizeScope,
     normalizeSort,
-    paginate,
-    parseBooleanFlag
+    paginate
   } = window.RenaissanceSearch;
+  const router = window.RenaissanceRouter;
 
   const searchForm = document.getElementById("search-page-form");
   const searchInput = document.getElementById("search-page-input");
@@ -55,15 +54,15 @@
   }
 
   function parseInitialState() {
-    const params = new URLSearchParams(window.location.search);
+    const route = router.parse();
     return {
-      query: String(params.get("q") || "").trim(),
-      mode: normalizeMode(params.get("mode")),
-      sort: normalizeSort(params.get("sort")),
-      scope: normalizeScope(params.get("scope"), allowedScopes()),
-      caseSensitive: parseBooleanFlag(params.get("case")),
-      page: normalizePage(params.get("page")),
-      pageSize: normalizePageSize(params.get("page_size"))
+      query: route.query,
+      mode: route.mode,
+      sort: route.sort,
+      scope: normalizeScope(route.scope, allowedScopes()),
+      caseSensitive: route.caseSensitive,
+      page: route.page,
+      pageSize: route.pageSize
     };
   }
 
@@ -111,32 +110,15 @@
   }
 
   function updateUrlState() {
-    const params = new URLSearchParams();
-    if (state.query) {
-      params.set("q", state.query);
-      if (state.scope !== "all") {
-        params.set("scope", state.scope);
-      }
-      if (state.mode !== "contains") {
-        params.set("mode", state.mode);
-      }
-      if (state.sort !== "reading_order") {
-        params.set("sort", state.sort);
-      }
-      if (state.caseSensitive) {
-        params.set("case", "1");
-      }
-      if (state.page > 1) {
-        params.set("page", String(state.page));
-      }
-      if (state.pageSize !== DEFAULT_PAGE_SIZE) {
-        params.set("page_size", String(state.pageSize));
-      }
-    }
-
-    const query = params.toString();
-    const nextUrl = window.location.pathname + (query ? "?" + query : "");
-    window.history.replaceState(null, "", nextUrl);
+    router.go("search", {
+      query: state.query,
+      scope: state.scope,
+      mode: state.mode,
+      sort: state.sort,
+      caseSensitive: state.caseSensitive,
+      page: state.page,
+      pageSize: state.pageSize
+    }, { replace: true, throttle: true });
   }
 
   function clearSearchView() {
@@ -160,12 +142,16 @@
     const visible = result.sectionCounts.slice(0, maxRows);
     const rows = visible.map((entry) => {
       const countCopy = entry.count === 1 ? "1 hit" : String(entry.count) + " hits";
+      const href = router.build("section", {
+        essaySlug: entry.essaySlug,
+        sectionNumber: entry.sectionNumber,
+        query: state.query,
+        mode: state.mode,
+        caseSensitive: state.caseSensitive
+      });
       return (
         '<p class="search-count-row">' +
-          '<a href="' + buildSectionUrl(entry.essaySlug, entry.sectionNumber, state.query, {
-            mode: state.mode,
-            caseSensitive: state.caseSensitive
-          }) + '">' +
+          '<a href="' + href + '">' +
             escapeHtml(entry.essayTitle + " . " + entry.sectionSearchLabel) +
           "</a>" +
           '<span class="muted">' + escapeHtml(countCopy) + "</span>" +
@@ -191,13 +177,17 @@
     searchResults.innerHTML = pageData.items
       .map((hit) => {
         const resultTitle = hit.sectionSearchLabel + " . Occurrence " + String(hit.occurrence);
+        const href = router.build("section", {
+          essaySlug: hit.essaySlug,
+          sectionNumber: hit.sectionNumber,
+          query: state.query,
+          occurrence: hit.occurrence,
+          mode: state.mode,
+          caseSensitive: state.caseSensitive
+        });
         return (
           '<article class="result-card">' +
-            '<h3><a href="' + buildSectionUrl(hit.essaySlug, hit.sectionNumber, state.query, {
-              occurrence: hit.occurrence,
-              mode: state.mode,
-              caseSensitive: state.caseSensitive
-            }) + '">' +
+            '<h3><a href="' + href + '">' +
               '<span class="search-result-kicker">' + escapeHtml(hit.essayTitle) + "</span>" +
               '<span class="search-result-title">' + escapeHtml(resultTitle) + "</span>" +
             "</a></h3>" +

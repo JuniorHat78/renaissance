@@ -20,6 +20,7 @@
     "test:meta": "node scripts/tests/meta-regression.js",
     "test:og-cards": "node scripts/tests/og-card-generation-regression.js",
     "test:reading-state": "node scripts/tests/reading-state-regression.js",
+    "test:router": "node scripts/tests/router-regression.js",
     "test:regression": "node scripts/tests/regression-check.js",
     "test:standalone": "npm run test:content-fallback && npm run test:lighthouse-target && npm run test:og-cards",
     "og:generate": "node scripts/og/generate-cards.js",

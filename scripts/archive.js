@@ -2,15 +2,13 @@
   const { initThemeToggle } = window.RenaissanceTheme;
   const { loadEssays, sectionDisplay } = window.RenaissanceContent;
   const {
-    buildSearchUrl,
-    buildSectionUrl,
     createSearchEngine,
     escapeHtml,
     highlightSnippet,
     normalizeMode,
-    normalizeScope,
-    parseBooleanFlag
+    normalizeScope
   } = window.RenaissanceSearch;
+  const router = window.RenaissanceRouter;
   const readingState = window.RenaissanceReadingState;
 
   const PREVIEW_LIMIT = 3;
@@ -52,7 +50,7 @@
   }
 
   function essayLink(slug) {
-    return "essay.html?essay=" + encodeURIComponent(slug);
+    return router.build("essay", { essaySlug: slug });
   }
 
   function progressPercent(value) {
@@ -136,12 +134,12 @@
   }
 
   function parseInitialState() {
-    const params = new URLSearchParams(window.location.search);
+    const route = router.parse();
     return {
-      query: String(params.get("q") || "").trim(),
-      mode: normalizeMode(params.get("mode")),
-      scope: normalizeScope(params.get("scope"), allowedScopes()),
-      caseSensitive: parseBooleanFlag(params.get("case"))
+      query: route.query,
+      mode: route.mode,
+      scope: normalizeScope(route.scope, allowedScopes()),
+      caseSensitive: route.caseSensitive
     };
   }
 
@@ -176,45 +174,30 @@
   }
 
   function updateUrlState() {
-    const params = new URLSearchParams(window.location.search);
-    ["q", "mode", "scope", "case", "sort", "page", "page_size"].forEach((key) => params.delete(key));
-
-    if (state.query) {
-      params.set("q", state.query);
-      if (state.scope !== "all") {
-        params.set("scope", state.scope);
-      }
-      if (state.mode !== "contains") {
-        params.set("mode", state.mode);
-      }
-      if (state.caseSensitive) {
-        params.set("case", "1");
-      }
-    }
-
-    const query = params.toString();
-    const nextUrl = window.location.pathname + (query ? "?" + query : "");
-    window.history.replaceState(null, "", nextUrl);
+    router.go("archive", {
+      query: state.query,
+      scope: state.scope,
+      mode: state.mode,
+      caseSensitive: state.caseSensitive
+    }, { replace: true, throttle: true });
   }
 
   function clearSearchView() {
     searchPanel.hidden = true;
     searchHint.textContent = "Search across all published essays.";
     searchResults.innerHTML = "";
-    searchViewFull.href = "search.html";
+    searchViewFull.href = router.build("search", {});
   }
 
   function renderNoResults() {
     searchPanel.hidden = false;
     searchHint.textContent = "0 hits in 0 essays and 0 sections.";
     searchResults.innerHTML = '<p class="muted">No matches found.</p>';
-    searchViewFull.href = buildSearchUrl({
+    searchViewFull.href = router.build("search", {
       query: state.query,
       scope: state.scope,
       mode: state.mode,
       caseSensitive: state.caseSensitive
-    }, {
-      allowedScopes: allowedScopes()
     });
   }
 
@@ -275,13 +258,19 @@
     searchResults.innerHTML = grouped
       .map((group) => {
         const sectionCountCopy = group.total === 1 ? "1 hit" : String(group.total) + " hits";
-        const sectionLink = buildSectionUrl(group.essaySlug, group.sectionNumber, state.query, {
+        const sectionLink = router.build("section", {
+          essaySlug: group.essaySlug,
+          sectionNumber: group.sectionNumber,
+          query: state.query,
           mode: state.mode,
           caseSensitive: state.caseSensitive
         });
         const previewHitsHtml = group.hits
           .map((hit) => {
-            const occurrenceLink = buildSectionUrl(hit.essaySlug, hit.sectionNumber, state.query, {
+            const occurrenceLink = router.build("section", {
+              essaySlug: hit.essaySlug,
+              sectionNumber: hit.sectionNumber,
+              query: state.query,
               occurrence: hit.occurrence,
               mode: state.mode,
               caseSensitive: state.caseSensitive
@@ -315,13 +304,11 @@
       })
       .join("");
 
-    searchViewFull.href = buildSearchUrl({
+    searchViewFull.href = router.build("search", {
       query: state.query,
       scope: state.scope,
       mode: state.mode,
       caseSensitive: state.caseSensitive
-    }, {
-      allowedScopes: allowedScopes()
     });
   }
 
