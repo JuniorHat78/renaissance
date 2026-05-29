@@ -16,6 +16,7 @@
     "test:chapter-redirect": "node scripts/tests/chapter-redirect-regression.js",
     "test:content-fallback": "node scripts/tests/content-fallback-regression.js",
     "test:copy-footer": "node scripts/tests/copy-footer-regression.js",
+    "test:hover-preview": "node scripts/tests/hover-preview-regression.js",
     "test:lighthouse-target": "node scripts/tests/lighthouse-target-resolver-regression.js",
     "test:meta": "node scripts/tests/meta-regression.js",
     "test:og-cards": "node scripts/tests/og-card-generation-regression.js",
