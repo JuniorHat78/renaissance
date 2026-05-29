@@ -15,7 +15,8 @@ function parseArgs(argv) {
     host: "127.0.0.1",
     port: 4173,
     root: process.cwd(),
-    timeoutMs: 20000
+    timeoutMs: 20000,
+    mount: ""
   };
 
   for (let index = 2; index < separator; index += 1) {
@@ -32,6 +33,12 @@ function parseArgs(argv) {
       index += 1;
     } else if (token === "--timeout-ms" && next) {
       options.timeoutMs = Number.parseInt(next, 10);
+      index += 1;
+    } else if (token === "--mount" && next) {
+      // Serve the site under a subpath (e.g. /renaissance/) to mirror GitHub
+      // project Pages. Switches the static server from python to the bundled
+      // Node server, which understands the mount prefix.
+      options.mount = "/" + String(next).replace(/^\/+|\/+$/g, "");
       index += 1;
     } else {
       throw new Error("Unknown option: " + token);
@@ -126,6 +133,20 @@ function quoteWindowsArg(value) {
 }
 
 function startServer(options) {
+  if (options.mount) {
+    const serverScript = path.resolve(__dirname, "static-server.js");
+    return spawn(
+      process.execPath,
+      [
+        serverScript,
+        "--host", options.host,
+        "--port", String(options.port),
+        "--root", options.root,
+        "--mount", options.mount
+      ],
+      { cwd: options.root, stdio: ["ignore", "pipe", "pipe"], shell: false }
+    );
+  }
   return spawn(pythonCommand(), ["-m", "http.server", String(options.port), "--bind", options.host], {
     cwd: options.root,
     stdio: ["ignore", "pipe", "pipe"],
@@ -135,7 +156,7 @@ function startServer(options) {
 
 async function main() {
   const { options, command } = parseArgs(process.argv);
-  const baseUrl = "http://" + options.host + ":" + String(options.port);
+  const baseUrl = "http://" + options.host + ":" + String(options.port) + options.mount;
   const server = startServer(options);
 
   let serverOutput = "";

@@ -40,6 +40,9 @@ jobs:
       - name: Browser Regression Suite
         run: npm run ci:regression
 
+      - name: Subpath Regression Suite (served under /renaissance/)
+        run: npm run ci:subpath
+
       - name: Visual QA Check (warning-only)
         run: |
           if ! npm run ci:visual; then
