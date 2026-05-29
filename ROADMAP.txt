@@ -1,0 +1,302 @@
+================================================================================
+RENAISSANCE — ROADMAP v2: CI/CD, CROSS-BROWSER, A11Y, DISCOVERABILITY, POLISH
+================================================================================
+Status: DRAFT for review. Nothing here is built yet.
+Picks up after the reader-polish program (Phases 0-6) + the subpath fix (613f58b).
+
+How to read this: each phase is self-contained and shippable on its own. They
+are ordered so earlier phases de-risk later ones, but you can reorder or skip.
+Mark phases with [x] keep / [~] modify / [ ] drop, scribble notes, hand it back.
+
+--------------------------------------------------------------------------------
+WHERE WE ARE TODAY (the honest baseline)
+--------------------------------------------------------------------------------
+- CI: one job in .github/workflows/ci.yml, ubuntu, CHROMIUM ONLY.
+    ci:standalone -> ci:regression -> ci:visual (warn-only) -> ci:lighthouse (warn-only, thr 90)
+- Deploy: GitHub *project* Pages, legacy branch build, served at /renaissance/.
+    No GitHub Actions deploy step; no post-deploy verification.
+- Tests run at the ROOT origin (127.0.0.1). The deploy is a SUBPATH. That gap
+    already shipped one production 404. This roadmap closes it permanently.
+- No custom 404, no sitemap, no robots.txt, no feed, no service worker.
+- No automated accessibility audit anywhere.
+
+--------------------------------------------------------------------------------
+CROSS-CUTTING RULES (apply to every phase — same discipline as Phases 0-6)
+--------------------------------------------------------------------------------
+1. Every phase ships its own tests and must pass the FULL suite + visual before commit.
+2. Internal links/assets stay RELATIVE. Anything new is verified under /renaissance/.
+3. Commit style: <scope>(<area>): <summary>, lowercase imperative. NO Co-Authored-By trailer.
+4. Manual smoke before commit; push to main per phase.
+5. "Magical under the hood": invisible when it works, graceful when it doesn't,
+     never naggy, always reduced-motion / touch / keyboard aware.
+
+Effort key: S = ~1-2h, M = ~half day, L = ~1+ day. (Rough, solo-agent pace.)
+
+================================================================================
+PHASE 7 — CI FOUNDATION: SUBPATH GUARD  [S]
+================================================================================
+GOAL  Make the test harness exercise the real deploy shape so a subpath 404 can
+      never ship green again.
+
+WHY   This is the #1 item: today's bug was invisible because local + CI serve at
+      root. Protects everything else we build.
+
+SCOPE
+  - scripts/ci/run-with-server.js: add a --mount <prefix> option so the static
+    server can serve the repo under /renaissance/ (mirrors GitHub project Pages).
+  - New npm script: ci:regression:subpath — runs the existing regression suite
+    against http://127.0.0.1:PORT/renaissance/.
+  - New test scripts/tests/subpath-regression.js: archive -> essay -> section
+    click-through, assert zero 404 responses and that URLs keep the /renaissance/
+    prefix. (Promote the throwaway script used to verify 613f58b.)
+  - Wire into ci.yml as a step (or matrix dimension base-path = "" and "/renaissance/").
+
+TESTS  subpath-regression.js green at root AND under /renaissance/.
+RISK   Low. Pure infra. The static server prefix-mount is the only new code.
+TOUCHES  scripts/ci/run-with-server.js, scripts/tests/, package.json, ci.yml
+
+================================================================================
+PHASE 8 — CUSTOM 404  [S]
+================================================================================
+GOAL  A branded, useful 404 instead of GitHub's gray default (which is how the
+      subpath bug surfaced).
+
+WHY   High polish-per-hour. Old/mistyped links land somewhere warm and recover.
+
+SCOPE
+  - 404.html at repo root, styled with site.css, same header/theme toggle.
+  - Copy: "This page drifted off." + a clear path back to the archive + search.
+  - Optional magic: a tiny JS shim that inspects the bad URL; if it looks like a
+    stale essay/section link (parseable slug), offer a "did you mean ..." link
+    resolved via the router. Pure enhancement, degrades to a static page.
+  - GitHub Pages serves /404.html automatically for unknown paths under the site.
+
+TESTS  New test: request a known-bad path, assert 404.html renders with the
+       recovery links; assert the "did you mean" shim resolves a stale slug.
+RISK   Low. Note: Pages 404 only fires for the project scope; verify under subpath.
+TOUCHES  404.html (new), styles/site.css, scripts/tests/
+
+================================================================================
+PHASE 9 — DISCOVERABILITY BUNDLE: SITEMAP + ROBOTS + RSS/ATOM  [M]
+================================================================================
+GOAL  Make the site legible to crawlers and subscribable by readers.
+
+WHY   It is a publishing site with 2 essays and growing; feeds + sitemap are the
+      baseline of "a real published thing."
+
+SCOPE
+  - scripts/generate-feed.js: build feed.xml (Atom) and rss.xml from the essay
+    manifest (data/essays.json) + section metadata. Absolute URLs rooted at the
+    canonical https://juniorhat78.github.io/renaissance/.
+  - scripts/generate-sitemap.js: sitemap.xml of archive + every essay + section.
+  - robots.txt: allow all, point at sitemap.
+  - <link rel="alternate" type="application/atom+xml"> in the page heads.
+  - A "Subscribe" affordance in the footer (tasteful, not a popup).
+  - Make these part of `npm run check` so they can never go stale (like the
+    embedded-data validator already does).
+
+TESTS  Validate feed.xml/rss.xml parse as well-formed XML and contain both
+       essays; sitemap lists every published URL; a "feeds up to date" check
+       mirrors validate:embedded:check.
+RISK   Low-med. Canonical URL must be correct (ties to the subpath lesson).
+       Feeds need absolute URLs — the one place we intentionally DON'T go relative.
+TOUCHES  scripts/generate-feed.js (new), scripts/generate-sitemap.js (new),
+         robots.txt (new), feed.xml/rss.xml/sitemap.xml (generated), *.html heads,
+         package.json, scripts/tests/
+
+================================================================================
+PHASE 10 — CROSS-BROWSER REGRESSION: CHROMIUM + FIREFOX + WEBKIT  [M]
+================================================================================
+GOAL  Run the functional regression suite on all three engines so behaviour is
+      verified on Chrome, Firefox, and Safari's engine.
+
+WHY   We use Clipboard API, View Transitions, color-mix, backdrop-filter,
+      ::-moz-selection, matchMedia(pointer/reduced-motion) — all have per-engine
+      quirks. WebKit especially differs on clipboard + transitions.
+
+SCOPE
+  - Centralize browser launch in a tiny test harness helper so every regression
+    file can run under {chromium, firefox, webkit} instead of hardcoding chromium.
+  - npm scripts: test:regression:firefox, test:regression:webkit (or a --browser flag).
+  - ci.yml: matrix over browser; install with `npx playwright install --with-deps
+    chromium firefox webkit`.
+  - Triage real cross-engine failures (likely: clipboard permissions model in
+    WebKit/Firefox; View Transitions absent in Firefox/WebKit — already opt-in so
+    should degrade; backdrop-filter rendering).
+
+HONEST CAVEATS (read before committing to this)
+  - Playwright WebKit ~= Safari's engine, but it is NOT real iOS/macOS Safari.
+    True device parity needs a real Mac/iPhone or a paid grid (BrowserStack/
+    Sauce). WebKit-via-Playwright catches ~90% and is the right first step;
+    real-Safari grid is DECLINED (see Q1) — WebKit matrix is the agreed bar.
+  - Cross-browser VISUAL pixel diffs are notoriously flaky (font hinting, sub-pixel
+    AA differ per engine/OS). So: cross-browser = FUNCTIONAL regression only.
+    Visual screenshot diffing stays Chromium-only. Do not chase cross-engine pixels.
+
+TESTS  Full regression suite passes on all three engines in CI matrix.
+RISK   Medium. Expect to fix 1-3 genuine WebKit/Firefox behaviours. That is the
+       point — those are real users.
+TOUCHES  scripts/tests/* (harness), package.json, ci.yml
+
+================================================================================
+PHASE 11 — AUTOMATED ACCESSIBILITY AUDITS  [M]
+================================================================================
+GOAL  Fail CI on real WCAG violations across every page + key states.
+
+WHY   We did reduced-motion by hand; this makes a11y a standing gate, not a vibe.
+
+SCOPE
+  - Add @axe-core/playwright (dev dep). New scripts/tests/a11y-regression.js runs
+    axe on: archive, essay, section (resting + with a search anchor + with a
+    selection/copy chip open), search (empty + results), and 404.
+  - Assert zero "serious"/"critical" violations; allowlist anything intentional
+    with a documented reason.
+  - Run in both light and dark themes (contrast differs).
+  - Wire into regression-check.js + ci.yml.
+
+TESTS  a11y-regression.js green; expect to fix real findings (likely: missing
+       aria-labels on icon buttons, focus order on the contextual copy chip,
+       contrast on --muted text, the live-region politeness on toasts).
+RISK   Medium. Will surface genuine fixes — good. Some may need design calls.
+TOUCHES  scripts/tests/a11y-regression.js (new), package.json, ci.yml, + fixes
+         across HTML/CSS/JS as findings dictate.
+
+================================================================================
+PHASE 12 — LIGHTHOUSE AS A MEASURING STICK (NON-GATING)  [M]
+================================================================================
+GOAL  Keep Lighthouse as an informative measuring stick that NEVER fails a PR on
+      its own. It only raises a loud, human-readable flag when a PR moves the
+      score DRASTICALLY, so you can choose to reverse. You stay in control.
+
+WHY   (Your call, and the right one.) CI-runner Lighthouse is noisy — cold
+      runners, network jitter, GC pauses swing scores +/- several points run to
+      run. A hard gate on a "magical" site just produces flaky red PRs everyone
+      learns to ignore. We want signal, not a tripwire.
+
+SCOPE
+  - Keep ci:lighthouse NON-BLOCKING (warning-only) as it is today. No build ever
+    fails because of a Lighthouse number.
+  - Commit a baseline snapshot (qa/lighthouse/baseline.json) of current scores +
+    key metrics (LCP, CLS, TBT, total weight).
+  - On each PR, run Lighthouse a few times and take the MEDIAN (kills single-run
+    noise), then DIFF against baseline.
+  - "Drastic" = a tunable delta only (e.g. any category drops >= 8 pts vs
+    baseline, or LCP/CLS worsens past a set margin). Default thresholds generous;
+    easy to tune in one config file.
+  - If drastic: post a clear PR comment ("perf 97 -> 86 (-11) on /section.html —
+    intended?") and emit a ::warning. Visible, decision-prompting, NEVER red.
+  - If a regression is intentional, you bump the baseline in the same PR; that
+    self-documents the trade in git history.
+  - Routine small drift: silent. Improvements: optionally note them, never nag.
+
+TESTS  A unit test on the diff logic: given baseline + sample run, it flags a
+       drastic drop and stays quiet on noise-level drift. The Lighthouse run
+       itself stays warning-only in CI.
+RISK   Low — it cannot fail a build by design. Only real work is the median+diff
+       harness and picking sane default deltas.
+TOUCHES  scripts/ci/lighthouse-warning-runner.js, qa/lighthouse/baseline.json (new),
+         lighthouse delta config (new), ci.yml (PR-comment step), scripts/tests/
+
+================================================================================
+PHASE 13 — POST-DEPLOY LIVE SMOKE TEST  [M]
+================================================================================
+GOAL  After a push to main, verify the REAL deployed site (not a local proxy).
+
+WHY   Pages builds asynchronously after merge; nothing currently confirms the
+      live artifact actually works. This is the final backstop for the subpath
+      class of bug and for any Pages config drift.
+
+SCOPE
+  - New workflow (or job) that, after Pages publishes, hits
+    https://juniorhat78.github.io/renaissance/ and clicks archive -> essay ->
+    section, asserting 200s + rendered content + zero 404s.
+  - Trigger: workflow_run after the Pages deploy, or a scheduled daily canary,
+    or both. Open a GitHub issue / fail loudly on regression.
+  - Reuse the Phase 7 click-through against a --base of the live URL.
+
+TESTS  The smoke job is itself the test; dry-run against current live site.
+RISK   Medium. Timing vs Pages build latency; needs a poll/retry on first load.
+TOUCHES  .github/workflows/ (new job), scripts/ci/
+
+================================================================================
+PHASE 14 — OFFLINE READING / PWA  [L]  (bigger swing)  [CONFIRMED: go all the way]
+================================================================================
+GOAL  A reading site that survives a tunnel or a flight. Open an essay, lose
+      signal, keep reading. Full offline — not just an installable shell.
+
+WHY   The single most on-brand "magical" feature for a long-form reader.
+
+SCOPE
+  - manifest.webmanifest (name, icons, theme-color matching the paper palette).
+  - Service worker: cache the app shell + the essay/section content the reader is
+    actively in; stale-while-revalidate for content, cache-first for shell.
+  - A quiet "available offline" indicator once a section is cached.
+  - Update strategy: versioned cache, skipWaiting + a gentle "new version" nudge
+    so readers never get stale content silently.
+
+HONEST CAVEATS
+  - Service worker SCOPE must be /renaissance/ (subpath again — same trap, new
+    surface). Register with the correct scope or it silently no-ops.
+  - file:// (the embedded-data fallback path) has no service workers — must
+    degrade cleanly; SW is a pure enhancement.
+  - Caching can serve stale essays; the version/update strategy is the hard part,
+    not the caching itself.
+
+TESTS  Playwright offline test: load section, go offline, navigate within cached
+       content, assert it still renders; assert SW scope; assert update flow.
+RISK   High-ish (most moving parts). Strictly additive; guard behind feature check.
+TOUCHES  manifest.webmanifest (new), sw.js (new), registration shim, *.html, tests
+
+================================================================================
+PHASE 15 — BROADER A11Y & FOCUS-MANAGEMENT PASS  [M]  (taste)
+================================================================================
+GOAL  Beyond axe's automated checks: the things only a human walk catches.
+
+WHY   Automated audits (Phase 11) catch ~40% of real a11y issues. This is the
+      rest: keyboard journeys, focus choreography, screen-reader narrative.
+
+SCOPE
+  - Keyboard-only walk of every page: search controls, pagination, the copy chip,
+    hover-preview parity (already has focus support — verify it announces).
+  - Focus management across in-page navigation (where does focus land after a
+    search anchor scroll? after opening a section?).
+  - Screen-reader pass (VoiceOver/NVDA) of the reader: heading structure, the
+    reading-progress bar's aria-hidden, live-region etiquette for toasts/hints.
+  - Honour-the-narrative fixes only; no churn for its own sake.
+
+TESTS  Targeted Playwright keyboard-journey assertions; manual SR notes recorded.
+RISK   Medium. Some findings are judgment calls; surface them, don't auto-decide.
+TOUCHES  HTML/CSS/JS as findings dictate; scripts/tests/
+
+================================================================================
+SUGGESTED SEQUENCE & RATIONALE
+================================================================================
+  7  Subpath guard ........... do first; protects all later work.        [S]
+  8  Custom 404 .............. quick, visible, fixes the bad-link UX.     [S]
+  9  Discoverability ......... sitemap/robots/feed; makes it "published". [M]
+  10 Cross-browser ........... Firefox + WebKit functional matrix.        [M]
+  11 A11y audits ............. axe gate across pages + themes.            [M]
+  12 Lighthouse stick ........ non-gating; flags only DRASTIC deltas.     [M]
+  13 Post-deploy smoke ....... verify the real live artifact.            [M]
+  14 Offline / PWA ........... the big magical swing.                     [L]
+  15 A11y human pass ......... the part machines miss.                    [M]
+
+Fast-win cluster if you want momentum first: 7 -> 8 -> 9.
+Robustness cluster: 7 -> 10 -> 11 -> 13.
+Magic cluster: 8 -> 14.
+
+================================================================================
+OPEN QUESTIONS FOR YOU
+================================================================================
+  Q1. [DECIDED] Safari = Playwright WebKit only. No paid real-device grid
+      (BrowserStack/Sauce are $$ subscriptions, ~$30-200+/mo) — over-engineering
+      for this site. Free WebKit matrix in Phase 10 is sufficient.
+  Q2. [DECIDED] Lighthouse NEVER gates a PR — measuring stick only, flags drastic
+      deltas vs a committed baseline for human review/reverse. (Phase 12 rewritten.)
+      Remaining knob: what delta counts as "drastic"? (default: category drop >= 8 pts.)
+  Q3. [DECIDED] PWA goes all the way — full offline reading (Phase 14 as scoped:
+      content caching, offline indicator, versioned update flow), not just an
+      installable manifest.
+  Q4. [DECIDED] Keep ROADMAP.txt and TODO.txt SEPARATE for now. No merge.
+  Q5. Anything here you want PROMOTED, DROPPED, or RESEQUENCED before we start?
+================================================================================

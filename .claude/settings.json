@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run check)",
+      "Bash(npm run check:syntax)",
+      "Bash(npm run validate:content)",
+      "Bash(npm run validate:embedded:check)",
+      "Bash(npm run test:regression)",
+      "Bash(npm run test:router)",
+      "Bash(npm run test:anchors)",
+      "Bash(npm run test:chapter-redirect)",
+      "Bash(npm run test:content-fallback)",
+      "Bash(npm run test:copy-footer)",
+      "Bash(npm run test:hover-preview)",
+      "Bash(npm run test:lighthouse-target)",
+      "Bash(npm run test:meta)",
+      "Bash(npm run test:og-cards)",
+      "Bash(npm run test:reading-state)",
+      "Bash(npm run test:reduced-motion)",
+      "Bash(npm run test:standalone)",
+      "Bash(npm run visual:check)",
+      "Bash(npm run visual:diff)",
+      "Bash(npm run visual:capture)"
+    ]
+  }
+}
