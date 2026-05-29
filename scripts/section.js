@@ -399,6 +399,12 @@
     return /mac|iphone|ipad|ipod/i.test(probe);
   }
 
+  function prefersReducedMotion() {
+    return Boolean(
+      window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    );
+  }
+
   function copyHintAlreadySeen() {
     try {
       return window.localStorage.getItem(COPY_HINT_STORAGE_KEY) === "1";
@@ -1352,6 +1358,24 @@
     }
   }
 
+  // Bring an element to rest on the same sightline the reader resumes at
+  // (READING_LINE_RATIO from the top), so a search hit and a resumed bookmark
+  // land in the same place. Honours prefers-reduced-motion: no smooth glide.
+  function scrollToReadingSightline(element, options) {
+    if (!element) {
+      return;
+    }
+    const settings = options || {};
+    const rect = element.getBoundingClientRect();
+    const target = clamp(
+      rect.top + documentScrollY() - readingLineY(),
+      0,
+      maxDocumentScrollY()
+    );
+    const behavior = settings.behavior || (prefersReducedMotion() ? "auto" : "smooth");
+    window.scrollTo({ top: target, left: 0, behavior });
+  }
+
   function focusHighlight(mark) {
     if (!mark) {
       return;
@@ -1364,11 +1388,7 @@
       mark.classList.remove("reader-highlight-arrival");
     }, 960);
     window.requestAnimationFrame(() => {
-      mark.scrollIntoView({
-        behavior: "smooth",
-        block: "center",
-        inline: "nearest"
-      });
+      scrollToReadingSightline(mark);
     });
   }
 

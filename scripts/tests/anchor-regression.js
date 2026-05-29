@@ -140,6 +140,42 @@ async function main() {
     );
   }, failures);
 
+  await runCase("search anchor rests on the reading sightline", async () => {
+    const url = sectionUrl(options.base, {
+      essay: options.essay,
+      section: options.section,
+      q: options.occurrenceQuery,
+      occ: 3
+    });
+    await openSection(page, url);
+    // Under reduced motion the landing is instant; give it a frame to settle.
+    await page.waitForTimeout(400);
+    const geom = await page.evaluate(() => {
+      const mark = document.querySelector('mark[data-auto-highlight="1"]');
+      if (!mark) {
+        return null;
+      }
+      const rect = mark.getBoundingClientRect();
+      return {
+        top: rect.top,
+        lineY: Math.max(80, window.innerHeight * 0.36),
+        scrollY: window.scrollY,
+        innerHeight: window.innerHeight
+      };
+    });
+    assert.ok(geom, "Expected a highlighted anchor to measure");
+    assert.ok(
+      geom.top >= 0 && geom.top <= geom.innerHeight,
+      "Anchor should rest within the viewport"
+    );
+    if (geom.scrollY > 5) {
+      assert.ok(
+        Math.abs(geom.top - geom.lineY) < 120,
+        "A scrolled anchor should rest near the reading sightline, not dead centre"
+      );
+    }
+  }, failures);
+
   await runCase("q-only low-hit mode does not show cap note", async () => {
     const url = sectionUrl(options.base, {
       essay: options.essay,
