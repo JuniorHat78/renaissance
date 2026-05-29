@@ -82,8 +82,17 @@ function main() {
 
       fs.readFile(filePath, (err, data) => {
         if (err) {
-          res.statusCode = 404;
-          res.end("Not found");
+          // Mirror GitHub Pages: serve the site's 404.html (with a 404 status)
+          // for any missing path, so local runs exercise real 404 behaviour.
+          fs.readFile(path.join(rootResolved, "404.html"), (notFoundErr, notFoundData) => {
+            res.statusCode = 404;
+            if (notFoundErr) {
+              res.end("Not found");
+              return;
+            }
+            res.setHeader("Content-Type", "text/html; charset=utf-8");
+            res.end(notFoundData);
+          });
           return;
         }
         res.setHeader("Content-Type", contentType(filePath));

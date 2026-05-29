@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Page not found · Renaissance</title>
+  <script>
+    (function () {
+      try {
+        var savedTheme = localStorage.getItem("renaissance-theme");
+        document.documentElement.setAttribute(
+          "data-theme",
+          savedTheme === "dark" ? "dark" : "light"
+        );
+      } catch (error) {
+        document.documentElement.setAttribute("data-theme", "light");
+      }
+    })();
+  </script>
+  <!-- Self-contained on purpose: GitHub Pages serves this file for ANY missing
+       path depth, so external stylesheet/script links (which resolve relative to
+       the bad URL) cannot be relied on. Everything the page needs is inline. -->
+  <style>
+    :root {
+      --paper: #f8f2e7;
+      --canvas: #efe5d6;
+      --text: #2a2018;
+      --muted: #6d5d4a;
+      --line: #cdbba3;
+      --accent: #a34f2a;
+      --accent-hover: #8f4322;
+      --accent-soft: color-mix(in srgb, var(--accent) 14%, transparent);
+      --font-title: "Garamond", "Palatino Linotype", "Book Antiqua", serif;
+      --font-body: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", serif;
+      --font-ui: "Optima", "Gill Sans MT", "Trebuchet MS", sans-serif;
+    }
+    :root[data-theme="dark"] {
+      --paper: #211a14;
+      --canvas: #18130f;
+      --text: #f0e2d1;
+      --muted: #b69f84;
+      --line: #534233;
+      --accent: #c96d3e;
+      --accent-hover: #dd8050;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem 1.5rem;
+      background:
+        radial-gradient(circle at 50% 0%, color-mix(in srgb, var(--paper) 88%, #fff 12%), transparent 60%),
+        var(--canvas);
+      color: var(--text);
+      font-family: var(--font-body);
+    }
+    .notfound-card {
+      max-width: 34rem;
+      width: 100%;
+      text-align: center;
+    }
+    .eyebrow {
+      font-family: var(--font-ui);
+      font-size: 0.72rem;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin: 0 0 0.9rem;
+    }
+    h1 {
+      font-family: var(--font-title);
+      font-weight: 500;
+      font-size: clamp(1.9rem, 5vw, 2.8rem);
+      line-height: 1.1;
+      margin: 0 0 1rem;
+    }
+    .lead {
+      font-size: 1.04rem;
+      line-height: 1.65;
+      color: var(--muted);
+      margin: 0 auto 1.6rem;
+      max-width: 28rem;
+    }
+    .did-you-mean {
+      margin: 0 auto 1.6rem;
+      padding: 0.7rem 0.9rem;
+      max-width: 30rem;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: color-mix(in srgb, var(--paper) 70%, transparent);
+      font-size: 0.95rem;
+      line-height: 1.5;
+    }
+    .did-you-mean a { color: var(--accent); font-weight: 600; }
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.7rem;
+      justify-content: center;
+      margin: 0;
+    }
+    .actions a {
+      display: inline-block;
+      font-family: var(--font-ui);
+      font-size: 0.86rem;
+      letter-spacing: 0.02em;
+      text-decoration: none;
+      padding: 0.5rem 1rem;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      color: var(--text);
+      transition: border-color 120ms ease, color 120ms ease, background-color 120ms ease;
+    }
+    .actions a.primary {
+      border-color: var(--accent);
+      color: #fff7ef;
+      background: var(--accent);
+    }
+    .actions a:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+    .actions a.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); color: #fff7ef; }
+    a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    @media (prefers-reduced-motion: reduce) {
+      .actions a { transition: none; }
+    }
+  </style>
+</head>
+<body>
+  <main class="notfound-card">
+    <p class="eyebrow">Lost page</p>
+    <h1>This page slipped out of the archive.</h1>
+    <p class="lead">
+      The link may be old, or the address mistyped. Nothing published has gone
+      anywhere — pick up the thread from the archive, or search for what you came for.
+    </p>
+    <p class="did-you-mean" id="did-you-mean" hidden></p>
+    <p class="actions">
+      <a class="primary" id="archive-link" href="index.html">Return to the archive</a>
+      <a id="search-link" href="search.html">Search the essays</a>
+    </p>
+  </main>
+
+  <script>
+    (function () {
+      // Our 404 only ever renders under the project subpath (/renaissance/).
+      // Recover that base from the URL so recovery links stay correct no matter
+      // how deep the missing path was. A first segment that looks like a file
+      // (has a dot) means we're at the root, so fall back to "/".
+      function siteBase() {
+        var parts = location.pathname.split("/").filter(Boolean);
+        var first = parts[0] || "";
+        return first && first.indexOf(".") === -1 ? "/" + first + "/" : "/";
+      }
+
+      var base = siteBase();
+      var archive = document.getElementById("archive-link");
+      var search = document.getElementById("search-link");
+      archive.setAttribute("href", base + "index.html");
+      search.setAttribute("href", base + "search.html");
+
+      // Did-you-mean: if the dead URL carries a recognizable essay slug, offer
+      // the live page for it (which itself handles a missing essay gracefully).
+      try {
+        var params = new URLSearchParams(location.search);
+        var slug = (params.get("essay") || "").trim();
+        if (/^[a-z0-9][a-z0-9-]*$/i.test(slug)) {
+          var section = (params.get("section") || "").trim();
+          var pretty = slug.replace(/-/g, " ").replace(/\b\w/g, function (c) { return c.toUpperCase(); });
+          var href, label;
+          if (/^\d+$/.test(section)) {
+            href = base + "section.html?essay=" + encodeURIComponent(slug) + "&section=" + encodeURIComponent(section);
+            label = "Open “" + pretty + ",” section " + section;
+          } else {
+            href = base + "essay.html?essay=" + encodeURIComponent(slug);
+            label = "Open the essay “" + pretty + "”";
+          }
+          var box = document.getElementById("did-you-mean");
+          var lead = document.createTextNode("Were you looking for this? ");
+          var link = document.createElement("a");
+          link.setAttribute("href", href);
+          link.textContent = label;
+          box.appendChild(lead);
+          box.appendChild(link);
+          box.hidden = false;
+        }
+      } catch (error) {
+        // best-effort only
+      }
+    })();
+  </script>
+</body>
+</html>

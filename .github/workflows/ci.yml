@@ -43,6 +43,9 @@ jobs:
       - name: Subpath Regression Suite (served under /renaissance/)
         run: npm run ci:subpath
 
+      - name: Custom 404 Regression
+        run: npm run ci:notfound
+
       - name: Visual QA Check (warning-only)
         run: |
           if ! npm run ci:visual; then
