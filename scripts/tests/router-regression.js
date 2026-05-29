@@ -150,6 +150,11 @@ async function main() {
     assert.ok(/index\.html$/.test(result.archiveDefaults), "archive default URL has no query");
     assert.ok(/index\.html$/.test(result.archiveWithDefaults), "explicit defaults must be elided");
     assert.match(result.searchAll, /search\.html\?scope=shadows&q=shadow&sort=relevance&page=2&page_size=25$/, "search URL stable order");
+    // Links must be relative so navigation survives a project subpath
+    // (e.g. GitHub Pages at /renaissance/). A leading "/" would 404 there.
+    assert.ok(!result.sectionUrl.startsWith("/"), "build() must return a relative section path");
+    assert.ok(!result.archiveDefaults.startsWith("/"), "build() must return a relative archive path");
+    assert.ok(!result.searchAll.startsWith("/"), "build() must return a relative search path");
   }, failures);
 
   await runCase("build() round-trips through parse()", browser, options, async (page) => {

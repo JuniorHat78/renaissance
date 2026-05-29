@@ -27,7 +27,11 @@
   const isLocalFile = window.location.protocol === "file:";
 
   function resolvePath(filename) {
-    return isLocalFile ? "./" + filename : "/" + filename;
+    // Relative paths keep navigation working whether the site is served from
+    // the domain root or a project subpath (e.g. GitHub Pages at /renaissance/).
+    // Every page lives in the same directory, so a bare filename always resolves
+    // correctly; a root-absolute "/essay.html" would 404 under a subpath.
+    return isLocalFile ? "./" + filename : filename;
   }
 
   function detectViewFromPath(pathname) {
@@ -348,14 +352,20 @@
         extras
       });
 
-      const currentRelative = window.location.pathname + window.location.search;
-      const fakeBase = "http://x.invalid";
-      const expected = new URL(cleanedUrl, fakeBase);
-      const cleanedRelative = expected.pathname + expected.search;
+      // Compare only the query string and rewrite in place against the current
+      // pathname. This keeps self-heal subpath-safe (it must never strip the
+      // /renaissance/ prefix) and preserves any text-fragment hash for the
+      // reader's anchor logic to pick up.
+      const expected = new URL(cleanedUrl, "http://x.invalid/");
+      const cleanedSearch = expected.search;
 
-      if (currentRelative !== cleanedRelative) {
+      if (window.location.search !== cleanedSearch) {
         const state = window.history.state || {};
-        window.history.replaceState(state, "", cleanedUrl);
+        window.history.replaceState(
+          state,
+          "",
+          window.location.pathname + cleanedSearch + window.location.hash
+        );
       }
     } catch (_error) {
       // self-heal must never throw
