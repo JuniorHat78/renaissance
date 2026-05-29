@@ -828,6 +828,17 @@
     };
   }
 
+  function readerProgressOpacity(value) {
+    const viewport = Math.max(1, window.innerHeight || 1);
+    const scrolled = documentScrollY();
+    // Hold the bar hidden until the reader is roughly a screen in — a thin
+    // sliver at the very top is just noise — then let it recede again as they
+    // cross into the final stretch and the count is all but done.
+    const fadeIn = clamp((scrolled - viewport * 0.6) / (viewport * 0.4), 0, 1);
+    const fadeOut = clamp((1 - value) / 0.18, 0, 1);
+    return Math.min(fadeIn, fadeOut);
+  }
+
   function setReaderProgress(progress) {
     if (!readerProgressBar) {
       return;
@@ -835,6 +846,7 @@
 
     const value = clamp(progress, 0, 1);
     readerProgressBar.style.transform = "scaleX(" + value.toFixed(4) + ")";
+    readerProgressBar.style.opacity = readerProgressOpacity(value).toFixed(3);
   }
 
   function saveReadingProgress(progress) {

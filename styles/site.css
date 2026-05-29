@@ -11,6 +11,7 @@
   --accent-hover: #8f4322;
   --accent-ink: #fff7ef;
   --accent-wash: rgba(163, 79, 42, 0.08);
+  --accent-soft: color-mix(in srgb, var(--accent) 25%, transparent);
   --mark: #ebd29d;
 }
 
@@ -1366,8 +1367,13 @@ mark.reader-highlight-target.reader-highlight-arrival {
   animation: highlight-arrival 900ms ease-out 1;
 }
 
-.chapter-content ::selection {
-  background: color-mix(in srgb, var(--accent) 24%, #f0d7aa 76%);
+::selection {
+  background: var(--accent-soft);
+  color: inherit;
+}
+
+::-moz-selection {
+  background: var(--accent-soft);
   color: inherit;
 }
 

@@ -202,6 +202,27 @@ async function main() {
     assert.match(snapshot.transform, /scaleX\((?!0\.0000)/);
   }, failures);
 
+  await runCase("reader progress line fades in past the first screen", browser, null, async (context) => {
+    const page = await context.newPage();
+    await openReadySection(page, sectionUrl(options.base, 1));
+
+    const readOpacity = () => page.evaluate(() => {
+      const bar = document.getElementById("reader-progress-bar");
+      return bar ? Number(bar.style.opacity || "0") : null;
+    });
+
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.waitForTimeout(140);
+    const topOpacity = await readOpacity();
+
+    await page.evaluate(() => window.scrollTo(0, window.innerHeight * 2.5));
+    await page.waitForTimeout(180);
+    const midOpacity = await readOpacity();
+
+    assert.ok(topOpacity <= 0.05, "progress line should be hidden at the very top");
+    assert.ok(midOpacity > 0.5, "progress line should be visible once a screen in");
+  }, failures);
+
   await runCase("semantic reader position restores on normal section open", browser, stateWithRecord({
     progress: 0.42,
     maxProgress: 0.42,
