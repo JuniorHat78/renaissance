@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://juniorhat78.github.io/renaissance/sitemap.xml

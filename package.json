@@ -6,7 +6,7 @@
   "type": "commonjs",
   "scripts": {
     "dev": "python -m http.server 8000",
-    "check": "npm run check:syntax && npm run validate:content && npm run validate:embedded:check",
+    "check": "npm run check:syntax && npm run validate:content && npm run validate:embedded:check && npm run validate:discoverability:check",
     "check:syntax": "node scripts/check-js-syntax.js",
     "ci:standalone": "npm run check && npm run test:standalone",
     "ci:regression": "node scripts/ci/run-with-server.js --port 4173 -- npm run test:regression -- --base http://127.0.0.1:4173",
@@ -26,7 +26,7 @@
     "test:reduced-motion": "node scripts/tests/reduced-motion-regression.js",
     "test:router": "node scripts/tests/router-regression.js",
     "test:regression": "node scripts/tests/regression-check.js",
-    "test:standalone": "npm run test:content-fallback && npm run test:lighthouse-target && npm run test:og-cards",
+    "test:standalone": "npm run test:content-fallback && npm run test:lighthouse-target && npm run test:og-cards && npm run test:discoverability",
     "test:subpath": "node scripts/ci/run-with-server.js --port 4176 --mount /renaissance/ -- node scripts/tests/subpath-regression.js",
     "test:notfound": "node scripts/ci/run-with-server.js --port 4177 --mount /renaissance/ -- node scripts/tests/notfound-regression.js",
     "og:generate": "node scripts/og/generate-cards.js",
@@ -35,7 +35,10 @@
     "visual:check": "node scripts/visual/check.js",
     "visual:approve": "node scripts/visual/approve.js",
     "validate:content": "node scripts/validate-content.js",
-    "validate:embedded:check": "node scripts/generate-embedded-data.js --check"
+    "validate:embedded:check": "node scripts/generate-embedded-data.js --check",
+    "discover:generate": "node scripts/generate-discoverability.js",
+    "validate:discoverability:check": "node scripts/generate-discoverability.js --check",
+    "test:discoverability": "node scripts/tests/discoverability-regression.js"
   },
   "devDependencies": {
     "pixelmatch": "^7.1.0",

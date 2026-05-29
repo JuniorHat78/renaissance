@@ -6,6 +6,7 @@ window.RENAISSANCE_EMBEDDED_ESSAYS = [
     "slug": "etching-god-into-sand",
     "title": "Etching God into Sand",
     "summary": "A long-form essay in ten sections tracing sand, silicon, language, and cognition.",
+    "published_at": "2026-01-15",
     "social_image": "assets/og-etching-god-into-sand.png",
     "source_dir": "raw/etching-god-into-sand",
     "section_order": [
