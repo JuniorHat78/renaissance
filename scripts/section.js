@@ -38,7 +38,10 @@
   let selectionCopyBar = document.getElementById("selection-copy-bar");
   let selectionCopyBarButton = document.getElementById("selection-copy-bar-button");
   const MAX_QUERY_ONLY_HIGHLIGHTS = 160;
-  const SOURCE_FOOTER_LABEL = "[Source] ";
+  const CITATION_MIN_WORDS = 5;
+  const CITATION_FULL_WORDS = 40;
+  const COPY_HINT_STORAGE_KEY = "renaissance:copy-hint-seen";
+  const COPY_HINT_VISIBLE_MS = 4000;
   const READING_LINE_RATIO = 0.36;
   const MIN_READING_LINE_Y = 80;
   const RESTORE_SAVE_SUPPRESS_MS = 720;
@@ -69,6 +72,9 @@
   const CONTEXTUAL_LABEL_ERROR = "Try copy again";
   let hasContextualShare = false;
   let copyToast = document.getElementById("copy-toast");
+  let copyHintElement = null;
+  let copyHintTimer = null;
+  let copyHintActive = false;
   const shouldLogHighlightPerf = (() => {
     const protocol = String(window.location.protocol || "").toLowerCase();
     if (protocol === "file:") {
@@ -167,8 +173,59 @@
     highlightCapNote.hidden = false;
   }
 
-  function sourceFooterText(url) {
-    return SOURCE_FOOTER_LABEL + String(url || "");
+  function countWords(text) {
+    return String(text || "").trim().split(/\s+/).filter(Boolean).length;
+  }
+
+  function citationTier(wordCount) {
+    // A few words is a lookup, not a quotation — leave it clean.
+    if (wordCount < CITATION_MIN_WORDS) {
+      return "none";
+    }
+    // A sentence or two warrants a link back; a paragraph warrants a full citation.
+    if (wordCount < CITATION_FULL_WORDS) {
+      return "link";
+    }
+    return "full";
+  }
+
+  function citationSourceLabel() {
+    const title = currentEssay ? String(currentEssay.title || "").trim() : "";
+    const label = currentDisplay ? String(currentDisplay.label || "").trim() : "";
+    if (title && label) {
+      return title + ", " + label;
+    }
+    return title || label;
+  }
+
+  function citationPlainText(selectedText, url, tier) {
+    const body = String(selectedText || "").replace(/^\s+|\s+$/g, "");
+    if (tier === "none") {
+      return body;
+    }
+    if (tier === "full") {
+      const source = citationSourceLabel();
+      const lead = source ? "— " + source + "\n  " : "— ";
+      return body + "\n\n" + lead + url;
+    }
+    return body + "\n\n— " + url;
+  }
+
+  function citationHtml(selectedHtml, url, tier) {
+    if (tier === "none" || !selectedHtml) {
+      return "";
+    }
+
+    const link =
+      '<a href="' + escapeHtml(url) + '" rel="noopener noreferrer">' + escapeHtml(url) + "</a>";
+    const quote = "<blockquote>" + selectedHtml + "</blockquote>";
+
+    if (tier === "full") {
+      const source = citationSourceLabel();
+      const cite = source ? "<cite>" + escapeHtml(source) + "</cite><br>" : "";
+      return quote + '<p class="renaissance-citation">— ' + cite + link + "</p>";
+    }
+    return quote + '<p class="renaissance-citation">— ' + link + "</p>";
   }
 
   function joinMetaParts(parts) {
@@ -332,6 +389,99 @@
     return window.matchMedia("(max-width: 760px)").matches;
   }
 
+  function isMacPlatform() {
+    const probe = String(
+      (navigator.userAgentData && navigator.userAgentData.platform) ||
+        navigator.platform ||
+        navigator.userAgent ||
+        ""
+    );
+    return /mac|iphone|ipad|ipod/i.test(probe);
+  }
+
+  function copyHintAlreadySeen() {
+    try {
+      return window.localStorage.getItem(COPY_HINT_STORAGE_KEY) === "1";
+    } catch (_error) {
+      // No storage (private mode / sandbox): behave as already seen so we never nag.
+      return true;
+    }
+  }
+
+  function markCopyHintSeen() {
+    try {
+      window.localStorage.setItem(COPY_HINT_STORAGE_KEY, "1");
+    } catch (_error) {
+      // ignore
+    }
+  }
+
+  function ensureCopyHintElement() {
+    if (copyHintElement) {
+      return copyHintElement;
+    }
+    const hint = document.createElement("div");
+    hint.id = "selection-copy-hint";
+    hint.className = "selection-copy-hint";
+    hint.setAttribute("role", "status");
+    hint.setAttribute("aria-live", "polite");
+    hint.hidden = true;
+    document.body.appendChild(hint);
+    copyHintElement = hint;
+    return hint;
+  }
+
+  function dismissCopyHint() {
+    if (copyHintTimer) {
+      clearTimeout(copyHintTimer);
+      copyHintTimer = null;
+    }
+    copyHintActive = false;
+    if (copyHintElement) {
+      copyHintElement.classList.remove("is-visible");
+      copyHintElement.hidden = true;
+    }
+  }
+
+  function maybeShowCopyHint(rect) {
+    if (copyHintActive || !rect || isMobileLayout() || copyHintAlreadySeen()) {
+      return;
+    }
+
+    // First qualifying selection only — and only once, ever, per reader.
+    copyHintActive = true;
+    markCopyHintSeen();
+
+    const hint = ensureCopyHintElement();
+    const shortcut = isMacPlatform() ? "⌘C" : "Ctrl+C";
+    hint.textContent = shortcut + " keeps a link back to this passage";
+
+    hint.hidden = false;
+    hint.style.visibility = "hidden";
+    hint.style.left = "0px";
+    hint.style.top = "0px";
+
+    const hintRect = hint.getBoundingClientRect();
+    const margin = 10;
+    let left = rect.left + (rect.width / 2) - (hintRect.width / 2);
+    left = clamp(left, margin, window.innerWidth - hintRect.width - margin);
+
+    let top = rect.bottom + 12;
+    if (top + hintRect.height > window.innerHeight - margin) {
+      top = rect.top - hintRect.height - 12;
+    }
+    top = clamp(top, margin, window.innerHeight - hintRect.height - margin);
+
+    hint.style.left = String(Math.round(left)) + "px";
+    hint.style.top = String(Math.round(top)) + "px";
+    hint.style.visibility = "visible";
+    hint.classList.remove("is-visible");
+    void hint.offsetWidth;
+    hint.classList.add("is-visible");
+
+    copyHintTimer = setTimeout(dismissCopyHint, COPY_HINT_VISIBLE_MS);
+  }
+
   function clamp(value, min, max) {
     return Math.min(Math.max(value, min), max);
   }
@@ -345,6 +495,7 @@
 
   function hideContextualShare() {
     clearContextualHideTimer();
+    dismissCopyHint();
     setContextualButtonState("default");
     if (selectionCopyChip) {
       selectionCopyChip.classList.remove("is-visible");
@@ -1705,14 +1856,13 @@
       return;
     }
     const url = buildShareUrl(details);
-    const footer = sourceFooterText(url);
 
     try {
       if (navigator.clipboard && window.isSecureContext) {
-        await navigator.clipboard.writeText(footer);
+        await navigator.clipboard.writeText(url);
       } else {
         const helper = document.createElement("textarea");
-        helper.value = footer;
+        helper.value = url;
         helper.setAttribute("readonly", "readonly");
         helper.style.position = "fixed";
         helper.style.left = "-9999px";
@@ -1724,7 +1874,8 @@
           throw new Error("copy failed");
         }
       }
-      setCopyStatus("Source link copied.");
+      dismissCopyHint();
+      setCopyStatus("Link copied.");
       scheduleHideContextualShare(1200);
     } catch (error) {
       setCopyStatus("Try copy again.", true);
@@ -1758,6 +1909,10 @@
 
     activeSelectionDetails = details;
     showContextualShare(details.rect);
+
+    if (details.rect && citationTier(countWords(details.payload.text)) !== "none") {
+      maybeShowCopyHint(details.rect);
+    }
   }
 
   function scheduleSyncContextualSelection() {
@@ -1836,20 +1991,27 @@
       return;
     }
 
-    const sourceUrl = buildShareUrl(details);
-    const plain = selected.text + "\n\n" + sourceFooterText(sourceUrl);
-    event.clipboardData.setData("text/plain", plain);
+    const tier = citationTier(countWords(selected.text));
 
-    const selectedHtml = htmlFromRange(selected.range);
-    if (selectedHtml) {
-      const sourceHtml =
-        '<p><br><span>' + escapeHtml(SOURCE_FOOTER_LABEL) + "</span>" +
-        '<a href="' + escapeHtml(sourceUrl) + '" rel="noopener noreferrer">' + escapeHtml(sourceUrl) + "</a></p>";
-      event.clipboardData.setData("text/html", selectedHtml + sourceHtml);
+    // Short fragments copy verbatim. We deliberately leave the native copy
+    // untouched rather than appending anything — no preventDefault, no branch
+    // on device. The gesture (a few words) tells us it is a lookup.
+    if (tier === "none") {
+      dismissCopyHint();
+      return;
+    }
+
+    const sourceUrl = buildShareUrl(details);
+    event.clipboardData.setData("text/plain", citationPlainText(selected.text, sourceUrl, tier));
+
+    const html = citationHtml(htmlFromRange(selected.range), sourceUrl, tier);
+    if (html) {
+      event.clipboardData.setData("text/html", html);
     }
 
     event.preventDefault();
-    setCopyStatus("Copied with source link.", false, {
+    dismissCopyHint();
+    setCopyStatus(tier === "full" ? "Copied with citation." : "Copied with source link.", false, {
       updateContextualButton: false,
       resetDelayMs: 1000,
       toastDurationMs: 1400
