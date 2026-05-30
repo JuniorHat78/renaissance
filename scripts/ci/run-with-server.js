@@ -2,6 +2,7 @@
 "use strict";
 
 const { spawn } = require("child_process");
+const fs = require("fs");
 const http = require("http");
 const path = require("path");
 
@@ -100,20 +101,13 @@ async function waitForServer(url, timeoutMs) {
 
 function runCommand(command, env) {
   return new Promise((resolve) => {
-    const isWindows = process.platform === "win32";
-    const child = isWindows
-      ? spawn(command.map((part) => quoteWindowsArg(part)).join(" "), {
-          cwd: process.cwd(),
-          env,
-          stdio: "inherit",
-          shell: true
-        })
-      : spawn(command[0], command.slice(1), {
-          cwd: process.cwd(),
-          env,
-          stdio: "inherit",
-          shell: false
-        });
+    const resolved = resolveCommand(command[0]);
+    const child = spawn(resolved.bin, resolved.args.concat(command.slice(1)), {
+      cwd: process.cwd(),
+      env,
+      stdio: "inherit",
+      shell: false
+    });
     child.on("exit", (code, signal) => {
       if (signal) {
         resolve(1);
@@ -121,15 +115,34 @@ function runCommand(command, env) {
       }
       resolve(code === null ? 1 : code);
     });
+    child.on("error", () => resolve(1));
   });
 }
 
-function quoteWindowsArg(value) {
-  const text = String(value);
-  if (/^[A-Za-z0-9_./:=?&+-]+$/.test(text)) {
-    return text;
+function resolveCommand(command) {
+  const name = String(command || "");
+  if (process.platform === "win32" && /^(npm|npx)$/.test(name)) {
+    const cli = nodeToolCliPath(name);
+    if (cli) {
+      return { bin: process.execPath, args: [cli] };
+    }
   }
-  return '"' + text.replace(/"/g, '\\"') + '"';
+  return { bin: name, args: [] };
+}
+
+function nodeToolCliPath(command) {
+  const cliName = command === "npx" ? "npx-cli.js" : "npm-cli.js";
+  const candidates = [
+    process.env.APPDATA ? path.join(process.env.APPDATA, "npm", "node_modules", "npm", "bin", cliName) : "",
+    path.join(path.dirname(process.execPath), "node_modules", "npm", "bin", cliName)
+  ];
+
+  for (const candidate of candidates) {
+    if (candidate && fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return "";
 }
 
 function startServer(options) {

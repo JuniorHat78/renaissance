@@ -212,7 +212,7 @@ async function main() {
       essaySlug: "etching-god-into-sand",
       sectionNumber: 2,
       query: "sand",
-      extras: { hl: "first surprise", hlp: "the", hls: "that" }
+      extras: [["hl", "first surprise"], ["hlp", "the"], ["hls", "that"]]
     }));
     assert.match(url, /section\.html\?essay=etching-god-into-sand&section=2&q=sand&hl=first%20surprise&hlp=the&hls=that$/, "extras come after nav params, percent-encoded");
   }, failures);

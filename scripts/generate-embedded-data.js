@@ -45,7 +45,10 @@ function loadEssays() {
 }
 
 function escapeForTemplateLiteral(text) {
-  return text.replace(/`/g, "\\`").replace(/\$\{/g, "\\${");
+  return text
+    .replace(/\\/g, "\\\\")
+    .replace(/`/g, "\\`")
+    .replace(/\$\{/g, "\\${");
 }
 
 function embeddedSectionEntries(essays) {

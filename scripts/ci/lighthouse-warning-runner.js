@@ -50,12 +50,30 @@ function route(base, pathname) {
   return new URL(pathname, base).toString();
 }
 
-function quoteWindowsArg(value) {
-  const text = String(value);
-  if (/^[A-Za-z0-9_./:=?&+-]+$/.test(text)) {
-    return text;
+function resolveCommand(command) {
+  const name = String(command || "");
+  if (process.platform === "win32" && /^(npm|npx)$/.test(name)) {
+    const cli = nodeToolCliPath(name);
+    if (cli) {
+      return { bin: process.execPath, args: [cli] };
+    }
   }
-  return '"' + text.replace(/"/g, '\\"') + '"';
+  return { bin: name, args: [] };
+}
+
+function nodeToolCliPath(command) {
+  const cliName = command === "npx" ? "npx-cli.js" : "npm-cli.js";
+  const candidates = [
+    process.env.APPDATA ? path.join(process.env.APPDATA, "npm", "node_modules", "npm", "bin", cliName) : "",
+    path.join(path.dirname(process.execPath), "node_modules", "npm", "bin", cliName)
+  ];
+
+  for (const candidate of candidates) {
+    if (candidate && fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return "";
 }
 
 function runLighthouse(target) {
@@ -70,17 +88,12 @@ function runLighthouse(target) {
     "--output-path=" + target.out
   ];
 
-  const result = process.platform === "win32"
-    ? spawnSync(["npx", ...args].map((part) => quoteWindowsArg(part)).join(" "), {
-        cwd: process.cwd(),
-        stdio: "inherit",
-        shell: true
-      })
-    : spawnSync("npx", args, {
-        cwd: process.cwd(),
-        stdio: "inherit",
-        shell: false
-      });
+  const command = resolveCommand("npx");
+  const result = spawnSync(command.bin, command.args.concat(args), {
+    cwd: process.cwd(),
+    stdio: "inherit",
+    shell: false
+  });
 
   if (result.status !== 0) {
     console.log(

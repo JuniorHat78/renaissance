@@ -133,9 +133,8 @@ async function main() {
     await openSection(page, url);
     const snapshot = await getHighlightSnapshot(page);
     assert.equal(snapshot.marks.length, 1, "Expected exactly one highlighted mark for q+occ");
-    assert.match(
-      snapshot.marks[0].toLowerCase(),
-      new RegExp(options.occurrenceQuery.toLowerCase()),
+    assert.ok(
+      snapshot.marks[0].toLowerCase().includes(options.occurrenceQuery.toLowerCase()),
       "Expected occurrence highlight to match query"
     );
   }, failures);
@@ -246,9 +245,8 @@ async function main() {
     await openSection(page, url);
     const snapshot = await getHighlightSnapshot(page);
     assert.equal(snapshot.marks.length, 1, "Expected one mark when payload resolves");
-    assert.match(
-      snapshot.marks[0].toLowerCase(),
-      new RegExp(options.payloadText.toLowerCase()),
+    assert.ok(
+      snapshot.marks[0].toLowerCase().includes(options.payloadText.toLowerCase()),
       "Expected payload text to drive anchor"
     );
   }, failures);
@@ -297,9 +295,8 @@ async function main() {
     await openSection(page, url);
     const snapshot = await getHighlightSnapshot(page);
     assert.equal(snapshot.marks.length, 1, "Expected one mark for range anchor");
-    assert.match(
-      snapshot.marks[0].toLowerCase(),
-      new RegExp(options.payloadText.toLowerCase()),
+    assert.ok(
+      snapshot.marks[0].toLowerCase().includes(options.payloadText.toLowerCase()),
       "Expected range anchor to win over occurrence"
     );
   }, failures);

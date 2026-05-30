@@ -197,12 +197,16 @@
       appendIfPresent(pairs, key, accumulator[key]);
     });
 
-    if (source.extras && typeof source.extras === "object") {
-      Object.keys(source.extras).forEach((key) => {
+    if (Array.isArray(source.extras)) {
+      source.extras.forEach((entry) => {
+        if (!Array.isArray(entry) || entry.length < 2) {
+          return;
+        }
+        const key = String(entry[0] || "");
         if (NAV_PARAM_ORDER.indexOf(key) !== -1) {
           return;
         }
-        const value = source.extras[key];
+        const value = entry[1];
         if (value === undefined || value === null || value === "") {
           return;
         }
@@ -331,10 +335,10 @@
       const view = detectViewFromPath(window.location.pathname);
 
       const knownNavKeys = new Set(NAV_PARAM_ORDER);
-      const extras = {};
+      const extras = [];
       params.forEach((value, key) => {
         if (!knownNavKeys.has(key)) {
-          extras[key] = value;
+          extras.push([key, value]);
         }
       });
 
