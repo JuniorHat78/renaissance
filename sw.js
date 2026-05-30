@@ -12,9 +12,10 @@
  *  - A versioned cache; bump VERSION to force a clean re-precache.
  */
 
-const VERSION = "asset-bf60a750e8aa";
+const VERSION = "asset-2f1df3098cbc";
 const CACHE = "renaissance-" + VERSION;
 const OFFLINE_ASSET_MANIFEST = "data/offline-assets.json";
+const NAVIGATION_NETWORK_TIMEOUT_MS = 4500;
 
 const PRECACHE = [
   "./",
@@ -97,19 +98,7 @@ self.addEventListener("fetch", (event) => {
   }
 
   if (request.mode === "navigate") {
-    event.respondWith(
-      fetch(request)
-        .then((response) => {
-          const copy = response.clone();
-          caches.open(CACHE).then((cache) => cache.put(request, copy));
-          return response;
-        })
-        .catch(() =>
-          caches.match(request, { ignoreSearch: true }).then(
-            (cached) => cached || caches.match("404.html") || Response.error()
-          )
-        )
-    );
+    event.respondWith(networkFirstNavigation(request));
     return;
   }
 
@@ -129,3 +118,26 @@ self.addEventListener("fetch", (event) => {
     })
   );
 });
+
+function timeoutAfter(ms) {
+  return new Promise((resolve, reject) => {
+    setTimeout(() => reject(new Error("navigation network timeout")), ms);
+  });
+}
+
+function cachedNavigationFallback(request) {
+  return caches.match(request, { ignoreSearch: true }).then(
+    (cached) => cached || caches.match("404.html") || Response.error()
+  );
+}
+
+function networkFirstNavigation(request) {
+  const network = fetch(request).then((response) => {
+    const copy = response.clone();
+    caches.open(CACHE).then((cache) => cache.put(request, copy));
+    return response;
+  });
+
+  return Promise.race([network, timeoutAfter(NAVIGATION_NETWORK_TIMEOUT_MS)])
+    .catch(() => cachedNavigationFallback(request));
+}

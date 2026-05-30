@@ -152,7 +152,7 @@ Goal: reduce stale shell risk from manual service-worker cache versions.
 - [x] Add generated cache metadata or an asset-content-derived version stamp.
 - [x] Add a check that fails when generated cache metadata is stale.
 - [x] Keep the service worker install path deterministic.
-- [ ] Consider a bounded network timeout for navigations before falling back to
+- [x] Consider a bounded network timeout for navigations before falling back to
       cached shell pages on slow/flaky networks.
 - [ ] Preserve current offline reading guarantees.
 - [ ] Document the new cache/version workflow in `docs/QA.md` and/or
@@ -183,13 +183,13 @@ Suggested commit:
 
 Goal: catch content and route mistakes before deployment.
 
-- [ ] Detect duplicate essay slugs.
-- [ ] Validate section order against files and metadata.
-- [ ] Validate social images exist.
+- [x] Detect duplicate essay slugs.
+- [x] Validate section order against files and metadata.
+- [x] Validate social images exist.
 - [ ] Validate internal route links resolve.
 - [ ] Validate no root-absolute links escape `/renaissance/`.
-- [ ] Validate feed, sitemap, robots, and discoverability outputs stay fresh.
-- [ ] Add or update standalone regression tests for the new validators.
+- [x] Validate feed, sitemap, robots, and discoverability outputs stay fresh.
+- [x] Add or update standalone regression tests for the new validators.
 
 Suggested commit:
 
@@ -201,8 +201,8 @@ Goal: create one source of truth for valid site routes and metadata.
 
 - [x] Generate a route registry from published essays, sections, shell pages,
       feeds, sitemap, manifest, and static recovery routes.
-- [ ] Use the registry to validate internal links.
-- [ ] Use the registry to seed 404/recovery suggestions.
+- [x] Use the registry to validate internal links.
+- [x] Use the registry to seed 404/recovery suggestions.
 - [ ] Use the registry to derive sitemap/feed/discoverability expectations where
       practical.
 - [ ] Use the registry to derive service-worker shell precache expectations where
@@ -218,14 +218,14 @@ Suggested commit:
 
 Goal: make generated artifacts predictable and auditable.
 
-- [ ] Inventory every generated artifact and its source inputs.
+- [x] Inventory every generated artifact and its source inputs.
 - [ ] Add or improve a single build/check command that validates all generated
       artifacts are fresh.
-- [ ] Add artifact summary output for humans: counts, sizes, published essays,
+- [x] Add artifact summary output for humans: counts, sizes, published essays,
       sections, routes, cache entries.
 - [ ] Ensure generated outputs are deterministic across Windows/Linux line
       endings where practical.
-- [ ] Add size budgets for large generated files.
+- [x] Add size budgets for large generated files.
 - [ ] Document the content-to-artifact pipeline.
 
 Suggested commit:

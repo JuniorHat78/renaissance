@@ -98,6 +98,10 @@ function validateEssays(errors) {
       continue;
     }
 
+    if (!/^[a-z0-9][a-z0-9-]*$/.test(slug)) {
+      errors.push("Essay " + slug + " has an invalid slug; use lowercase letters, numbers, and hyphens");
+    }
+
     if (slugSeen.has(slug)) {
       errors.push("Duplicate essay slug: " + slug);
     } else {
@@ -122,6 +126,15 @@ function validateEssays(errors) {
         errors.push("Essay " + slug + " has non-string social_image");
       } else if (!String(essay.social_image).trim()) {
         errors.push("Essay " + slug + " has empty social_image");
+      } else if (!fs.existsSync(path.join(rootDir, String(essay.social_image).trim()))) {
+        errors.push("Essay " + slug + " references missing social_image: " + String(essay.social_image).trim());
+      }
+    }
+
+    if (essay.published !== false) {
+      const publishedAt = String((essay && essay.published_at) || "").trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(publishedAt)) {
+        errors.push("Published essay " + slug + " requires published_at as YYYY-MM-DD");
       }
     }
 
