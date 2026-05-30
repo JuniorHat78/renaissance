@@ -1,0 +1,8 @@
+[
+  {
+    "code": "unmatched-emphasis-marker",
+    "details": {},
+    "message": "Treating unmatched emphasis marker as literal text.",
+    "offset": 21
+  }
+]

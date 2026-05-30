@@ -1,0 +1,69 @@
+{
+  "version": 1,
+  "fixtures": [
+    {
+      "name": "basic-paragraph",
+      "purpose": "Paragraph splitting and soft line joining."
+    },
+    {
+      "name": "curly-quotes",
+      "purpose": "Curly quote pull-quote detection without text loss."
+    },
+    {
+      "name": "divider",
+      "purpose": "Horizontal rule block recognition."
+    },
+    {
+      "name": "emphasis-basic",
+      "purpose": "Conservative inline emphasis parsing."
+    },
+    {
+      "name": "emphasis-empty",
+      "purpose": "Empty star pairs stay literal."
+    },
+    {
+      "name": "emphasis-unmatched-close",
+      "purpose": "Stray closing-looking markers stay literal."
+    },
+    {
+      "name": "emphasis-unmatched-open",
+      "purpose": "Unmatched opening markers stay literal and diagnostic."
+    },
+    {
+      "name": "hard-break",
+      "purpose": "Two trailing spaces create an explicit hard break."
+    },
+    {
+      "name": "headings",
+      "purpose": "Heading levels and clamping behavior."
+    },
+    {
+      "name": "html-is-text",
+      "purpose": "HTML-looking prose is rendered as text."
+    },
+    {
+      "name": "literal-asterisk-bullet-looking-line",
+      "purpose": "Markdown-like bullet prose does not become emphasis."
+    },
+    {
+      "name": "literal-asterisk-multiplication",
+      "purpose": "Mathematical and word-adjacent asterisks stay literal."
+    },
+    {
+      "name": "long-paragraph",
+      "purpose": "Large paragraphs parse deterministically."
+    },
+    {
+      "name": "pull-quote",
+      "purpose": "Straight quote pull-quote detection without quote stripping."
+    },
+    {
+      "name": "script-tag-is-text",
+      "purpose": "Script-looking input is escaped, not executed markup."
+    },
+    {
+      "name": "unicode-punctuation",
+      "purpose": "Unicode punctuation remains stable through parsing and rendering."
+    }
+  ]
+}

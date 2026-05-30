@@ -1,0 +1,48 @@
+{
+  "children": [
+    {
+      "children": [
+        {
+          "type": "text",
+          "value": "Before the break."
+        }
+      ],
+      "position": {
+        "endOffset": 17,
+        "line": 1,
+        "startOffset": 0
+      },
+      "type": "paragraph"
+    },
+    {
+      "position": {
+        "endOffset": 22,
+        "line": 3,
+        "startOffset": 19
+      },
+      "type": "divider"
+    },
+    {
+      "children": [
+        {
+          "type": "text",
+          "value": "After the break."
+        }
+      ],
+      "position": {
+        "endOffset": 40,
+        "line": 5,
+        "startOffset": 24
+      },
+      "type": "paragraph"
+    }
+  ],
+  "diagnostics": [],
+  "sourceName": "divider",
+  "stats": {
+    "blocks": 3,
+    "words": 6
+  },
+  "type": "document",
+  "version": "0.1.0"
+}

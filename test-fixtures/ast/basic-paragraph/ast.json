@@ -1,0 +1,40 @@
+{
+  "children": [
+    {
+      "children": [
+        {
+          "type": "text",
+          "value": "The first paragraph starts here and continues on the next source line."
+        }
+      ],
+      "position": {
+        "endOffset": 70,
+        "line": 1,
+        "startOffset": 0
+      },
+      "type": "paragraph"
+    },
+    {
+      "children": [
+        {
+          "type": "text",
+          "value": "The second paragraph stands alone."
+        }
+      ],
+      "position": {
+        "endOffset": 106,
+        "line": 4,
+        "startOffset": 72
+      },
+      "type": "paragraph"
+    }
+  ],
+  "diagnostics": [],
+  "sourceName": "basic-paragraph",
+  "stats": {
+    "blocks": 2,
+    "words": 17
+  },
+  "type": "document",
+  "version": "0.1.0"
+}

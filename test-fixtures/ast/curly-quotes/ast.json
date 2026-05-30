@@ -1,0 +1,26 @@
+{
+  "children": [
+    {
+      "children": [
+        {
+          "type": "text",
+          "value": "“The old grammar should become explicit.”"
+        }
+      ],
+      "position": {
+        "endOffset": 41,
+        "line": 1,
+        "startOffset": 0
+      },
+      "type": "pull_quote"
+    }
+  ],
+  "diagnostics": [],
+  "sourceName": "curly-quotes",
+  "stats": {
+    "blocks": 1,
+    "words": 6
+  },
+  "type": "document",
+  "version": "0.1.0"
+}

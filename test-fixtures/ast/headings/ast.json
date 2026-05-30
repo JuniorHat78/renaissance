@@ -1,0 +1,82 @@
+{
+  "children": [
+    {
+      "children": [
+        {
+          "type": "text",
+          "value": "First"
+        }
+      ],
+      "level": 1,
+      "position": {
+        "endOffset": 7,
+        "line": 1,
+        "startOffset": 0
+      },
+      "type": "heading"
+    },
+    {
+      "children": [
+        {
+          "type": "text",
+          "value": "Second"
+        }
+      ],
+      "level": 2,
+      "position": {
+        "endOffset": 18,
+        "line": 3,
+        "startOffset": 9
+      },
+      "type": "heading"
+    },
+    {
+      "children": [
+        {
+          "type": "text",
+          "value": "Third"
+        }
+      ],
+      "level": 3,
+      "position": {
+        "endOffset": 29,
+        "line": 5,
+        "startOffset": 20
+      },
+      "type": "heading"
+    },
+    {
+      "children": [
+        {
+          "type": "text",
+          "value": "Fourth becomes third"
+        }
+      ],
+      "level": 3,
+      "position": {
+        "endOffset": 56,
+        "line": 7,
+        "startOffset": 31
+      },
+      "type": "heading"
+    }
+  ],
+  "diagnostics": [
+    {
+      "code": "heading-level-clamped",
+      "details": {
+        "level": 4,
+        "line": 7
+      },
+      "message": "Clamped heading level 4 to level 3.",
+      "offset": 31
+    }
+  ],
+  "sourceName": "headings",
+  "stats": {
+    "blocks": 4,
+    "words": 6
+  },
+  "type": "document",
+  "version": "0.1.0"
+}

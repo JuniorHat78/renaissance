@@ -1,0 +1,26 @@
+{
+  "children": [
+    {
+      "children": [
+        {
+          "type": "text",
+          "value": "This sentence has a stray marker* at the edge."
+        }
+      ],
+      "position": {
+        "endOffset": 46,
+        "line": 1,
+        "startOffset": 0
+      },
+      "type": "paragraph"
+    }
+  ],
+  "diagnostics": [],
+  "sourceName": "emphasis-unmatched-close",
+  "stats": {
+    "blocks": 1,
+    "words": 9
+  },
+  "type": "document",
+  "version": "0.1.0"
+}

@@ -1,0 +1,1 @@
+This paragraph is intentionally longer than the tiny examples because production essays are long, patient, and full of clauses. It keeps moving through several phrases without requiring the parser to allocate surprising structures, and it should still produce one paragraph, one searchable string, and a stable word count for every run of the toolchain.

@@ -1,0 +1,11 @@
+[
+  {
+    "code": "heading-level-clamped",
+    "details": {
+      "level": 4,
+      "line": 7
+    },
+    "message": "Clamped heading level 4 to level 3.",
+    "offset": 31
+  }
+]
