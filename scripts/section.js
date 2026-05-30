@@ -707,15 +707,61 @@
     return essays[0].slug;
   }
 
-  function showMessage(message) {
+  function clearNode(element) {
+    while (element && element.firstChild) {
+      element.removeChild(element.firstChild);
+    }
+  }
+
+  function makeActionLink(href, label, className) {
+    const link = document.createElement("a");
+    link.href = href;
+    link.className = className;
+    link.textContent = label;
+    return link;
+  }
+
+  function setRobotsNoIndex() {
+    let robots = document.querySelector('meta[name="robots"]');
+    if (!robots) {
+      robots = document.createElement("meta");
+      robots.setAttribute("name", "robots");
+      document.head.appendChild(robots);
+    }
+    robots.setAttribute("content", "noindex");
+  }
+
+  function showMessage(message, options) {
+    const settings = options || {};
+    const body = String(settings.body || "The requested page is not available.").trim();
     essayLine.textContent = "Renaissance";
     sectionKicker.textContent = "Reader";
     sectionTitle.textContent = message;
     setSectionSubtitle("");
     sectionMeta.textContent = "";
-    sectionContent.innerHTML = '<p><a href="index.html">Return to Home</a></p>';
-    backToEssay.href = "index.html";
-    backToEssay.textContent = "Home";
+    clearNode(sectionContent);
+
+    const paragraph = document.createElement("p");
+    paragraph.className = "muted";
+    paragraph.textContent = body;
+
+    const actions = document.createElement("p");
+    actions.className = "reader-message-actions";
+    actions.appendChild(makeActionLink(router.build("archive", {}), "Return to the archive", "button"));
+    actions.appendChild(document.createTextNode(" "));
+    actions.appendChild(makeActionLink(router.build("search", {}), "Search the essays", "button button-ghost"));
+
+    sectionContent.appendChild(paragraph);
+    sectionContent.appendChild(actions);
+    backToEssay.href = router.build("archive", {});
+    backToEssay.textContent = "Archive";
+    setRobotsNoIndex();
+    setPageMetadata({
+      title: message + " \u00b7 Renaissance",
+      description: body,
+      canonical: toAbsoluteUrl(router.build("archive", {})),
+      image: toAbsoluteUrl("assets/og-home.png")
+    });
     if (copyHighlightButton) {
       copyHighlightButton.disabled = true;
     }
@@ -2154,18 +2200,24 @@
       const essaySlug = await resolveEssaySlug();
       const essay = await loadEssay(essaySlug);
       if (!essay) {
-        showMessage("Essay not found.");
+        showMessage("Essay not found.", {
+          body: "That essay slug is not published here. The archive and search page are the quickest ways back into the collection."
+        });
         return;
       }
 
       if (!essay.section_order.length) {
-        showMessage("No sections are available.");
+        showMessage("No sections are available.", {
+          body: "This essay exists, but it does not have any readable sections yet."
+        });
         return;
       }
 
       const sectionNumber = querySectionNumber() || essay.section_order[0];
       if (!essay.section_order.includes(sectionNumber)) {
-        showMessage("Section not found.");
+        showMessage("Section not found.", {
+          body: "That section is not part of this essay. Return to the essay page to choose an available section."
+        });
         return;
       }
 
@@ -2213,7 +2265,9 @@
         updateReadingStateDebug();
       }, hasAnchor ? 900 : didRestore ? RESTORE_SAVE_SUPPRESS_MS + 160 : 180);
     } catch (error) {
-      showMessage("Unable to load this section.");
+      showMessage("Unable to load this section.", {
+        body: "The section could not be loaded right now. Try the archive or search page to keep reading."
+      });
     }
   }
 

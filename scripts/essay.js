@@ -75,6 +75,62 @@
     });
   }
 
+  function clearNode(element) {
+    while (element && element.firstChild) {
+      element.removeChild(element.firstChild);
+    }
+  }
+
+  function makeActionLink(href, label, className) {
+    const link = document.createElement("a");
+    link.href = href;
+    link.className = className;
+    link.textContent = label;
+    return link;
+  }
+
+  function setRobotsNoIndex() {
+    let robots = document.querySelector('meta[name="robots"]');
+    if (!robots) {
+      robots = document.createElement("meta");
+      robots.setAttribute("name", "robots");
+      document.head.appendChild(robots);
+    }
+    robots.setAttribute("content", "noindex");
+  }
+
+  function showEssayMessage(title, body) {
+    const message = String(title || "Unable to load this essay.");
+    const description = String(body || "The requested essay is not available.").trim();
+    essayTitle.textContent = message;
+    essaySummary.textContent = description;
+    essaySummary.hidden = false;
+    essayStats.textContent = "";
+    clearNode(sectionList);
+
+    const item = document.createElement("li");
+    item.className = "muted";
+    const paragraph = document.createElement("p");
+    paragraph.textContent = "Start again from one of these routes.";
+    const actions = document.createElement("p");
+    actions.className = "reader-message-actions";
+    actions.appendChild(makeActionLink(router.build("archive", {}), "Return to the archive", "button"));
+    actions.appendChild(document.createTextNode(" "));
+    actions.appendChild(makeActionLink(router.build("search", {}), "Search the essays", "button button-ghost"));
+    item.appendChild(paragraph);
+    item.appendChild(actions);
+    sectionList.appendChild(item);
+
+    setRobotsNoIndex();
+    setPageMetadata({
+      title: message + " \u00b7 Renaissance",
+      description,
+      canonical: toAbsoluteUrl(router.build("archive", {})),
+      image: toAbsoluteUrl("assets/og-home.png")
+    });
+    clearSearchView();
+  }
+
   function joinMetaParts(parts) {
     return parts
       .map((part) => '<span>' + escapeHtml(part) + "</span>")
@@ -448,12 +504,19 @@
         clearSearchView();
       }
     } catch (error) {
-      essayTitle.textContent = "Unable to load this essay.";
-      essaySummary.textContent = "";
-      essaySummary.hidden = true;
-      essayStats.textContent = "";
-      sectionList.innerHTML = '<li class="muted">Sections unavailable.</li>';
-      clearSearchView();
+      const message = String((error && error.message) || "");
+      if (/essay not found/i.test(message)) {
+        showEssayMessage(
+          "Essay not found.",
+          "That essay slug is not published here. The archive and search page are the quickest ways back into the collection."
+        );
+        return;
+      }
+
+      showEssayMessage(
+        "Unable to load this essay.",
+        "The essay could not be loaded right now. Try the archive or search page to keep reading."
+      );
     }
   }
 

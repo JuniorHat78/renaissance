@@ -85,6 +85,56 @@ async function main() {
     );
   });
 
+  await step("section shell gives recovery links for an unknown essay slug", async () => {
+    const response = await page.goto(options.base + "/section.html?essay=etching-god-into-san&section=1", {
+      waitUntil: "domcontentloaded",
+      timeout: 30000
+    });
+    assert.ok(response, "expected a response");
+    assert.equal(response.status(), 200, "app-shell not-found states keep the shell response");
+    await page.waitForFunction(() => {
+      const title = document.getElementById("section-title");
+      return title && /Essay not found/i.test(String(title.textContent || ""));
+    }, null, { timeout: 5000 });
+
+    const robots = await page.getAttribute('meta[name="robots"]', "content");
+    assert.equal(robots, "noindex", "app-level missing section routes should be noindex");
+    const links = await page.$$eval("#section-content a", (anchors) => anchors.map((anchor) => anchor.href));
+    assert.ok(
+      links.some((href) => href.endsWith(prefix + "/index.html")),
+      "section recovery should link to the archive under the subpath"
+    );
+    assert.ok(
+      links.some((href) => href.endsWith(prefix + "/search.html")),
+      "section recovery should link to search under the subpath"
+    );
+  });
+
+  await step("essay shell gives recovery links for an unknown essay slug", async () => {
+    const response = await page.goto(options.base + "/essay.html?essay=etching-god-into-san", {
+      waitUntil: "domcontentloaded",
+      timeout: 30000
+    });
+    assert.ok(response, "expected a response");
+    assert.equal(response.status(), 200, "app-shell not-found states keep the shell response");
+    await page.waitForFunction(() => {
+      const title = document.getElementById("essay-title");
+      return title && /Essay not found/i.test(String(title.textContent || ""));
+    }, null, { timeout: 5000 });
+
+    const robots = await page.getAttribute('meta[name="robots"]', "content");
+    assert.equal(robots, "noindex", "app-level missing essay routes should be noindex");
+    const links = await page.$$eval("#section-list a", (anchors) => anchors.map((anchor) => anchor.href));
+    assert.ok(
+      links.some((href) => href.endsWith(prefix + "/index.html")),
+      "essay recovery should link to the archive under the subpath"
+    );
+    assert.ok(
+      links.some((href) => href.endsWith(prefix + "/search.html")),
+      "essay recovery should link to search under the subpath"
+    );
+  });
+
   await context.close();
   await browser.close();
 
