@@ -46,6 +46,9 @@ jobs:
       - name: Custom 404 Regression
         run: npm run ci:notfound
 
+      - name: Accessibility Audit (axe-core, light + dark)
+        run: npm run ci:a11y
+
       - name: Visual QA Check (warning-only)
         run: |
           if ! npm run ci:visual; then
