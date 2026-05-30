@@ -55,6 +55,12 @@ jobs:
       - name: Focus & Keyboard Regression (skip link, focus management)
         run: npm run ci:focus
 
+      - name: Device Matrix Regression (emulated phones/tablet/desktop)
+        run: npm run ci:devices
+
+      - name: Keyboard-only Journey Regression
+        run: npm run ci:keyboard
+
       - name: Visual QA Check (warning-only)
         run: |
           if ! npm run ci:visual; then
