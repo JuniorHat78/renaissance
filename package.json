@@ -31,7 +31,7 @@
     "ci:visual": "node scripts/ci/run-with-server.js --port 4174 -- npm run visual:check -- --base http://127.0.0.1:4174 --warn-only",
     "ci:lighthouse": "node scripts/ci/run-with-server.js --port 4175 -- node scripts/ci/lighthouse-warning-runner.js --base http://127.0.0.1:4175",
     "test:anchors": "node scripts/tests/anchor-regression.js",
-    "test:ast": "npm run test:ast-runtime && npm run ast:doctor && npm run ast:fixture-shape && npm run ast:fixtures && npm run ast:corpus && npm run ast:compare",
+    "test:ast": "npm run test:ast-runtime && npm run ast:doctor && npm run ast:fixture-shape && npm run ast:fixtures && npm run ast:corpus && npm run ast:report && npm run ast:compare",
     "test:ast-runtime": "node scripts/tests/ast-runtime-regression.js",
     "test:chapter-redirect": "node scripts/tests/chapter-redirect-regression.js",
     "test:clipboard-citation": "node scripts/tests/clipboard-citation-regression.js",
