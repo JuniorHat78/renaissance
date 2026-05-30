@@ -69,11 +69,7 @@
   }
 
   function firstParagraphExcerpt(payload) {
-    const blocks =
-      payload && payload.contentBlocks && payload.contentBlocks.length
-        ? payload.contentBlocks
-        : (payload && payload.blocks) || [];
-    const paragraph = content.firstParagraph(blocks) || "";
+    const paragraph = String((payload && payload.firstParagraphText) || "");
     return content.shortExcerpt(paragraph, PREVIEW_CHARS);
   }
 

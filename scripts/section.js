@@ -102,14 +102,9 @@
   }
 
   function descriptionForSection(essay, display, payload) {
-    const blocks = Array.isArray(payload && payload.contentBlocks)
-      ? payload.contentBlocks
-      : Array.isArray(payload && payload.blocks)
-        ? payload.blocks
-        : [];
-    const firstParagraph = blocks.find((block) => block && block.type === "p" && cleanSpaces(block.text));
-    if (firstParagraph) {
-      return truncateText(firstParagraph.text, 200);
+    const firstParagraphText = String((payload && payload.firstParagraphText) || "").trim();
+    if (firstParagraphText) {
+      return truncateText(firstParagraphText, 200);
     }
 
     return "Read " + display.label + " of " + String(essay.title || "this essay") + " on Renaissance.";

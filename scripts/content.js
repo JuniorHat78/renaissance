@@ -666,6 +666,9 @@
     const searchableText = contentAst
       ? AST.toSearchableText(contentAst)
       : (blocksToSearchableText(contentBlocks) || toSearchableText(rawText));
+    const firstParagraphText = contentAst
+      ? AST.firstParagraphText(contentAst)
+      : firstParagraph(contentBlocks);
     const wordCount = AST ? AST.wordCount(searchableText) : countWords(searchableText);
     const readMinutes = estimateReadMinutes(wordCount);
 
@@ -679,6 +682,7 @@
       blocks,
       contentBlocks,
       searchableText,
+      firstParagraphText,
       wordCount,
       readMinutes
     };
