@@ -44,10 +44,6 @@ const allowedSinks = [
   ["scripts/section.js", "sectionMeta.innerHTML = joinMetaParts([", "metadata parts are escaped in joinMetaParts"]
 ];
 
-function toRepoPath(filePath) {
-  return filePath.replace(/\\/g, "/");
-}
-
 function trackedRuntimeFiles() {
   const output = childProcess.execFileSync("git", ["ls-files", "scripts/*.js"], {
     cwd: root,
