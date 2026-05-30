@@ -77,6 +77,23 @@ check("every precached path exists on disk (no dangling entries)", () => {
   }
 });
 
+check("offline text asset manifest is cached and points at real files", () => {
+  assert.ok(precacheSet.has("data/offline-assets.json"), "offline asset manifest should be precached");
+  assert.ok(/cacheOfflineAssets/.test(swSource), "service worker should cache offline text assets during install");
+
+  const manifest = JSON.parse(read("data/offline-assets.json"));
+  assert.ok(Array.isArray(manifest.assets), "offline asset manifest needs an assets array");
+  assert.ok(manifest.assets.includes("data/essays.json"), "offline assets should include essay metadata");
+  assert.ok(
+    manifest.assets.some((asset) => /^raw\/.+\/1\.txt$/.test(asset)),
+    "offline assets should include raw section text"
+  );
+
+  for (const asset of manifest.assets) {
+    assert.ok(fs.existsSync(path.join(root, asset)), "offline asset missing on disk: " + asset);
+  }
+});
+
 check("the webmanifest is valid and complete", () => {
   const manifest = JSON.parse(read("site.webmanifest"));
   assert.ok(manifest.name, "manifest needs a name");

@@ -1,10 +1,9 @@
 #!/usr/bin/env node
 
 // Proves the PWA actually works offline. Loads the site so the service worker
-// installs and precaches the shell, then flips the browser offline and verifies
-// the archive still renders, an essay still reads (content lives in the precached
-// essays-data.js), and a never-before-visited essay also reads — all with the
-// network cut. This is the real promise of Phase 14, asserted end to end.
+// installs and precaches the shell plus offline text assets, then flips the
+// browser offline and verifies the archive, an essay, a raw section, and the
+// custom 404 all render with the network cut.
 
 const assert = require("node:assert/strict");
 const { browserType, resolveBrowserName } = require("./lib/browser");
@@ -71,7 +70,7 @@ async function main() {
     await page.waitForSelector("#essay-list .essay-item a", { timeout: 30000 });
   });
 
-  await step("an essay reads offline (content from precached data)", async () => {
+  await step("an essay reads offline", async () => {
     await page.goto(options.base + "/essay.html?essay=" + encodeURIComponent(slugs[0]), {
       waitUntil: "domcontentloaded",
       timeout: 30000

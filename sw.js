@@ -4,16 +4,17 @@
  * Strategy:
  *  - Navigations: network-first (content stays fresh online), falling back to
  *    the cached page when offline. Matches ignore the query string, so
- *    essay.html?essay=X resolves to the cached essay.html shell — and because
- *    all essay text lives in the precached essays-data.js, every essay reads
- *    offline once the shell is cached, not just the ones already visited.
+ *    essay.html?essay=X resolves to the cached essay.html shell. Raw essay text
+ *    is cached from data/offline-assets.json during install so unread sections
+ *    can still open offline without parsing one monolithic JS data blob.
  *  - Static assets (css/js/icons): stale-while-revalidate — instant from cache,
  *    refreshed in the background so a later load picks up a new deploy.
  *  - A versioned cache; bump VERSION to force a clean re-precache.
  */
 
-const VERSION = "v3";
+const VERSION = "v4";
 const CACHE = "renaissance-" + VERSION;
+const OFFLINE_ASSET_MANIFEST = "data/offline-assets.json";
 
 const PRECACHE = [
   "./",
@@ -22,6 +23,7 @@ const PRECACHE = [
   "section.html",
   "search.html",
   "404.html",
+  "data/offline-assets.json",
   "styles/site.css",
   "scripts/ast/index.js",
   "scripts/archive.js",
@@ -49,9 +51,30 @@ const PRECACHE = [
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(CACHE).then((cache) => cache.addAll(PRECACHE)).then(() => self.skipWaiting())
+    caches.open(CACHE)
+      .then((cache) => cache.addAll(PRECACHE).then(() => cacheOfflineAssets(cache)))
+      .then(() => self.skipWaiting())
   );
 });
+
+async function cacheOfflineAssets(cache) {
+  try {
+    const response = await fetch(OFFLINE_ASSET_MANIFEST, { cache: "no-store" });
+    if (!response.ok) {
+      return;
+    }
+    const manifest = await response.json();
+    const assets = Array.isArray(manifest.assets)
+      ? manifest.assets.filter((asset) => typeof asset === "string" && asset.length > 0)
+      : [];
+    if (assets.length > 0) {
+      await cache.addAll(assets);
+    }
+  } catch (error) {
+    // Shell precache still gives a useful offline fallback if content caching
+    // fails during install.
+  }
+}
 
 self.addEventListener("activate", (event) => {
   event.waitUntil(

@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "assets": [
+    "data/essays.json",
+    "raw/etching-god-into-sand/1.txt",
+    "raw/etching-god-into-sand/10.txt",
+    "raw/etching-god-into-sand/2.txt",
+    "raw/etching-god-into-sand/3.txt",
+    "raw/etching-god-into-sand/4.txt",
+    "raw/etching-god-into-sand/5.txt",
+    "raw/etching-god-into-sand/6.txt",
+    "raw/etching-god-into-sand/7.txt",
+    "raw/etching-god-into-sand/8.txt",
+    "raw/etching-god-into-sand/9.txt",
+    "raw/etching-god-into-sand/manifest.json",
+    "raw/shadows/1.txt",
+    "raw/shadows/2.txt",
+    "raw/shadows/3.txt",
+    "raw/shadows/4.txt",
+    "raw/shadows/5.txt",
+    "raw/shadows/6.txt",
+    "raw/shadows/manifest.json"
+  ]
+}

@@ -131,32 +131,13 @@
       .replace(/\n/g, " ");
   }
 
-  function encodingQualityScore(text) {
-    const replacementCount = (text.match(/\uFFFD/g) || []).length;
-    const mojibakeCount = (text.match(/(?:\u00C3.|\u00C2.|\u00E2.)/g) || []).length;
-    return -((replacementCount * 4) + mojibakeCount);
-  }
-
-  function decodeText(buffer) {
-    const utf8 = new TextDecoder("utf-8", { fatal: false }).decode(buffer);
-    if (!utf8.includes("\uFFFD")) {
-      return utf8;
-    }
-
-    const windows1252 = new TextDecoder("windows-1252").decode(buffer);
-    return encodingQualityScore(windows1252) > encodingQualityScore(utf8)
-      ? windows1252
-      : utf8;
-  }
-
   async function fetchAsText(path) {
     const response = await fetch(path);
     if (!response.ok) {
       throw new Error("Failed to load " + path + " (" + response.status + ")");
     }
 
-    const buffer = await response.arrayBuffer();
-    return decodeText(buffer).replace(/\r\n/g, "\n");
+    return (await response.text()).replace(/\r\n?/g, "\n");
   }
 
   function parseNumber(value) {
