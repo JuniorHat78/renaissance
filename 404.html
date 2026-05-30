@@ -384,7 +384,10 @@
       function siteBase() {
         var parts = location.pathname.split("/").filter(Boolean);
         var first = parts[0] || "";
-        return first && first.indexOf(".") === -1 ? "/" + first + "/" : "/";
+        if (first.toLowerCase() === "renaissance") {
+          return "/renaissance/";
+        }
+        return "/";
       }
 
       function sanitizeHref(url) {
@@ -401,12 +404,6 @@
           .replace(/%[0-9a-f]{2}/gi, " ")
           .replace(/[^a-z0-9]+/g, " ")
           .trim();
-      }
-
-      function prettySlug(slug) {
-        return String(slug || "")
-          .replace(/-/g, " ")
-          .replace(/\b\w/g, function (letter) { return letter.toUpperCase(); });
       }
 
       function safeDecode(value) {
