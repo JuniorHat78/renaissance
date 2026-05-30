@@ -3,6 +3,10 @@
   const SORTS = ["reading_order", "relevance"];
   const PAGE_SIZES = [25, 50, 100];
   const DEFAULT_PAGE_SIZE = 50;
+  const MAX_SEARCH_CACHE_ENTRIES = 24;
+  const MAX_FUZZY_QUERY_TOKENS = 8;
+  const MAX_FUZZY_TOKEN_LENGTH = 48;
+  const YIELD_EVERY_SECTIONS = 4;
 
   function escapeHtml(text) {
     return String(text)
@@ -79,7 +83,7 @@
     return tokenizeWordSpans(text).map((token) => token.lower);
   }
 
-  function levenshteinDistance(left, right) {
+  function boundedLevenshteinDistance(left, right, maxDistance) {
     if (left === right) {
       return 0;
     }
@@ -88,6 +92,9 @@
     }
     if (!right.length) {
       return left.length;
+    }
+    if (Math.abs(left.length - right.length) > maxDistance) {
+      return maxDistance + 1;
     }
 
     const previous = new Array(right.length + 1);
@@ -99,6 +106,7 @@
 
     for (let row = 1; row <= left.length; row += 1) {
       current[0] = row;
+      let rowBest = current[0];
       for (let column = 1; column <= right.length; column += 1) {
         const substitutionCost = left[row - 1] === right[column - 1] ? 0 : 1;
         current[column] = Math.min(
@@ -106,6 +114,11 @@
           current[column - 1] + 1,
           previous[column - 1] + substitutionCost
         );
+        rowBest = Math.min(rowBest, current[column]);
+      }
+
+      if (rowBest > maxDistance) {
+        return maxDistance + 1;
       }
 
       for (let column = 0; column <= right.length; column += 1) {
@@ -193,14 +206,16 @@
       return [];
     }
 
-    const queryTokens = Array.from(new Set(tokenizeQueryWords(trimmed).filter((token) => token.length >= 3)));
+    const queryTokens = Array.from(new Set(tokenizeQueryWords(trimmed).filter((token) =>
+      token.length >= 3 && token.length <= MAX_FUZZY_TOKEN_LENGTH
+    ))).slice(0, MAX_FUZZY_QUERY_TOKENS);
     if (!queryTokens.length) {
       return [];
     }
 
     const hits = [];
     for (const token of section.tokens) {
-      if (token.lower.length < 3) {
+      if (token.lower.length < 3 || token.lower.length > MAX_FUZZY_TOKEN_LENGTH) {
         continue;
       }
 
@@ -216,7 +231,7 @@
           continue;
         }
         const threshold = fuzzyThreshold(Math.max(token.lower.length, queryToken.length));
-        const distance = levenshteinDistance(token.lower, queryToken);
+        const distance = boundedLevenshteinDistance(token.lower, queryToken, threshold);
         if (distance <= threshold && distance < bestDistance) {
           bestDistance = distance;
         }
@@ -384,6 +399,7 @@
     }
 
     let indexPromise = null;
+    const resultCache = new Map();
 
     async function buildIndex() {
       const essays = (await contentApi.loadEssays()).filter((essay) => essay.published !== false);
@@ -425,6 +441,44 @@
       return indexPromise;
     }
 
+    function cacheKeyForState(state, activeScope) {
+      return [
+        activeScope || state.scope,
+        state.query,
+        state.mode,
+        state.sort,
+        state.caseSensitive ? "1" : "0",
+        String(state.page),
+        String(state.pageSize)
+      ].join("\u001f");
+    }
+
+    function rememberResult(key, result) {
+      if (resultCache.has(key)) {
+        resultCache.delete(key);
+      }
+      resultCache.set(key, result);
+      while (resultCache.size > MAX_SEARCH_CACHE_ENTRIES) {
+        const oldest = resultCache.keys().next().value;
+        resultCache.delete(oldest);
+      }
+      return result;
+    }
+
+    function cachedResult(key) {
+      if (!resultCache.has(key)) {
+        return null;
+      }
+      const result = resultCache.get(key);
+      resultCache.delete(key);
+      resultCache.set(key, result);
+      return result;
+    }
+
+    function yieldToBrowser() {
+      return new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
     async function search(rawState, options) {
       const settings = options || {};
       const index = await ensureIndex();
@@ -453,9 +507,20 @@
         };
       }
 
+      const cacheKey = cacheKeyForState(state, activeScope);
+      const cached = cachedResult(cacheKey);
+      if (cached) {
+        return cached;
+      }
+
       const allHits = [];
       const sectionOccurrenceCounts = new Map();
-      for (const section of sections) {
+      for (let sectionIndex = 0; sectionIndex < sections.length; sectionIndex += 1) {
+        const section = sections[sectionIndex];
+        if (sectionIndex > 0 && sectionIndex % YIELD_EVERY_SECTIONS === 0) {
+          await yieldToBrowser();
+        }
+
         const sectionHits = findOccurrencesInText(section.text, state.query, {
           mode: state.mode,
           caseSensitive: state.caseSensitive
@@ -525,7 +590,7 @@
       });
       const essayCounts = Array.from(essayCountsMap.values()).sort((left, right) => left.essayOrder - right.essayOrder);
 
-      return {
+      return rememberResult(cacheKey, {
         state: {
           ...state,
           scope: activeScope || state.scope
@@ -537,10 +602,13 @@
         totalSections: sectionCounts.length,
         totalEssays: essayCounts.length,
         essays: index.essays
-      };
+      });
     }
 
     return {
+      cacheSize() {
+        return resultCache.size;
+      },
       ensureIndex,
       search
     };
