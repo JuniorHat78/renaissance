@@ -3,6 +3,7 @@
   const DEFAULT_FALLBACK_SLUG = "default-essay";
   const DEFAULT_FALLBACK_SOURCE_DIR = "raw";
   const EMBEDDED_CHAPTERS_PATH = "scripts/chapters-data.js";
+  const AST = window.RenaissanceAst || null;
 
   const EMBEDDED_ESSAYS = Array.isArray(window.RENAISSANCE_EMBEDDED_ESSAYS)
     ? window.RENAISSANCE_EMBEDDED_ESSAYS
@@ -380,6 +381,10 @@
   }
 
   function toSearchableText(rawText) {
+    if (AST) {
+      return AST.toSearchableText(AST.parseDocument(rawText));
+    }
+
     return rawText
       .replace(/^#{1,6}\s+/gm, "")
       .replace(/^\s*---\s*$/gm, " ")
@@ -389,6 +394,10 @@
   }
 
   function blocksToSearchableText(blocks) {
+    if (AST) {
+      return AST.toSearchableText(blocks);
+    }
+
     return blocks
       .map((block) => {
         if (block.type === "hr") {
@@ -404,6 +413,10 @@
     }
 
   function parseBlocks(rawText) {
+    if (AST) {
+      return AST.astToLegacyBlocks(AST.parseDocument(rawText));
+    }
+
     const lines = rawText.split("\n");
     const blocks = [];
     let paragraphLines = [];
@@ -458,6 +471,10 @@
   }
 
   function firstParagraph(blocks) {
+    if (AST) {
+      return AST.firstParagraphText(blocks);
+    }
+
     const paragraph = blocks.find((block) => block.type === "p");
     return paragraph ? paragraph.text : "";
   }
@@ -640,10 +657,16 @@
     }
 
     const rawText = await loadSectionText(essay, section);
-    const blocks = parseBlocks(rawText);
-    const contentBlocks = removeLeadingHeadings(blocks);
-    const searchableText = blocksToSearchableText(contentBlocks) || toSearchableText(rawText);
-    const wordCount = countWords(searchableText);
+    const ast = AST
+      ? AST.parseDocument(rawText, { sourceName: essay.source_dir + "/" + String(section) + ".txt" })
+      : null;
+    const contentAst = ast ? AST.withoutLeadingHeadings(ast) : null;
+    const blocks = ast ? AST.astToLegacyBlocks(ast) : parseBlocks(rawText);
+    const contentBlocks = contentAst ? AST.astToLegacyBlocks(contentAst) : removeLeadingHeadings(blocks);
+    const searchableText = contentAst
+      ? AST.toSearchableText(contentAst)
+      : (blocksToSearchableText(contentBlocks) || toSearchableText(rawText));
+    const wordCount = AST ? AST.wordCount(searchableText) : countWords(searchableText);
     const readMinutes = estimateReadMinutes(wordCount);
 
     return {
@@ -651,6 +674,8 @@
       sectionNumber: section,
       display: sectionDisplay(essay, section),
       rawText,
+      ast,
+      contentAst,
       blocks,
       contentBlocks,
       searchableText,
@@ -683,6 +708,11 @@
   }
 
   function renderBlocks(container, blocks) {
+    if (AST) {
+      AST.renderBlocks(container, blocks);
+      return;
+    }
+
     const html = blocks
       .map((block) => {
         if (block.type === "hr") {

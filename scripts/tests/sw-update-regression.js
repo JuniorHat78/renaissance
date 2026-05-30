@@ -8,9 +8,15 @@
 // stale cache is gone while the current one survives.
 
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const { chromium } = require("playwright");
 
-const CURRENT_CACHE = "renaissance-v1";
+const swSource = fs.readFileSync(path.join(__dirname, "..", "..", "sw.js"), "utf8");
+const versionMatch = swSource.match(/const VERSION = "([^"]+)";/);
+assert.ok(versionMatch, "sw.js must declare a VERSION constant");
+
+const CURRENT_CACHE = "renaissance-" + versionMatch[1];
 const STALE_CACHE = "renaissance-vstale";
 
 function parseArgs(argv) {
