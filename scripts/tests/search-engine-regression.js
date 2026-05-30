@@ -49,6 +49,25 @@ async function main() {
     );
   });
 
+  await check("search index precomputes token and fuzzy records", async () => {
+    const engine = Search.createSearchEngine(fakeContentApi());
+    const index = await engine.ensureIndex();
+    const section = index.sections[0];
+
+    assert.ok(Array.isArray(section.tokens), "section record should include token spans");
+    assert.ok(section.tokens.some((token) => token.raw === "alpha"), "section tokens should preserve raw text");
+    assert.ok(section.fuzzyBuckets instanceof Map, "section record should include fuzzy candidate buckets");
+    assert.ok(section.fuzzyBuckets.size > 0, "fuzzy candidate buckets should not be empty");
+  });
+
+  await check("fuzzy search uses indexed section records", async () => {
+    const engine = Search.createSearchEngine(fakeContentApi());
+    const result = await engine.search({ query: "alhpa", mode: "fuzzy" });
+
+    assert.equal(result.totalHits, 1);
+    assert.equal(result.hits[0].matchedText, "alpha");
+  });
+
   console.log("Search engine regression checks passed.");
 }
 

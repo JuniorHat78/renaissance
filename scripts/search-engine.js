@@ -83,6 +83,50 @@
     return tokenizeWordSpans(text).map((token) => token.lower);
   }
 
+  function fuzzyBucketKey(length, first, last) {
+    return String(length) + "\u001f" + first + "\u001f" + last;
+  }
+
+  function buildFuzzyBuckets(tokens) {
+    const buckets = new Map();
+    for (const token of tokens) {
+      const value = token.lower;
+      if (value.length < 3 || value.length > MAX_FUZZY_TOKEN_LENGTH) {
+        continue;
+      }
+
+      const key = fuzzyBucketKey(value.length, value[0], value[value.length - 1]);
+      const bucket = buckets.get(key);
+      if (bucket) {
+        bucket.push(token);
+      } else {
+        buckets.set(key, [token]);
+      }
+    }
+    return buckets;
+  }
+
+  function fuzzyCandidatesForToken(section, queryToken) {
+    if (!section.fuzzyBuckets) {
+      return section.tokens || [];
+    }
+
+    const candidates = [];
+    for (let length = queryToken.length - 1; length <= queryToken.length + 1; length += 1) {
+      if (length < 3 || length > MAX_FUZZY_TOKEN_LENGTH) {
+        continue;
+      }
+
+      const bucket = section.fuzzyBuckets.get(
+        fuzzyBucketKey(length, queryToken[0], queryToken[queryToken.length - 1])
+      );
+      if (bucket) {
+        candidates.push(...bucket);
+      }
+    }
+    return candidates;
+  }
+
   function boundedLevenshteinDistance(left, right, maxDistance) {
     if (left === right) {
       return 0;
@@ -213,41 +257,35 @@
       return [];
     }
 
-    const hits = [];
-    for (const token of section.tokens) {
-      if (token.lower.length < 3 || token.lower.length > MAX_FUZZY_TOKEN_LENGTH) {
-        continue;
-      }
+    const bestHits = new Map();
+    for (const queryToken of queryTokens) {
+      const threshold = fuzzyThreshold(queryToken.length);
+      for (const token of fuzzyCandidatesForToken(section, queryToken)) {
+        if (token.lower.length < 3 || token.lower.length > MAX_FUZZY_TOKEN_LENGTH) {
+          continue;
+        }
 
-      let bestDistance = Number.POSITIVE_INFINITY;
-      for (const queryToken of queryTokens) {
-        if (Math.abs(token.lower.length - queryToken.length) > 1) {
-          continue;
-        }
-        if (token.lower[0] !== queryToken[0]) {
-          continue;
-        }
-        if (token.lower[token.lower.length - 1] !== queryToken[queryToken.length - 1]) {
-          continue;
-        }
-        const threshold = fuzzyThreshold(Math.max(token.lower.length, queryToken.length));
         const distance = boundedLevenshteinDistance(token.lower, queryToken, threshold);
-        if (distance <= threshold && distance < bestDistance) {
-          bestDistance = distance;
+        if (distance > threshold) {
+          continue;
         }
-      }
 
-      if (Number.isFinite(bestDistance)) {
-        hits.push({
-          index: token.index,
-          length: token.raw.length,
-          matchedText: token.raw,
-          score: 130 - (bestDistance * 15)
-        });
+        const key = String(token.index) + "\u001f" + token.raw;
+        const previous = bestHits.get(key);
+        if (!previous || distance < previous.distance) {
+          bestHits.set(key, { token, distance });
+        }
       }
     }
 
-    return hits;
+    return Array.from(bestHits.values())
+      .sort((left, right) => left.token.index - right.token.index)
+      .map(({ token, distance }) => ({
+        index: token.index,
+        length: token.raw.length,
+        matchedText: token.raw,
+        score: 130 - (distance * 15)
+      }));
   }
 
   function makeSnippet(text, startIndex, length) {
@@ -311,6 +349,32 @@
 
   function findOccurrencesInText(text, query, options) {
     const sourceText = String(text || "");
+    const tokens = tokenizeWordSpans(sourceText);
+    const section = {
+      text: sourceText,
+      lowerText: sourceText.toLowerCase(),
+      tokens,
+      fuzzyBuckets: buildFuzzyBuckets(tokens)
+    };
+    return findOccurrencesInTextRecord(section, query, options);
+  }
+
+  function findOccurrencesInSection(section, query, options) {
+    const record = section || {};
+    record.text = String(record.text || "");
+    if (typeof record.lowerText !== "string") {
+      record.lowerText = record.text.toLowerCase();
+    }
+    if (!Array.isArray(record.tokens)) {
+      record.tokens = tokenizeWordSpans(record.text);
+    }
+    if (!record.fuzzyBuckets) {
+      record.fuzzyBuckets = buildFuzzyBuckets(record.tokens);
+    }
+    return findOccurrencesInTextRecord(record, query, options);
+  }
+
+  function findOccurrencesInTextRecord(section, query, options) {
     const needle = String(query || "").trim();
     const settings = options || {};
     const mode = normalizeMode(settings.mode);
@@ -319,12 +383,6 @@
     if (!needle) {
       return [];
     }
-
-    const section = {
-      text: sourceText,
-      lowerText: sourceText.toLowerCase(),
-      tokens: tokenizeWordSpans(sourceText)
-    };
 
     if (mode === "exact_phrase") {
       return findExactPhraseOccurrences(section, needle, caseSensitive);
@@ -413,6 +471,7 @@
           const section = payload.sections[sectionOrder];
           const display = contentApi.sectionDisplay(essay, section.sectionNumber);
           const text = section.searchableText || "";
+          const tokens = tokenizeWordSpans(text);
 
           sections.push({
             essaySlug: essay.slug,
@@ -426,7 +485,8 @@
             sectionSearchLabel: display.searchLabel,
             text,
             lowerText: text.toLowerCase(),
-            tokens: tokenizeWordSpans(text)
+            tokens,
+            fuzzyBuckets: buildFuzzyBuckets(tokens)
           });
         }
       }
@@ -521,7 +581,7 @@
           await yieldToBrowser();
         }
 
-        const sectionHits = findOccurrencesInText(section.text, state.query, {
+        const sectionHits = findOccurrencesInSection(section, state.query, {
           mode: state.mode,
           caseSensitive: state.caseSensitive
         });
@@ -623,6 +683,7 @@
     buildSectionUrl,
     createSearchEngine,
     escapeHtml,
+    findOccurrencesInSection,
     findOccurrencesInText,
     highlightSnippet,
     normalizeMode,
