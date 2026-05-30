@@ -68,6 +68,19 @@ async function main() {
     assert.equal(result.hits[0].matchedText, "alpha");
   });
 
+  await check("relevance ranking boosts essay and section titles over body hits", async () => {
+    const engine = Search.createSearchEngine(rankingContentApi());
+    const result = await engine.search({ query: "alpha", mode: "contains", sort: "relevance" });
+
+    assert.ok(result.hits.length >= 3, "fixture should produce title, section, and body hits");
+    assert.equal(result.hits[0].field, "essay_title");
+    assert.equal(result.hits[1].field, "section_title");
+    assert.ok(
+      result.hits.findIndex((hit) => hit.field === "body") > 1,
+      "body hit should rank after title fields"
+    );
+  });
+
   console.log("Search engine regression checks passed.");
 }
 
@@ -99,6 +112,40 @@ function fakeContentApi() {
         label: "Section " + String(sectionNumber),
         title: "Fixture Section",
         searchLabel: "Section " + String(sectionNumber) + " | Fixture Section",
+      };
+    },
+  };
+}
+
+function rankingContentApi() {
+  const essay = {
+    slug: "ranking-fixture",
+    title: "Alpha Archive",
+    summary: "Ranking fixture",
+    published: true,
+    section_order: [1],
+  };
+
+  return {
+    async loadEssays() {
+      return [essay];
+    },
+    async loadEssaySections() {
+      return {
+        essay,
+        sections: [
+          {
+            sectionNumber: 1,
+            searchableText: "A body paragraph mentions alpha once.",
+          },
+        ],
+      };
+    },
+    sectionDisplay() {
+      return {
+        label: "Section 1",
+        title: "Alpha Notes",
+        searchLabel: "Section 1 | Alpha Notes",
       };
     },
   };

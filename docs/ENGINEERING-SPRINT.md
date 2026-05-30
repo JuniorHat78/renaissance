@@ -259,14 +259,14 @@ Goal: harden search behavior and prepare scaling without committing to a new UI.
       index or Web Worker.
 - [ ] Keep the current runtime search behavior working.
 - [ ] Do not redesign the search UI or Spotlight UI in this phase.
-- [ ] Write a ranking spec: title > section title > exact phrase > body
+- [x] Write a ranking spec: title > section title > exact phrase > body
       occurrence > fuzzy match.
-- [ ] Add ranking fixtures with deterministic expected order.
+- [x] Add ranking fixtures with deterministic expected order.
 - [ ] Add query parser fixtures for phrases, punctuation, case sensitivity, and
       empty/noisy input.
-- [ ] Add field boosts for essay title, section title, headings, and body when
+- [x] Add field boosts for essay title, section title, headings, and body when
       supported by current data.
-- [ ] Add tie-break rules that remain stable across browsers.
+- [x] Add tie-break rules that remain stable across browsers.
 - [ ] Consider a generated lightweight index artifact if it can stay within the
       size budget.
 - [ ] Consider a Web Worker boundary if runtime indexing grows beyond the

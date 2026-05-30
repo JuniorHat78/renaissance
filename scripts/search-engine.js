@@ -7,6 +7,12 @@
   const MAX_FUZZY_QUERY_TOKENS = 8;
   const MAX_FUZZY_TOKEN_LENGTH = 48;
   const YIELD_EVERY_SECTIONS = 4;
+  const FIELD_BOOSTS = {
+    essay_title: 80,
+    section_title: 60,
+    section_label: 30,
+    body: 0
+  };
 
   function escapeHtml(text) {
     return String(text)
@@ -393,6 +399,66 @@
     return findContainsOccurrences(section, needle, caseSensitive);
   }
 
+  function searchField(field, text, query, options) {
+    const sourceText = String(text || "");
+    if (!sourceText) {
+      return [];
+    }
+    const record = {
+      text: sourceText,
+      lowerText: sourceText.toLowerCase(),
+      tokens: tokenizeWordSpans(sourceText)
+    };
+    record.fuzzyBuckets = buildFuzzyBuckets(record.tokens);
+    const boost = FIELD_BOOSTS[field] || 0;
+    return findOccurrencesInTextRecord(record, query, options).map((hit) => ({
+      ...hit,
+      field,
+      score: hit.score + boost
+    }));
+  }
+
+  function fieldSearchesForSection(section) {
+    return [
+      { field: "essay_title", text: section.essayTitle },
+      { field: "section_title", text: section.sectionTitle },
+      { field: "section_label", text: section.sectionLabel },
+      { field: "body", text: section.text }
+    ];
+  }
+
+  function searchSectionField(section, entry, query, options) {
+    if (entry.field === "body") {
+      return findOccurrencesInSection(section, query, options).map((hit) => ({
+        ...hit,
+        field: "body",
+        score: hit.score + FIELD_BOOSTS.body
+      }));
+    }
+    return searchField(entry.field, entry.text, query, options);
+  }
+
+  function snippetForHit(section, field, hit) {
+    if (field === "body") {
+      return makeSnippet(section.text, hit.index, hit.length);
+    }
+    const source = fieldSearchesForSection(section).find((entry) => entry.field === field);
+    return source ? source.text : hit.matchedText;
+  }
+
+  function indexForHit(field, index) {
+    if (field === "essay_title") {
+      return -3000 + index;
+    }
+    if (field === "section_title") {
+      return -2000 + index;
+    }
+    if (field === "section_label") {
+      return -1000 + index;
+    }
+    return index;
+  }
+
   function buildSectionUrl(essaySlug, sectionNumber, query, options) {
     const settings = options || {};
     const params = new URLSearchParams();
@@ -581,10 +647,13 @@
           await yieldToBrowser();
         }
 
-        const sectionHits = findOccurrencesInSection(section, state.query, {
+        const hitOptions = {
           mode: state.mode,
           caseSensitive: state.caseSensitive
-        });
+        };
+        const sectionHits = fieldSearchesForSection(section).flatMap((entry) =>
+          searchSectionField(section, entry, state.query, hitOptions)
+        );
 
         for (const hit of sectionHits) {
           const sectionKey = section.essaySlug + ":" + String(section.sectionNumber);
@@ -601,12 +670,13 @@
             sectionLabel: section.sectionLabel,
             sectionTitle: section.sectionTitle,
             sectionSearchLabel: section.sectionSearchLabel,
-            index: hit.index,
+            field: hit.field,
+            index: indexForHit(hit.field, hit.index),
             length: hit.length,
             score: hit.score,
             occurrence,
             matchedText: hit.matchedText,
-            snippet: makeSnippet(section.text, hit.index, hit.length)
+            snippet: snippetForHit(section, hit.field, hit)
           });
         }
       }
@@ -677,6 +747,7 @@
   window.RenaissanceSearch = {
     buildSearchUrl,
     DEFAULT_PAGE_SIZE,
+    FIELD_BOOSTS,
     MODES,
     PAGE_SIZES,
     SORTS,
