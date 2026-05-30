@@ -49,6 +49,9 @@ jobs:
       - name: Accessibility Audit (axe-core, light + dark)
         run: npm run ci:a11y
 
+      - name: Offline / PWA Regression (service worker)
+        run: npm run ci:offline
+
       - name: Visual QA Check (warning-only)
         run: |
           if ! npm run ci:visual; then
