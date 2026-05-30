@@ -32,6 +32,7 @@ const PRECACHE = [
   "scripts/essay.js",
   "scripts/essays-data.js",
   "scripts/meta.js",
+  "scripts/archive-select.js",
   "scripts/preview-card.js",
   "scripts/reading-state.js",
   "scripts/router.js",
