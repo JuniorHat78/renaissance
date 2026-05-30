@@ -91,6 +91,17 @@ check("a missing score warns and is reported as unavailable", () => {
   assert.ok(lines.some((l) => /Section: score unavailable/.test(l)));
 });
 
+check("category scores (a11y/best-practices/seo) render when present", () => {
+  const withCats = Object.assign(entry("Home", 100), {
+    categories: { accessibility: 96, "best-practices": 100, seo: 92 }
+  });
+  const { lines } = buildSummary({ entries: [withCats], baseline, threshold: 80, drasticDrop: 8 });
+  assert.ok(
+    lines.some((l) => /a11y 96 \/ best-practices 100 \/ seo 92/.test(l)),
+    "should render the non-performance category scores"
+  );
+});
+
 check("never throws and never signals a gate (warnings are advisory)", () => {
   const result = buildSummary({ entries: [entry("Home", 5)], baseline, threshold: 90, drasticDrop: 8 });
   assert.ok(Array.isArray(result.warnings) && Array.isArray(result.lines));

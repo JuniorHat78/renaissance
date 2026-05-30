@@ -61,6 +61,12 @@ jobs:
       - name: Keyboard-only Journey Regression
         run: npm run ci:keyboard
 
+      - name: Slow-3G Journey Regression
+        run: npm run ci:slow-network
+
+      - name: Service Worker Update-Flow Regression
+        run: npm run ci:sw-update
+
       - name: Visual QA Check (warning-only)
         run: |
           if ! npm run ci:visual; then

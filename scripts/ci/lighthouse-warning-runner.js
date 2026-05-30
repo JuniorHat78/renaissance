@@ -63,7 +63,7 @@ function runLighthouse(target) {
     "--yes",
     "lighthouse",
     target.url,
-    "--only-categories=performance",
+    "--only-categories=performance,accessibility,best-practices,seo",
     "--quiet",
     "--chrome-flags=--headless=new --no-sandbox --disable-dev-shm-usage",
     "--output=json",

@@ -42,11 +42,17 @@ function metric(audits, id, fallback) {
 }
 
 function scoreFromReport(data) {
-  const raw = data &&
-    data.categories &&
-    data.categories.performance &&
-    data.categories.performance.score;
+  return categoryScore(data, "performance");
+}
+
+function categoryScore(data, id) {
+  const category = data && data.categories && data.categories[id];
+  const raw = category && category.score;
   return Number.isFinite(raw) ? Math.round(raw * 100) : null;
+}
+
+function show(value) {
+  return value === null || value === undefined ? "n/a" : String(value);
 }
 
 // Pure, deterministic core so the flagging logic can be unit-tested without
@@ -96,7 +102,11 @@ function buildSummary({ entries, baseline, threshold, drasticDrop }) {
       }
     }
 
-    lines.push("- " + entry.label + ": " + entry.score + deltaText +
+    const cat = entry.categories;
+    const catText = cat
+      ? " · a11y " + show(cat.accessibility) + " / best-practices " + show(cat["best-practices"]) + " / seo " + show(cat.seo)
+      : "";
+    lines.push("- " + entry.label + ": perf " + entry.score + deltaText + catText +
       " (LCP " + entry.lcp + ", TBT " + entry.tbt + ", CLS " + entry.cls + ")");
 
     if (entry.score < threshold) {
@@ -120,6 +130,11 @@ function readEntries() {
     return {
       label: report.label,
       score: scoreFromReport(data),
+      categories: {
+        accessibility: categoryScore(data, "accessibility"),
+        "best-practices": categoryScore(data, "best-practices"),
+        seo: categoryScore(data, "seo")
+      },
       lcp: metric(audits, "largest-contentful-paint", "n/a"),
       tbt: metric(audits, "total-blocking-time", "n/a"),
       cls: metric(audits, "cumulative-layout-shift", "n/a")
