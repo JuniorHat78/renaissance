@@ -41,6 +41,7 @@
   <link rel="stylesheet" href="styles/site.css">
 </head>
 <body>
+  <a class="skip-link" href="#main-content">Skip to content</a>
   <div id="reader-progress" class="reader-progress" aria-hidden="true">
     <span id="reader-progress-bar"></span>
   </div>
@@ -60,7 +61,7 @@
     </div>
   </header>
 
-  <main class="reader-layout">
+  <main id="main-content" tabindex="-1" class="reader-layout">
     <nav class="chapter-nav-top" aria-label="Section navigation">
       <a id="prev-link" class="button button-ghost hidden" href="#">Previous Section</a>
       <a id="next-link" class="button button-ghost hidden" href="#">Next Section</a>

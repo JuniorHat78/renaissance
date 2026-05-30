@@ -39,6 +39,8 @@
     "ci:offline": "node scripts/ci/run-with-server.js --port 4180 --mount /renaissance/ -- node scripts/tests/offline-regression.js",
     "test:offline": "node scripts/ci/run-with-server.js --port 4180 --mount /renaissance/ -- node scripts/tests/offline-regression.js",
     "test:pwa-precache": "node scripts/tests/pwa-precache-regression.js",
+    "ci:focus": "node scripts/ci/run-with-server.js --port 4181 -- node scripts/tests/focus-regression.js --base http://127.0.0.1:4181",
+    "test:focus": "node scripts/ci/run-with-server.js --port 4181 -- node scripts/tests/focus-regression.js --base http://127.0.0.1:4181",
     "icons:generate": "node scripts/pwa/generate-icons.js",
     "og:generate": "node scripts/og/generate-cards.js",
     "visual:capture": "node scripts/visual/capture.js",

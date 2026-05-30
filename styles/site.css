@@ -1576,6 +1576,36 @@ mark.reader-highlight-target.reader-highlight-arrival {
   border: 0;
 }
 
+/* Keyboard skip link: off-screen until focused, then slides into view as the
+   first tab stop so keyboard users can jump straight past the header chrome. */
+.skip-link {
+  position: absolute;
+  left: 0.75rem;
+  top: -4rem;
+  z-index: 1000;
+  background: var(--paper);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  padding: 0.5rem 0.9rem;
+  font-family: var(--font-ui);
+  font-size: 0.85rem;
+  text-decoration: none;
+  transition: top var(--motion-fast) var(--motion-ease);
+}
+
+.skip-link:focus {
+  top: 0.75rem;
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* The main region only takes focus programmatically (via the skip link); don't
+   paint a focus ring around the whole column when it does. */
+main[tabindex="-1"]:focus {
+  outline: none;
+}
+
 @media (max-width: 760px) {
   .site-header {
     padding-top: 0.85rem;
