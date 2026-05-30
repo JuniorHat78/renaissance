@@ -1,0 +1,60 @@
+name: A11y Ablation Matrix
+
+# A 2^4 factorial ablation of the accessibility audit: every combination of
+# theme x motion x viewport x forced-colors (16 cells) runs the full axe sweep
+# over all five surfaces. Accessibility is the check that genuinely varies across
+# these rendering conditions, so ablating it here surfaces interaction bugs
+# (e.g. focus visibility under forced-colors, tap targets on mobile in dark) that
+# a single-condition run would miss. Each cell is gating; fail-fast is off so one
+# red cell never hides the state of the others.
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: a11y-matrix-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ablation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        theme: [light, dark]
+        motion: [no-preference, reduce]
+        viewport: [desktop, mobile]
+        forced: [none, active]
+
+    env:
+      RENAISSANCE_A11Y_THEME: ${{ matrix.theme }}
+      RENAISSANCE_A11Y_MOTION: ${{ matrix.motion }}
+      RENAISSANCE_A11Y_VIEWPORT: ${{ matrix.viewport }}
+      RENAISSANCE_A11Y_FORCED: ${{ matrix.forced }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install Node Dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: "A11y cell: ${{ matrix.theme }} / ${{ matrix.motion }} / ${{ matrix.viewport }} / forced-${{ matrix.forced }}"
+        run: npm run ci:a11y
