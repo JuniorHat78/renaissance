@@ -93,6 +93,26 @@ async function main() {
     assert.ok(section.fuzzyBuckets.size > 0, "fuzzy candidate buckets should not be empty");
   });
 
+  await check("search index build timing is visible", async () => {
+    const engine = Search.createSearchEngine(fakeContentApi());
+    const started = performance.now();
+    const index = await engine.ensureIndex();
+    const duration = performance.now() - started;
+    const tokenCount = index.sections.reduce((count, section) => count + section.tokens.length, 0);
+
+    assert.equal(index.sections.length, 1);
+    assert.ok(tokenCount > 0, "timing output should include indexed token work");
+    console.log(
+      "INFO search index build: " +
+      duration.toFixed(2) +
+      "ms for " +
+      String(index.sections.length) +
+      " sections / " +
+      String(tokenCount) +
+      " tokens"
+    );
+  });
+
   await check("fuzzy search uses indexed section records", async () => {
     const engine = Search.createSearchEngine(fakeContentApi());
     const result = await engine.search({ query: "alhpa", mode: "fuzzy" });

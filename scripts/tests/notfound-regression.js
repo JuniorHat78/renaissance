@@ -23,6 +23,14 @@ function mountPrefix(base) {
   return new URL(base + "/").pathname.replace(/\/+$/, "");
 }
 
+function toMs(value) {
+  const first = String(value || "0s").split(",")[0].trim();
+  if (first.endsWith("ms")) {
+    return Number.parseFloat(first) || 0;
+  }
+  return (Number.parseFloat(first) || 0) * 1000;
+}
+
 async function main() {
   const options = parseArgs(process.argv);
   const prefix = mountPrefix(options.base);
@@ -109,6 +117,36 @@ async function main() {
     });
     const mode = await page.getAttribute("body", "data-recovery-mode");
     assert.equal(mode, "asset", "missing asset should use asset recovery mode");
+  });
+
+  await step("404 animations respect reduced motion", async () => {
+    const reduceContext = await browser.newContext({
+      locale: "en-US",
+      timezoneId: "UTC",
+      colorScheme: "light",
+      reducedMotion: "reduce"
+    });
+    const reducePage = await reduceContext.newPage();
+    await reducePage.goto(options.base + "/this-page-does-not-exist", {
+      waitUntil: "domcontentloaded",
+      timeout: 30000
+    });
+    const durations = await reducePage.evaluate(() => {
+      const rule = document.querySelector(".notfound-rule");
+      const shelf = document.querySelector(".shelf-mark");
+      const suggestion = document.querySelector(".suggestion");
+      return [
+        getComputedStyle(rule, "::after").animationDuration,
+        getComputedStyle(shelf, "::after").animationDuration,
+        suggestion ? getComputedStyle(suggestion).animationDuration : "0s"
+      ];
+    });
+    await reduceContext.close();
+
+    assert.ok(
+      durations.every((duration) => toMs(duration) < 5),
+      "404 animation durations should collapse under reduced motion, got " + durations.join(", ")
+    );
   });
 
   await step("unpublished essay slugs do not leak into browser 404 suggestions", async () => {

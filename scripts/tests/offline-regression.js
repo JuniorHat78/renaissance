@@ -97,6 +97,10 @@ async function main() {
     assert.ok(response, "expected a cached response while offline");
     const heading = (await page.textContent("h1").catch(() => "")) || "";
     assert.ok(heading.trim().length > 0, "a cached page should render while offline");
+    const mode = await page.getAttribute("body", "data-recovery-mode");
+    assert.equal(mode, "offline", "cached 404 should switch into offline recovery mode");
+    const title = (await page.textContent("#recovery-title").catch(() => "")) || "";
+    assert.match(title, /local shelf/i, "offline 404 should expose local-shelf recovery copy");
   });
 
   await context.setOffline(false);
