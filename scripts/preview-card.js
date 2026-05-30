@@ -160,7 +160,7 @@
   function renderCard(data) {
     kickerEl.textContent = data.kicker || "";
     kickerEl.hidden = !data.kicker;
-    titleEl.innerHTML = escapeHtml(data.title || "");
+    titleEl.textContent = data.title || "";
     bodyEl.textContent = data.body || "";
     bodyEl.hidden = !data.body;
   }
