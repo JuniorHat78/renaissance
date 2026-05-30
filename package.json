@@ -16,6 +16,7 @@
     "ast:fixtures": "node scripts/ast-tools/run-fixtures.js",
     "ast:fixtures:update": "node scripts/ast-tools/update-fixtures.js",
     "ast:new-fixture": "node scripts/ast-tools/new-fixture.js",
+    "ast:fixture:from-corpus": "node scripts/ast-tools/fixture-from-corpus.js",
     "ast:report": "node scripts/ast-tools/report.js",
     "ast:explain": "node scripts/ast-tools/explain.js",
     "ast:tree": "node scripts/ast-tools/print-tree.js",
