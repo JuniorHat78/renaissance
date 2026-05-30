@@ -24,8 +24,9 @@ npm run check
 ```
 
 This covers syntax, AST runtime/tooling/corpus checks, content validation,
-generated embedded data freshness, offline asset freshness, and
-discoverability/feed freshness.
+generated embedded data freshness, site-registry freshness, 404 recovery
+catalogue freshness, offline asset freshness, discoverability/feed freshness,
+and generated service-worker cache version freshness.
 
 For standalone regressions that do not need a browser server:
 
@@ -37,6 +38,12 @@ For the full non-browser local gate:
 
 ```powershell
 npm run ci:standalone
+```
+
+For a human-readable generated artifact inventory:
+
+```powershell
+npm run artifacts:summary
 ```
 
 ## Browser Regressions

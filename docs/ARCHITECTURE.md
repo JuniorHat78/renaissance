@@ -77,6 +77,26 @@ Check freshness:
 npm run validate:offline-assets:check
 ```
 
+Other generated deployment artifacts:
+
+- `data/site-registry.json`: canonical published routes and recovery metadata.
+- Inline 404 recovery catalogue in `404.html`.
+- `sitemap.xml`, `robots.txt`, and feed outputs from discoverability metadata.
+- `sw.js` cache `VERSION`, generated from the contents of precached assets.
+
+Refresh/check commands:
+
+```powershell
+npm run site-registry:generate
+npm run 404-catalogue:generate
+npm run discover:generate
+npm run cache-version:generate
+npm run check
+```
+
+`scripts/artifact-summary.js` gives a compact count/size report for generated
+route, cache, content, and recovery artifacts.
+
 ## Search
 
 Search is client-side. `scripts/search-engine.js` builds an in-memory index from

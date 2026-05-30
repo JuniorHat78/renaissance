@@ -33,13 +33,13 @@ These are the current execution rules for the long sprint.
 - [x] Push to GitHub often so GitHub Actions can do the heavy verification.
 - [ ] Merge the sprint branch only after the sprint is complete and CI is in an
       acceptable state.
-- [ ] Prefer GitHub Actions over heavy local test loops.
-- [ ] Use extensive CI, add or strengthen workflows if the sprint creates new
+- [x] Prefer GitHub Actions over heavy local test loops.
+- [x] Use extensive CI, add or strengthen workflows if the sprint creates new
       risk surfaces.
-- [ ] Do not run local dependency installs unless the user explicitly changes the
+- [x] Do not run local dependency installs unless the user explicitly changes the
       rule.
-- [ ] Avoid large writes to `C:`; the machine is low on C-drive space.
-- [ ] Existing Playwright/browser assets may live on `D:`; inspect before using
+- [x] Avoid large writes to `C:`; the machine is low on C-drive space.
+- [x] Existing Playwright/browser assets may live on `D:`; inspect before using
       during the sprint, but do not install browser bundles locally.
 - [ ] Skip a troublesome subtask only if it blocks unrelated work; record the
       skip and continue the sprint.
@@ -68,15 +68,15 @@ This sprint should therefore favor:
 
 ## Operating Rules
 
-- [ ] Work in phases and keep each phase shippable.
-- [ ] Use commit style: `<scope>(<area>): <summary>`, lowercase imperative.
-- [ ] Do not add `Co-Authored-By` trailers.
-- [ ] Keep all internal links and assets relative/subpath-safe for
+- [x] Work in phases and keep each phase shippable.
+- [x] Use commit style: `<scope>(<area>): <summary>`, lowercase imperative.
+- [x] Do not add `Co-Authored-By` trailers.
+- [x] Keep all internal links and assets relative/subpath-safe for
       `/renaissance/`.
-- [ ] Preserve keyboard, touch, reduced-motion, offline, and dark-theme behavior.
-- [ ] Run only focused local checks during development.
-- [ ] Let GitHub Actions carry the expensive browser/device/visual matrix.
-- [ ] Prefer rerunning failed GitHub jobs over pounding the laptop.
+- [x] Preserve keyboard, touch, reduced-motion, offline, and dark-theme behavior.
+- [x] Run only focused local checks during development.
+- [x] Let GitHub Actions carry the expensive browser/device/visual matrix.
+- [x] Prefer rerunning failed GitHub jobs over pounding the laptop.
 - [ ] Keep warning-only visual and Lighthouse results as review signals.
 - [ ] Add CI coverage rather than relying on local manual confidence when a new
       backend/recovery/cache/search/parser surface is introduced.
@@ -154,8 +154,8 @@ Goal: reduce stale shell risk from manual service-worker cache versions.
 - [x] Keep the service worker install path deterministic.
 - [x] Consider a bounded network timeout for navigations before falling back to
       cached shell pages on slow/flaky networks.
-- [ ] Preserve current offline reading guarantees.
-- [ ] Document the new cache/version workflow in `docs/QA.md` and/or
+- [x] Preserve current offline reading guarantees.
+- [x] Document the new cache/version workflow in `docs/QA.md` and/or
       `docs/ARCHITECTURE.md`.
 
 Suggested commit:
@@ -186,8 +186,8 @@ Goal: catch content and route mistakes before deployment.
 - [x] Detect duplicate essay slugs.
 - [x] Validate section order against files and metadata.
 - [x] Validate social images exist.
-- [ ] Validate internal route links resolve.
-- [ ] Validate no root-absolute links escape `/renaissance/`.
+- [x] Validate internal route links resolve.
+- [x] Validate no root-absolute links escape `/renaissance/`.
 - [x] Validate feed, sitemap, robots, and discoverability outputs stay fresh.
 - [x] Add or update standalone regression tests for the new validators.
 
@@ -203,12 +203,12 @@ Goal: create one source of truth for valid site routes and metadata.
       feeds, sitemap, manifest, and static recovery routes.
 - [x] Use the registry to validate internal links.
 - [x] Use the registry to seed 404/recovery suggestions.
-- [ ] Use the registry to derive sitemap/feed/discoverability expectations where
+- [x] Use the registry to derive sitemap/feed/discoverability expectations where
       practical.
-- [ ] Use the registry to derive service-worker shell precache expectations where
+- [x] Use the registry to derive service-worker shell precache expectations where
       practical.
 - [x] Add stale-registry checks.
-- [ ] Document the registry in `docs/ARCHITECTURE.md`.
+- [x] Document the registry in `docs/ARCHITECTURE.md`.
 
 Suggested commit:
 
@@ -219,14 +219,14 @@ Suggested commit:
 Goal: make generated artifacts predictable and auditable.
 
 - [x] Inventory every generated artifact and its source inputs.
-- [ ] Add or improve a single build/check command that validates all generated
+- [x] Add or improve a single build/check command that validates all generated
       artifacts are fresh.
 - [x] Add artifact summary output for humans: counts, sizes, published essays,
       sections, routes, cache entries.
 - [x] Ensure generated outputs are deterministic across Windows/Linux line
       endings where practical.
 - [x] Add size budgets for large generated files.
-- [ ] Document the content-to-artifact pipeline.
+- [x] Document the content-to-artifact pipeline.
 
 Suggested commit:
 
