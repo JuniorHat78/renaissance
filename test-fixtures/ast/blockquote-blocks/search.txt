@@ -1,0 +1,1 @@
+A quoted line with emphasis. A second quoted line with a link.

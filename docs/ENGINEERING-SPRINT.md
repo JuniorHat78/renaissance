@@ -280,22 +280,22 @@ Suggested commit:
 
 Goal: make AST evolution safe enough to support richer authoring later.
 
-- [ ] Document supported syntax: paragraphs, headings, dividers, emphasis,
-      pull-quotes, and current inline behavior.
-- [ ] Document intentionally unsupported syntax: strong, links, inline code,
-      lists, blockquotes, recursive nested inline parsing.
-- [ ] Add fixtures for current edge behavior.
-- [ ] Add tests showing unsupported syntax degrades safely.
-- [ ] Preserve current parser security and dependency-free browser runtime.
-- [ ] Add an AST version/migration note if behavior changes.
-- [ ] Build parser fixtures before changing recursive inline behavior.
-- [ ] Add renderer parity tests for legacy bridge output and AST rendering.
-- [ ] Add recursive inline parsing for nested emphasis only after fixture parity
+- [x] Document supported syntax: paragraphs, headings, dividers, emphasis,
+      pull-quotes, strong, links, inline code, lists, blockquotes, and recursive
+      inline behavior.
+- [x] Document intentionally plain-text syntax that still degrades safely.
+- [x] Add fixtures for current edge behavior.
+- [x] Add tests showing unsupported or unsafe syntax degrades safely.
+- [x] Preserve current parser security and dependency-free browser runtime.
+- [x] Add an AST version/migration note if behavior changes.
+- [x] Build parser fixtures before changing recursive inline behavior.
+- [x] Add renderer parity tests for legacy bridge output and AST rendering.
+- [x] Add recursive inline parsing for nested emphasis only after fixture parity
       is stable.
-- [ ] Add strong, inline code, links, lists, and blockquotes only behind explicit
+- [x] Add strong, inline code, links, lists, and blockquotes only behind explicit
       fixtures and sanitizer-safe rendering.
-- [ ] Keep unsupported raw HTML inert.
-- [ ] Avoid importing a full Markdown parser unless the project explicitly
+- [x] Keep unsupported raw HTML inert.
+- [x] Avoid importing a full Markdown parser unless the project explicitly
       chooses that dependency trade-off.
 
 Suggested commit:

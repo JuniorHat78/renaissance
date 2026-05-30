@@ -67,6 +67,7 @@ Generated fallback data lives in:
 - [Ideas](docs/IDEAS.md)
 - [Interface Grammar](docs/INTERFACE-GRAMMAR.md)
 - [Magical 404 Spec](docs/404-MAGIC-SPEC.md)
+- [AST Dialect](docs/AST-DIALECT.md)
 - [Search Ranking Spec](docs/SEARCH-RANKING-SPEC.md)
 - [Engineering Sprint Checklist](docs/ENGINEERING-SPRINT.md)
 - [Archived planning docs](docs/archive/)

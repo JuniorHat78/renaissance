@@ -1,0 +1,63 @@
+{
+  "children": [
+    {
+      "children": [
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "A quoted line with "
+            },
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "emphasis"
+                }
+              ],
+              "type": "emphasis"
+            },
+            {
+              "type": "text",
+              "value": ". A second quoted line with "
+            },
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "a link"
+                }
+              ],
+              "href": "search.html?q=sand",
+              "type": "link"
+            },
+            {
+              "type": "text",
+              "value": "."
+            }
+          ],
+          "position": {
+            "endOffset": 90,
+            "line": 1,
+            "startOffset": 2
+          },
+          "type": "paragraph"
+        }
+      ],
+      "position": {
+        "endOffset": 90,
+        "line": 1,
+        "startOffset": 2
+      },
+      "type": "blockquote"
+    }
+  ],
+  "diagnostics": [],
+  "sourceName": "blockquote-blocks",
+  "stats": {
+    "blocks": 1,
+    "words": 12
+  },
+  "type": "document",
+  "version": "0.2.0"
+}

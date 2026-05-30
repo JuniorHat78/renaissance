@@ -9,20 +9,27 @@
 })(typeof globalThis !== "undefined" ? globalThis : window, function buildRenaissanceAst() {
   "use strict";
 
-  const VERSION = "0.1.0";
+  const VERSION = "0.2.0";
   const HARD_BREAK_SENTINEL = "\x01";
+  const MAX_INLINE_DEPTH = 12;
 
   const BLOCK_TYPES = Object.freeze({
     DOCUMENT: "document",
     HEADING: "heading",
     PARAGRAPH: "paragraph",
     PULL_QUOTE: "pull_quote",
+    BLOCK_QUOTE: "blockquote",
+    LIST: "list",
+    LIST_ITEM: "list_item",
     DIVIDER: "divider",
   });
 
   const INLINE_TYPES = Object.freeze({
     TEXT: "text",
     EMPHASIS: "emphasis",
+    STRONG: "strong",
+    CODE: "code",
+    LINK: "link",
     HARD_BREAK: "hard_break",
   });
 
@@ -38,7 +45,10 @@
     BOM_REMOVED: "bom-removed",
     CRLF_NORMALIZED: "crlf-normalized",
     HEADING_LEVEL_CLAMPED: "heading-level-clamped",
+    UNSAFE_LINK_URL: "unsafe-link-url",
+    UNMATCHED_CODE_MARKER: "unmatched-code-marker",
     UNMATCHED_EMPHASIS_MARKER: "unmatched-emphasis-marker",
+    UNMATCHED_STRONG_MARKER: "unmatched-strong-marker",
   });
 
   function normalizeSource(source) {
@@ -88,6 +98,41 @@
       if (isDividerLine(line)) {
         flushParagraph();
         blocks.push(createDivider(lineNumber, offset, line.length));
+        continue;
+      }
+
+      const blockQuoteLine = parseBlockQuoteLine(line, lineNumber, offset);
+      if (blockQuoteLine) {
+        flushParagraph();
+        const quoteLines = [];
+        while (index < lines.length) {
+          const currentLine = parseBlockQuoteLine(lines[index], index + 1, lineOffsets[index]);
+          if (!currentLine) {
+            break;
+          }
+          quoteLines.push(currentLine);
+          index += 1;
+        }
+        index -= 1;
+        blocks.push(createBlockQuote(quoteLines, diagnostics));
+        continue;
+      }
+
+      const listLine = parseListLine(line, lineNumber, offset);
+      if (listLine) {
+        flushParagraph();
+        const listLines = [];
+        const ordered = listLine.ordered;
+        while (index < lines.length) {
+          const currentLine = parseListLine(lines[index], index + 1, lineOffsets[index]);
+          if (!currentLine || currentLine.ordered !== ordered) {
+            break;
+          }
+          listLines.push(currentLine);
+          index += 1;
+        }
+        index -= 1;
+        blocks.push(createList(listLines, ordered, diagnostics));
         continue;
       }
 
@@ -151,6 +196,36 @@
     };
   }
 
+  function parseBlockQuoteLine(line, lineNumber, offset) {
+    const match = /^(\s*)>\s?(.*)$/.exec(line);
+    if (!match) {
+      return null;
+    }
+
+    const markerLength = match[1].length + 1 + (line[match[1].length + 1] === " " ? 1 : 0);
+    return createParagraphLine(match[2], lineNumber, offset + markerLength);
+  }
+
+  function parseListLine(line, lineNumber, offset) {
+    const match = /^(\s*)((?:[-+]|\d+[.)])\s+)(.+?)\s*$/.exec(line);
+    if (!match) {
+      return null;
+    }
+
+    const marker = match[2];
+    const text = match[3];
+    const markerStart = match[1].length;
+    const textOffset = offset + markerStart + marker.length;
+    return {
+      ordered: /^\d/.test(marker),
+      text,
+      lineNumber,
+      offset: textOffset,
+      sourceOffset: offset,
+      sourceLength: line.length,
+    };
+  }
+
   function createParagraph(lines, diagnostics) {
     const first = lines[0];
     const last = lines[lines.length - 1];
@@ -161,6 +236,37 @@
       type: blockType,
       children: parseInlineLines(lines, diagnostics),
       position: createPosition(first.lineNumber, first.offset, last.offset + last.sourceLength),
+    };
+  }
+
+  function createBlockQuote(lines, diagnostics) {
+    const first = lines[0];
+    const last = lines[lines.length - 1];
+    return {
+      type: BLOCK_TYPES.BLOCK_QUOTE,
+      children: [createParagraph(lines, diagnostics)],
+      position: createPosition(first.lineNumber, first.offset, last.offset + last.sourceLength),
+    };
+  }
+
+  function createList(lines, ordered, diagnostics) {
+    const first = lines[0];
+    const last = lines[lines.length - 1];
+    return {
+      type: BLOCK_TYPES.LIST,
+      ordered: Boolean(ordered),
+      children: lines.map(function createItem(line) {
+        return createListItem(line, diagnostics);
+      }),
+      position: createPosition(first.lineNumber, first.sourceOffset, last.sourceOffset + last.sourceLength),
+    };
+  }
+
+  function createListItem(line, diagnostics) {
+    return {
+      type: BLOCK_TYPES.LIST_ITEM,
+      children: parseInline(line.text, line.offset, diagnostics),
+      position: createPosition(line.lineNumber, line.offset, line.sourceOffset + line.sourceLength),
     };
   }
 
@@ -215,10 +321,27 @@
         return;
       }
 
-      if (node.type === INLINE_TYPES.EMPHASIS) {
+      if (node.type === INLINE_TYPES.EMPHASIS || node.type === INLINE_TYPES.STRONG) {
         appendInlineNode(normalized, {
-          type: INLINE_TYPES.EMPHASIS,
+          type: node.type,
           children: normalizeInlineSeparators(node.children || []),
+        });
+        return;
+      }
+
+      if (node.type === INLINE_TYPES.LINK) {
+        appendInlineNode(normalized, {
+          type: INLINE_TYPES.LINK,
+          href: node.href,
+          children: normalizeInlineSeparators(node.children || []),
+        });
+        return;
+      }
+
+      if (node.type === INLINE_TYPES.CODE) {
+        appendInlineNode(normalized, {
+          type: INLINE_TYPES.CODE,
+          value: normalizeInlineCodeText(node.value),
         });
         return;
       }
@@ -227,6 +350,10 @@
     });
 
     return normalized;
+  }
+
+  function normalizeInlineCodeText(value) {
+    return String(value).replace(new RegExp(HARD_BREAK_SENTINEL + "\n", "g"), "\n").replace(/\s+/g, " ");
   }
 
   function appendSeparatorText(target, value) {
@@ -267,45 +394,208 @@
     return Math.min(left, right);
   }
 
-  function parseInline(input, baseOffset, diagnostics) {
+  function parseInline(input, baseOffset, diagnostics, depth, suppressUnmatchedDiagnostics) {
     const text = input == null ? "" : String(input);
     const nodes = [];
+    const inlineDepth = Number(depth) || 0;
     let cursor = 0;
 
     while (cursor < text.length) {
-      const markerIndex = text.indexOf("*", cursor);
-      if (markerIndex === -1) {
-        appendText(nodes, text.slice(cursor));
-        break;
-      }
+      const char = text[cursor];
 
-      if (!canOpenEmphasis(text, markerIndex)) {
-        appendText(nodes, text.slice(cursor, markerIndex + 1));
-        cursor = markerIndex + 1;
+      if (char === "`") {
+        const closeIndex = text.indexOf("`", cursor + 1);
+        if (closeIndex === -1) {
+          appendText(nodes, char);
+          if (!suppressUnmatchedDiagnostics) {
+            diagnostics.push(createDiagnostic(
+              DIAGNOSTIC_CODES.UNMATCHED_CODE_MARKER,
+              "Treating unmatched code marker as literal text.",
+              baseOffset + cursor
+            ));
+          }
+          cursor += 1;
+          continue;
+        }
+
+        appendInlineNode(nodes, {
+          type: INLINE_TYPES.CODE,
+          value: text.slice(cursor + 1, closeIndex),
+        });
+        cursor = closeIndex + 1;
         continue;
       }
 
-      const closeIndex = findClosingEmphasis(text, markerIndex + 1);
-      if (closeIndex === -1) {
-        appendText(nodes, text.slice(cursor, markerIndex + 1));
-        diagnostics.push(createDiagnostic(
-          DIAGNOSTIC_CODES.UNMATCHED_EMPHASIS_MARKER,
-          "Treating unmatched emphasis marker as literal text.",
-          baseOffset + markerIndex
-        ));
-        cursor = markerIndex + 1;
+      if (char === "[") {
+        const link = parseLinkToken(text, cursor);
+        if (!link) {
+          appendText(nodes, char);
+          cursor += 1;
+          continue;
+        }
+
+        if (!isSafeLinkUrl(link.href)) {
+          appendText(nodes, text.slice(cursor, link.endIndex));
+          diagnostics.push(createDiagnostic(
+            DIAGNOSTIC_CODES.UNSAFE_LINK_URL,
+            "Treating unsafe link URL as literal text.",
+            baseOffset + link.hrefOffset,
+            { href: link.href }
+          ));
+          cursor = link.endIndex;
+          continue;
+        }
+
+        appendInlineNode(nodes, {
+          type: INLINE_TYPES.LINK,
+          href: link.href,
+          children: parseInlineChildren(link.label, baseOffset + cursor + 1, diagnostics, inlineDepth),
+        });
+        cursor = link.endIndex;
         continue;
       }
 
-      appendText(nodes, text.slice(cursor, markerIndex));
-      appendInlineNode(nodes, {
-        type: INLINE_TYPES.EMPHASIS,
-        children: [{ type: INLINE_TYPES.TEXT, value: text.slice(markerIndex + 1, closeIndex) }],
-      });
-      cursor = closeIndex + 1;
+      if (char === "*" && text[cursor + 1] === "*") {
+        if (!canOpenStrong(text, cursor)) {
+          appendText(nodes, "*");
+          cursor += 1;
+          continue;
+        }
+
+        const closeIndex = findClosingStrong(text, cursor + 2);
+        if (closeIndex === -1) {
+          appendText(nodes, "**");
+          if (!suppressUnmatchedDiagnostics) {
+            diagnostics.push(createDiagnostic(
+              DIAGNOSTIC_CODES.UNMATCHED_STRONG_MARKER,
+              "Treating unmatched strong marker as literal text.",
+              baseOffset + cursor
+            ));
+          }
+          cursor += 2;
+          continue;
+        }
+
+        appendInlineNode(nodes, {
+          type: INLINE_TYPES.STRONG,
+          children: parseInlineChildren(text.slice(cursor + 2, closeIndex), baseOffset + cursor + 2, diagnostics, inlineDepth),
+        });
+        cursor = closeIndex + 2;
+        continue;
+      }
+
+      if (char === "*") {
+        if (!canOpenEmphasis(text, cursor)) {
+          appendText(nodes, char);
+          cursor += 1;
+          continue;
+        }
+
+        const closeIndex = findClosingEmphasis(text, cursor + 1);
+        if (closeIndex === -1) {
+          appendText(nodes, char);
+          if (!suppressUnmatchedDiagnostics) {
+            diagnostics.push(createDiagnostic(
+              DIAGNOSTIC_CODES.UNMATCHED_EMPHASIS_MARKER,
+              "Treating unmatched emphasis marker as literal text.",
+              baseOffset + cursor
+            ));
+          }
+          cursor += 1;
+          continue;
+        }
+
+        appendInlineNode(nodes, {
+          type: INLINE_TYPES.EMPHASIS,
+          children: parseInlineChildren(text.slice(cursor + 1, closeIndex), baseOffset + cursor + 1, diagnostics, inlineDepth),
+        });
+        cursor = closeIndex + 1;
+        continue;
+      }
+
+      appendText(nodes, char);
+      cursor += 1;
     }
 
     return nodes;
+  }
+
+  function parseInlineChildren(text, baseOffset, diagnostics, depth) {
+    if (depth >= MAX_INLINE_DEPTH) {
+      return text ? [{ type: INLINE_TYPES.TEXT, value: text }] : [];
+    }
+
+    return parseInline(text, baseOffset, diagnostics, depth + 1, true);
+  }
+
+  function parseLinkToken(text, openIndex) {
+    const labelEnd = text.indexOf("](", openIndex + 1);
+    if (labelEnd === -1 || labelEnd === openIndex + 1) {
+      return null;
+    }
+
+    const hrefStart = labelEnd + 2;
+    const hrefEnd = text.indexOf(")", hrefStart);
+    if (hrefEnd === -1 || hrefEnd === hrefStart) {
+      return null;
+    }
+
+    return {
+      label: text.slice(openIndex + 1, labelEnd),
+      href: text.slice(hrefStart, hrefEnd).trim(),
+      hrefOffset: hrefStart,
+      endIndex: hrefEnd + 1,
+    };
+  }
+
+  function isSafeLinkUrl(url) {
+    const href = String(url || "").trim();
+    const schemeMatch = /^([a-z][a-z0-9+.-]*):/i.exec(href);
+    if (!href || /[\u0000-\u001f<>]/.test(href)) {
+      return false;
+    }
+
+    if (!schemeMatch) {
+      return true;
+    }
+
+    return ["http", "https", "mailto", "tel"].includes(schemeMatch[1].toLowerCase());
+  }
+
+  function findClosingStrong(text, start) {
+    for (let index = start; index < text.length - 1; index += 1) {
+      if (text[index] !== "*" || text[index + 1] !== "*") {
+        continue;
+      }
+
+      if (canCloseStrong(text, index)) {
+        return index;
+      }
+    }
+
+    return -1;
+  }
+
+  function canOpenStrong(text, index) {
+    const previous = index > 0 ? text[index - 1] : "";
+    const next = index < text.length - 2 ? text[index + 2] : "";
+
+    if (!next || isWhitespace(next) || next === "*") {
+      return false;
+    }
+
+    return !previous || isWhitespace(previous) || isOpeningBoundary(previous);
+  }
+
+  function canCloseStrong(text, index) {
+    const previous = index > 0 ? text[index - 1] : "";
+    const next = index < text.length - 2 ? text[index + 2] : "";
+
+    if (!previous || isWhitespace(previous) || previous === "*") {
+      return false;
+    }
+
+    return !next || isWhitespace(next) || isClosingBoundary(next);
   }
 
   function findClosingEmphasis(text, start) {
@@ -415,6 +705,28 @@
       return element;
     }
 
+    if (block.type === BLOCK_TYPES.BLOCK_QUOTE) {
+      const element = documentRef.createElement("blockquote");
+      (block.children || []).forEach(function appendQuoteBlock(child) {
+        element.appendChild(createBlockElement(documentRef, child));
+      });
+      return element;
+    }
+
+    if (block.type === BLOCK_TYPES.LIST) {
+      const element = documentRef.createElement(block.ordered ? "ol" : "ul");
+      (block.children || []).forEach(function appendListItem(item) {
+        element.appendChild(createBlockElement(documentRef, item));
+      });
+      return element;
+    }
+
+    if (block.type === BLOCK_TYPES.LIST_ITEM) {
+      const element = documentRef.createElement("li");
+      appendInlineDom(documentRef, element, block.children || []);
+      return element;
+    }
+
     if (block.type === BLOCK_TYPES.DIVIDER) {
       return documentRef.createElement("hr");
     }
@@ -436,6 +748,31 @@
         return;
       }
 
+      if (node.type === INLINE_TYPES.STRONG) {
+        const element = documentRef.createElement("strong");
+        appendInlineDom(documentRef, element, node.children || []);
+        parent.appendChild(element);
+        return;
+      }
+
+      if (node.type === INLINE_TYPES.CODE) {
+        const element = documentRef.createElement("code");
+        element.appendChild(documentRef.createTextNode(node.value || ""));
+        parent.appendChild(element);
+        return;
+      }
+
+      if (node.type === INLINE_TYPES.LINK) {
+        const element = documentRef.createElement("a");
+        setDomAttribute(element, "href", node.href || "#");
+        if (isExternalLink(node.href)) {
+          setDomAttribute(element, "rel", "noopener noreferrer");
+        }
+        appendInlineDom(documentRef, element, node.children || []);
+        parent.appendChild(element);
+        return;
+      }
+
       if (node.type === INLINE_TYPES.HARD_BREAK) {
         parent.appendChild(documentRef.createElement("br"));
         return;
@@ -443,6 +780,19 @@
 
       throw new Error("Unsupported inline type: " + node.type);
     });
+  }
+
+  function setDomAttribute(element, name, value) {
+    if (element && typeof element.setAttribute === "function") {
+      element.setAttribute(name, value);
+      return;
+    }
+
+    element[name] = value;
+  }
+
+  function isExternalLink(href) {
+    return /^https?:\/\//i.test(String(href || ""));
   }
 
   function serializeDocument(documentNode) {
@@ -468,6 +818,19 @@
       return "<p>" + serializeInline(block.children || []) + "</p>";
     }
 
+    if (block.type === BLOCK_TYPES.BLOCK_QUOTE) {
+      return "<blockquote>" + (block.children || []).map(serializeBlock).join("") + "</blockquote>";
+    }
+
+    if (block.type === BLOCK_TYPES.LIST) {
+      const tag = block.ordered ? "ol" : "ul";
+      return "<" + tag + ">" + (block.children || []).map(serializeBlock).join("") + "</" + tag + ">";
+    }
+
+    if (block.type === BLOCK_TYPES.LIST_ITEM) {
+      return "<li>" + serializeInline(block.children || []) + "</li>";
+    }
+
     if (block.type === BLOCK_TYPES.DIVIDER) {
       return "<hr>";
     }
@@ -485,6 +848,18 @@
         return "<em>" + serializeInline(node.children || []) + "</em>";
       }
 
+      if (node.type === INLINE_TYPES.STRONG) {
+        return "<strong>" + serializeInline(node.children || []) + "</strong>";
+      }
+
+      if (node.type === INLINE_TYPES.CODE) {
+        return "<code>" + escapeHtml(node.value || "") + "</code>";
+      }
+
+      if (node.type === INLINE_TYPES.LINK) {
+        return '<a href="' + escapeAttribute(node.href || "#") + '">' + serializeInline(node.children || []) + "</a>";
+      }
+
       if (node.type === INLINE_TYPES.HARD_BREAK) {
         return "<br>";
       }
@@ -500,6 +875,10 @@
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;")
       .replace(/'/g, "&#39;");
+  }
+
+  function escapeAttribute(value) {
+    return escapeHtml(value);
   }
 
   function formatDisplayText(value) {
@@ -540,6 +919,24 @@
 
       validatePosition(block.position, path + ".position", errors);
 
+      if (block.type === BLOCK_TYPES.BLOCK_QUOTE) {
+        validateBlockChildren(block.children, path + ".children", errors);
+        return;
+      }
+
+      if (block.type === BLOCK_TYPES.LIST) {
+        if (typeof block.ordered !== "boolean") {
+          errors.push(createValidationError("invalid-list-ordered", path + ".ordered", "List ordered flag must be a boolean."));
+        }
+        validateListItems(block.children, path + ".children", errors);
+        return;
+      }
+
+      if (block.type === BLOCK_TYPES.LIST_ITEM) {
+        validateInline(block.children, path + ".children", errors);
+        return;
+      }
+
       if (block.type === BLOCK_TYPES.DIVIDER) {
         if (block.children !== undefined) {
           errors.push(createValidationError("divider-children", path + ".children", "Divider blocks must not have inline children."));
@@ -551,6 +948,76 @@
     });
 
     return errors;
+  }
+
+  function validateBlockChildren(children, path, errors) {
+    if (!Array.isArray(children)) {
+      errors.push(createValidationError("invalid-block-children", path, "Block children must be an array."));
+      return;
+    }
+
+    children.forEach(function validateChildBlock(block, index) {
+      const childPath = path + "[" + index + "]";
+      if (!block || typeof block !== "object") {
+        errors.push(createValidationError("invalid-block", childPath, "Block must be an object."));
+        return;
+      }
+
+      if (!BLOCK_TYPE_VALUES.includes(block.type)) {
+        errors.push(createValidationError("unknown-block-type", childPath + ".type", "Unknown block type: " + block.type));
+        return;
+      }
+
+      if (block.type === BLOCK_TYPES.DIVIDER) {
+        errors.push(createValidationError("invalid-nested-divider", childPath, "Divider blocks are not valid inside nested block containers."));
+        return;
+      }
+
+      validatePosition(block.position, childPath + ".position", errors);
+
+      if (block.type === BLOCK_TYPES.BLOCK_QUOTE) {
+        validateBlockChildren(block.children, childPath + ".children", errors);
+        return;
+      }
+
+      if (block.type === BLOCK_TYPES.LIST) {
+        if (typeof block.ordered !== "boolean") {
+          errors.push(createValidationError("invalid-list-ordered", childPath + ".ordered", "List ordered flag must be a boolean."));
+        }
+        validateListItems(block.children, childPath + ".children", errors);
+        return;
+      }
+
+      if (block.type === BLOCK_TYPES.LIST_ITEM) {
+        validateInline(block.children, childPath + ".children", errors);
+        return;
+      }
+
+      if (block.type === BLOCK_TYPES.HEADING) {
+        if (!Number.isFinite(Number(block.level)) || block.level < 1 || block.level > 3) {
+          errors.push(createValidationError("invalid-heading-level", childPath + ".level", "Heading level must be between 1 and 3."));
+        }
+      }
+
+      validateInline(block.children, childPath + ".children", errors);
+    });
+  }
+
+  function validateListItems(children, path, errors) {
+    if (!Array.isArray(children)) {
+      errors.push(createValidationError("invalid-list-items", path, "List children must be list item nodes."));
+      return;
+    }
+
+    children.forEach(function validateItem(item, index) {
+      const itemPath = path + "[" + index + "]";
+      if (!item || item.type !== BLOCK_TYPES.LIST_ITEM) {
+        errors.push(createValidationError("invalid-list-item", itemPath, "List children must be list item nodes."));
+        return;
+      }
+      validatePosition(item.position, itemPath + ".position", errors);
+      validateInline(item.children, itemPath + ".children", errors);
+    });
   }
 
   function validatePosition(position, path, errors) {
@@ -601,7 +1068,25 @@
         return;
       }
 
-      if (node.type === INLINE_TYPES.EMPHASIS) {
+      if (node.type === INLINE_TYPES.EMPHASIS || node.type === INLINE_TYPES.STRONG) {
+        validateInline(node.children, nodePath + ".children", errors);
+        return;
+      }
+
+      if (node.type === INLINE_TYPES.CODE) {
+        if (typeof node.value !== "string") {
+          errors.push(createValidationError("invalid-code-value", nodePath + ".value", "Code nodes require a string value."));
+        }
+        if (node.children !== undefined) {
+          errors.push(createValidationError("invalid-code-children", nodePath + ".children", "Code nodes must not have inline children."));
+        }
+        return;
+      }
+
+      if (node.type === INLINE_TYPES.LINK) {
+        if (typeof node.href !== "string" || !isSafeLinkUrl(node.href)) {
+          errors.push(createValidationError("invalid-link-href", nodePath + ".href", "Link href must be a safe URL string."));
+        }
         validateInline(node.children, nodePath + ".children", errors);
         return;
       }
@@ -643,12 +1128,24 @@
       return "";
     }
 
+    if (block.type === BLOCK_TYPES.BLOCK_QUOTE) {
+      return (block.children || []).map(blockToPlainText).filter(Boolean).join("\n");
+    }
+
+    if (block.type === BLOCK_TYPES.LIST) {
+      return (block.children || []).map(blockToPlainText).filter(Boolean).join("\n");
+    }
+
     return inlineToText(block.children || [], "\n");
   }
 
   function blockToSearchableText(block) {
     if (block.type === BLOCK_TYPES.DIVIDER) {
       return "";
+    }
+
+    if (block.type === BLOCK_TYPES.BLOCK_QUOTE || block.type === BLOCK_TYPES.LIST) {
+      return normalizeWhitespace((block.children || []).map(blockToSearchableText).filter(Boolean).join(" "));
     }
 
     return normalizeWhitespace(inlineToText(block.children || [], " "));
@@ -662,6 +1159,14 @@
 
       if (node.type === INLINE_TYPES.EMPHASIS) {
         return inlineToText(node.children || [], hardBreakValue);
+      }
+
+      if (node.type === INLINE_TYPES.STRONG || node.type === INLINE_TYPES.LINK) {
+        return inlineToText(node.children || [], hardBreakValue);
+      }
+
+      if (node.type === INLINE_TYPES.CODE) {
+        return node.value || "";
       }
 
       if (node.type === INLINE_TYPES.HARD_BREAK) {
@@ -683,36 +1188,76 @@
 
   function astToLegacyBlocks(input) {
     const ast = normalizeAstInput(input);
+    const blocks = [];
 
-    return ast.children.map(function convertBlock(block) {
+    ast.children.forEach(function convert(block) {
+      appendLegacyBlock(blocks, block);
+    });
+
+    return blocks;
+  }
+
+  function appendLegacyBlock(target, block) {
       if (block.type === BLOCK_TYPES.HEADING) {
-        return {
+        target.push({
           type: "h" + clampHeadingLevel(block.level),
           text: inlineToLegacyText(block.children || []),
-        };
+        });
+        return;
       }
 
       if (block.type === BLOCK_TYPES.PULL_QUOTE) {
-        return {
+        target.push({
           type: "p",
           text: inlineToLegacyText(block.children || []),
           pullQuote: true,
-        };
+        });
+        return;
       }
 
       if (block.type === BLOCK_TYPES.PARAGRAPH) {
-        return {
+        target.push({
           type: "p",
           text: inlineToLegacyText(block.children || []),
-        };
+        });
+        return;
+      }
+
+      if (block.type === BLOCK_TYPES.BLOCK_QUOTE) {
+        (block.children || []).forEach(function appendQuoteChild(child) {
+          target.push({
+            type: "p",
+            text: "> " + blockToPlainText(child),
+          });
+        });
+        return;
+      }
+
+      if (block.type === BLOCK_TYPES.LIST) {
+        (block.children || []).forEach(function appendListItem(item, index) {
+          const marker = block.ordered ? String(index + 1) + ". " : "- ";
+          target.push({
+            type: "p",
+            text: marker + inlineToLegacyText(item.children || []),
+          });
+        });
+        return;
+      }
+
+      if (block.type === BLOCK_TYPES.LIST_ITEM) {
+        target.push({
+          type: "p",
+          text: inlineToLegacyText(block.children || []),
+        });
+        return;
       }
 
       if (block.type === BLOCK_TYPES.DIVIDER) {
-        return { type: "hr" };
+        target.push({ type: "hr" });
+        return;
       }
 
       throw new Error("Unsupported block type: " + block.type);
-    });
   }
 
   function legacyBlocksToAst(blocks) {
@@ -780,6 +1325,18 @@
 
       if (node.type === INLINE_TYPES.EMPHASIS) {
         return "*" + inlineToLegacyText(node.children || []) + "*";
+      }
+
+      if (node.type === INLINE_TYPES.STRONG) {
+        return "**" + inlineToLegacyText(node.children || []) + "**";
+      }
+
+      if (node.type === INLINE_TYPES.CODE) {
+        return "`" + (node.value || "") + "`";
+      }
+
+      if (node.type === INLINE_TYPES.LINK) {
+        return "[" + inlineToLegacyText(node.children || []) + "](" + (node.href || "") + ")";
       }
 
       if (node.type === INLINE_TYPES.HARD_BREAK) {

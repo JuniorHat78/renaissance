@@ -1,0 +1,70 @@
+{
+  "children": [
+    {
+      "children": [
+        {
+          "type": "text",
+          "value": "A paragraph with "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "emphasis containing "
+            },
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "strong text"
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": ", "
+            },
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "linked "
+                },
+                {
+                  "type": "code",
+                  "value": "code"
+                }
+              ],
+              "href": "notes.html",
+              "type": "link"
+            },
+            {
+              "type": "text",
+              "value": ", and more"
+            }
+          ],
+          "type": "emphasis"
+        },
+        {
+          "type": "text",
+          "value": "."
+        }
+      ],
+      "position": {
+        "endOffset": 94,
+        "line": 1,
+        "startOffset": 0
+      },
+      "type": "paragraph"
+    }
+  ],
+  "diagnostics": [],
+  "sourceName": "recursive-inline-mixed",
+  "stats": {
+    "blocks": 1,
+    "words": 11
+  },
+  "type": "document",
+  "version": "0.2.0"
+}

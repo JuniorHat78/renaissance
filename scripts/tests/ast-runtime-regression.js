@@ -30,6 +30,27 @@ check("hard breaks inside emphasis stay structural", () => {
   assert.equal(html, "<p><em>first line<br>second line</em></p>");
 });
 
+check("recursive inline dialect supports strong code and links", () => {
+  const documentNode = Ast.parseDocument("A *soft **bold** [linked `code`](notes.html)* line.");
+  const html = Ast.serializeDocument(documentNode);
+  assert.equal(html, '<p>A <em>soft <strong>bold</strong> <a href="notes.html">linked <code>code</code></a></em> line.</p>');
+  assert.equal(Ast.toSearchableText(documentNode), "A soft bold linked code line.");
+});
+
+check("unsafe inline links stay literal text", () => {
+  const documentNode = Ast.parseDocument("[bad](javascript:alert(1))");
+  const html = Ast.serializeDocument(documentNode);
+  assert.equal(html, "<p>[bad](javascript:alert(1))</p>");
+  assert.equal(documentNode.diagnostics[0].code, "unsafe-link-url");
+});
+
+check("lists and blockquotes render as structural blocks", () => {
+  const documentNode = Ast.parseDocument("- First\n- **Second**\n\n> Quoted *line*.");
+  const html = Ast.serializeDocument(documentNode);
+  assert.equal(html, "<ul><li>First</li><li><strong>Second</strong></li></ul><blockquote><p>Quoted <em>line</em>.</p></blockquote>");
+  assert.equal(Ast.toSearchableText(documentNode), "First Second Quoted line.");
+});
+
 check("leading headings can be removed without mutating the source document", () => {
   const documentNode = Ast.parseDocument("# Title\n\n## Deck\n\nBody text.");
   const content = Ast.withoutLeadingHeadings(documentNode);
