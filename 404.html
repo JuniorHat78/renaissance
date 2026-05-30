@@ -387,6 +387,14 @@
         return first && first.indexOf(".") === -1 ? "/" + first + "/" : "/";
       }
 
+      function sanitizeHref(url) {
+        var clean = String(url || "").trim();
+        if (clean.charAt(0) === "/" && clean.charAt(1) !== "/") {
+          return clean;
+        }
+        return "#";
+      }
+
       function normalizeWords(value) {
         return String(value || "")
           .toLowerCase()
@@ -553,7 +561,7 @@
         detail.className = "suggestion-note";
         title.textContent = label;
         detail.textContent = note;
-        link.href = href;
+        link.href = sanitizeHref(href);
         link.append(title, detail);
         item.appendChild(link);
         list.appendChild(item);
@@ -568,7 +576,7 @@
         detail.className = "suggestion-note";
         title.textContent = label;
         detail.textContent = note;
-        link.href = href;
+        link.href = sanitizeHref(href);
         link.append(title, detail);
         box.replaceChildren(link);
         box.hidden = false;
@@ -608,8 +616,8 @@
         pathSearchSeed()
       );
 
-      archive.href = base + "index.html";
-      search.href = base + "search.html";
+      archive.href = sanitizeHref(base + "index.html");
+      search.href = sanitizeHref(base + "search.html");
       document.getElementById("missing-path").textContent = missingPath || "Unknown shelf mark";
       queryInput.value = seed.replace(/\brenaissance\b/g, "").trim();
       applyModeCopy(mode);
@@ -695,7 +703,7 @@
       document.getElementById("notfound-search").addEventListener("submit", function (event) {
         event.preventDefault();
         var query = queryInput.value.trim();
-        location.href = base + "search.html" + (query ? "?q=" + encodeURIComponent(query) : "");
+        location.href = sanitizeHref(base + "search.html" + (query ? "?q=" + encodeURIComponent(query) : ""));
       });
     })();
   </script>
