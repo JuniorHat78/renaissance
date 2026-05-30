@@ -47,13 +47,13 @@ async function runJourney(browserName, base) {
 
     // Archive -> essay -> section.
     await page.click('#essay-list a[href*="essay.html"]');
-    await page.waitForLoadState("networkidle");
+    await page.waitForURL(/essay\.html/, { timeout: 45000 });
     await page.waitForSelector("#section-list .toc-item, #essay-title", { timeout: 45000 });
     const essayTitle = (await page.textContent("#essay-title").catch(() => "")) || "";
     assert.ok(essayTitle.trim().length > 0, "[" + browserName + "] essay should render a title");
 
     await page.click('a[href*="section.html"]');
-    await page.waitForLoadState("networkidle");
+    await page.waitForURL(/section\.html/, { timeout: 45000 });
     await page.waitForSelector("#section-content p", { timeout: 45000 });
     const paragraphs = await page.$$eval("#section-content p", (nodes) => nodes.length);
     assert.ok(paragraphs > 0, "[" + browserName + "] section should render prose");

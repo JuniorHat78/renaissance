@@ -57,7 +57,10 @@ async function main() {
 
   await step("archive -> essay keeps the subpath and renders", async () => {
     await page.click('#essay-list a[href*="essay.html"]');
-    await page.waitForLoadState("networkidle");
+    // Wait for the click-driven navigation to actually commit before asserting.
+    // A bare waitForLoadState can resolve against the already-idle archive page
+    // (webkit dispatches link navigation slightly later), so we wait on the URL.
+    await page.waitForURL(/essay\.html/, { timeout: 30000 });
     assert.ok(
       page.url().includes(prefix + "/essay.html"),
       "essay URL must keep the subpath prefix, got " + page.url()
@@ -69,7 +72,7 @@ async function main() {
 
   await step("essay -> section keeps the subpath and renders", async () => {
     await page.click('a[href*="section.html"]');
-    await page.waitForLoadState("networkidle");
+    await page.waitForURL(/section\.html/, { timeout: 30000 });
     assert.ok(
       page.url().includes(prefix + "/section.html"),
       "section URL must keep the subpath prefix, got " + page.url()
