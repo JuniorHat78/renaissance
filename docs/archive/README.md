@@ -6,3 +6,4 @@ These files are retained as historical context. They describe implemented or sup
 - `search-plan-implemented.txt`
 - `multi-essay-hardcoding-audit.md`
 - `procedure-legacy.md`
+- `roadmap-v2-ci-pwa.txt`
