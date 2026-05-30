@@ -3,7 +3,10 @@
   const DEFAULT_FALLBACK_SLUG = "default-essay";
   const DEFAULT_FALLBACK_SOURCE_DIR = "raw";
   const EMBEDDED_CHAPTERS_PATH = "scripts/chapters-data.js";
-  const AST = window.RenaissanceAst || null;
+  const AST = window.RenaissanceAst;
+  if (!AST) {
+    throw new Error("scripts/ast/index.js must load before scripts/content.js");
+  }
 
   const EMBEDDED_ESSAYS = Array.isArray(window.RENAISSANCE_EMBEDDED_ESSAYS)
     ? window.RENAISSANCE_EMBEDDED_ESSAYS
@@ -112,24 +115,6 @@
   }
 
   refreshEmbeddedMap();
-
-  function escapeHtml(text) {
-    return text
-      .replaceAll("&", "&amp;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;")
-      .replaceAll('"', "&quot;")
-      .replaceAll("'", "&#39;");
-  }
-
-  function formatInlineMarkdown(text) {
-    const escaped = escapeHtml(text);
-    return escaped
-      .replace(/\*([^*]+)\*/g, "<em>$1</em>")
-      .replace(/\s*—\s*/g, " — ")
-      .replace(/\n/g, "<br>")
-      .replace(/\n/g, " ");
-  }
 
   async function fetchAsText(path) {
     const response = await fetch(path);
@@ -357,107 +342,12 @@
     return essays.find((essay) => essay.slug === slug) || null;
   }
 
-  function cleanHeading(line) {
-    return line.replace(/^#{1,6}\s+/, "").trim();
-  }
-
-  function toSearchableText(rawText) {
-    if (AST) {
-      return AST.toSearchableText(AST.parseDocument(rawText));
-    }
-
-    return rawText
-      .replace(/^#{1,6}\s+/gm, "")
-      .replace(/^\s*---\s*$/gm, " ")
-      .replace(/\*([^*\n]+)\*/g, "$1")
-      .replace(/\s+/g, " ")
-      .trim();
-  }
-
-  function blocksToSearchableText(blocks) {
-    if (AST) {
-      return AST.toSearchableText(blocks);
-    }
-
-    return blocks
-      .map((block) => {
-        if (block.type === "hr") {
-          return " ";
-        }
-        return String(block.text || "")
-          .replace(//g, "")
-          .replace(/\*([^*]+)\*/g, "$1");
-      })
-      .join(" ")
-      .replace(/\s+/g, " ")
-      .trim();
-    }
-
   function parseBlocks(rawText) {
-    if (AST) {
-      return AST.astToLegacyBlocks(AST.parseDocument(rawText));
-    }
-
-    const lines = rawText.split("\n");
-    const blocks = [];
-    let paragraphLines = [];
-
-    const flushParagraph = () => {
-      if (paragraphLines.length === 0) {
-        return;
-      }
-      const text = paragraphLines.join("\n");
-      const stripped = text.replace(/\x01/g, "").trim();
-      const isPullQuote = !text.includes("\n") &&
-        /^["“]/.test(stripped) &&
-        /["”]$/.test(stripped);
-      const block = { type: "p", text };
-      if (isPullQuote) {
-        block.pullQuote = true;
-      }
-      blocks.push(block);
-      paragraphLines = [];
-    };
-
-    for (const line of lines) {
-      const trimmed = line.trim();
-
-      if (trimmed === "") {
-        flushParagraph();
-        continue;
-      }
-
-      if (/^#{1,6}\s+/.test(trimmed)) {
-        flushParagraph();
-        const level = Math.min(trimmed.match(/^#+/)[0].length, 3);
-        blocks.push({
-          type: "h" + String(level),
-          text: cleanHeading(trimmed)
-        });
-        continue;
-      }
-
-      if (trimmed === "---") {
-        flushParagraph();
-        blocks.push({ type: "hr" });
-        continue;
-      }
-
-      const hasHardBreak = /  +$/.test(line);
-      paragraphLines.push(hasHardBreak ? trimmed + "" : trimmed);
-    }
-
-    flushParagraph();
-    return blocks;
+    return AST.astToLegacyBlocks(AST.parseDocument(rawText));
   }
 
-  function firstParagraph(blocks) {
-    if (AST) {
-      return AST.firstParagraphText(blocks);
-    }
-
-    const paragraph = blocks.find((block) => block.type === "p");
-    return paragraph ? paragraph.text : "";
+  function firstParagraph(input) {
+    return AST.firstParagraphText(input);
   }
 
   function shortExcerpt(text, maxLength) {
@@ -542,15 +432,6 @@
     };
   }
 
-  function countWords(text) {
-    if (!text || typeof text !== "string") {
-      return 0;
-    }
-
-    const tokens = text.trim().split(/\s+/).filter((value) => value.length > 0);
-    return tokens.length;
-  }
-
   function estimateReadMinutes(wordCount) {
     const wordsPerMinute = 220;
     return Math.max(1, Math.round(wordCount / wordsPerMinute));
@@ -572,19 +453,6 @@
 
   function formatReadDuration(minutes) {
     return formatReadMinutes(minutes) + " read";
-  }
-
-  function removeLeadingHeadings(blocks) {
-    let startIndex = 0;
-    while (startIndex < blocks.length) {
-      const block = blocks[startIndex];
-      if (block.type === "h1" || block.type === "h2" || block.type === "h3") {
-        startIndex += 1;
-        continue;
-      }
-      break;
-    }
-    return blocks.slice(startIndex);
   }
 
   async function loadSectionText(essay, sectionNumber) {
@@ -638,19 +506,13 @@
     }
 
     const rawText = await loadSectionText(essay, section);
-    const ast = AST
-      ? AST.parseDocument(rawText, { sourceName: essay.source_dir + "/" + String(section) + ".txt" })
-      : null;
-    const contentAst = ast ? AST.withoutLeadingHeadings(ast) : null;
-    const blocks = ast ? AST.astToLegacyBlocks(ast) : parseBlocks(rawText);
-    const contentBlocks = contentAst ? AST.astToLegacyBlocks(contentAst) : removeLeadingHeadings(blocks);
-    const searchableText = contentAst
-      ? AST.toSearchableText(contentAst)
-      : (blocksToSearchableText(contentBlocks) || toSearchableText(rawText));
-    const firstParagraphText = contentAst
-      ? AST.firstParagraphText(contentAst)
-      : firstParagraph(contentBlocks);
-    const wordCount = AST ? AST.wordCount(searchableText) : countWords(searchableText);
+    const ast = AST.parseDocument(rawText, { sourceName: essay.source_dir + "/" + String(section) + ".txt" });
+    const contentAst = AST.withoutLeadingHeadings(ast);
+    const blocks = AST.astToLegacyBlocks(ast);
+    const contentBlocks = AST.astToLegacyBlocks(contentAst);
+    const searchableText = AST.toSearchableText(contentAst);
+    const firstParagraphText = AST.firstParagraphText(contentAst);
+    const wordCount = AST.wordCount(searchableText);
     const readMinutes = estimateReadMinutes(wordCount);
 
     return {
@@ -693,28 +555,7 @@
   }
 
   function renderBlocks(container, blocks) {
-    if (AST) {
-      AST.renderBlocks(container, blocks);
-      return;
-    }
-
-    const html = blocks
-      .map((block) => {
-        if (block.type === "hr") {
-          return "<hr>";
-        }
-
-        const safeText = formatInlineMarkdown(block.text || "");
-        if (block.type === "h1" || block.type === "h2" || block.type === "h3") {
-          return "<" + block.type + ">" + safeText + "</" + block.type + ">";
-        }
-
-        const cls = block.pullQuote ? ' class="pull-quote"' : "";
-        return "<p" + cls + ">" + safeText + "</p>";
-      })
-      .join("");
-
-    container.innerHTML = html;
+    AST.renderBlocks(container, blocks);
   }
 
   window.RenaissanceContent = {

@@ -2216,7 +2216,7 @@
 
       const payload = await loadSection(essay.slug, sectionNumber);
       const display = sectionDisplay(essay, sectionNumber);
-      const blocks = payload.contentBlocks.length ? payload.contentBlocks : payload.blocks;
+      const contentAst = payload.contentAst || payload.contentBlocks || payload.blocks;
       currentEssay = essay;
       currentSectionNumber = sectionNumber;
       currentDisplay = display;
@@ -2237,7 +2237,7 @@
         formatWordCount(payload.wordCount),
         formatReadMinutes(payload.readMinutes)
       ]);
-      renderBlocks(sectionContent, blocks);
+      renderBlocks(sectionContent, contentAst);
       annotateParagraphIndices();
       applySectionMetadata(essay, display, sectionNumber, payload);
       initializeReadingProgress(display);

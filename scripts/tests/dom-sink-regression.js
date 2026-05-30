@@ -20,8 +20,6 @@ const allowedSinks = [
   ["scripts/archive.js", "searchResults.innerHTML = '<p", "static error-state markup"],
   ["scripts/archive.js", "essayList.innerHTML = '<li", "static error-state markup"],
 
-  ["scripts/content.js", "container.innerHTML = html;", "legacy fallback renders escaped inline markdown only"],
-
   ["scripts/essay.js", "sectionList.innerHTML = sections", "section list values are escaped before joining"],
   ["scripts/essay.js", "searchResults.innerHTML = \"\";", "clear existing results"],
   ["scripts/essay.js", "searchResults.innerHTML = '<p", "static empty-state markup"],

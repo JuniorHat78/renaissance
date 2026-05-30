@@ -30,6 +30,18 @@ function main() {
     source.includes("function fallbackTitleFromSlug(slug)"),
     "Expected generic fallback title generation helper"
   );
+  assert.ok(
+    source.includes("scripts/ast/index.js must load before scripts/content.js"),
+    "Content runtime should require the AST parser before section rendering"
+  );
+  assert.ok(
+    !source.includes("function formatInlineMarkdown"),
+    "Content runtime should not keep a parallel regex inline renderer"
+  );
+  assert.ok(
+    !source.includes("container.innerHTML ="),
+    "Content runtime should render through the AST DOM renderer, not innerHTML"
+  );
 
   console.log("Content fallback regression checks passed.");
 }
