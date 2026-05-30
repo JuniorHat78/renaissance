@@ -30,7 +30,7 @@
     "test:reduced-motion": "node scripts/tests/reduced-motion-regression.js",
     "test:router": "node scripts/tests/router-regression.js",
     "test:regression": "node scripts/tests/regression-check.js",
-    "test:standalone": "npm run test:content-fallback && npm run test:lighthouse-target && npm run test:lighthouse-summary && npm run test:og-cards && npm run test:discoverability && npm run test:pwa-precache",
+    "test:standalone": "npm run test:content-fallback && npm run test:lighthouse-target && npm run test:lighthouse-summary && npm run test:og-cards && npm run test:discoverability && npm run test:pwa-precache && npm run test:link-integrity && npm run test:essays-schema && npm run test:asset-budget && npm run test:html",
     "test:subpath": "node scripts/ci/run-with-server.js --port 4176 --mount /renaissance/ -- node scripts/tests/subpath-regression.js",
     "test:notfound": "node scripts/ci/run-with-server.js --port 4177 --mount /renaissance/ -- node scripts/tests/notfound-regression.js",
     "test:crossbrowser": "node scripts/ci/run-with-server.js --port 4178 -- node scripts/tests/cross-browser-regression.js",
@@ -39,6 +39,10 @@
     "ci:offline": "node scripts/ci/run-with-server.js --port 4180 --mount /renaissance/ -- node scripts/tests/offline-regression.js",
     "test:offline": "node scripts/ci/run-with-server.js --port 4180 --mount /renaissance/ -- node scripts/tests/offline-regression.js",
     "test:pwa-precache": "node scripts/tests/pwa-precache-regression.js",
+    "test:link-integrity": "node scripts/tests/link-integrity-regression.js",
+    "test:essays-schema": "node scripts/tests/essays-schema-regression.js",
+    "test:asset-budget": "node scripts/tests/asset-budget-regression.js",
+    "test:html": "html-validate index.html essay.html section.html search.html 404.html chapter.html",
     "ci:focus": "node scripts/ci/run-with-server.js --port 4181 -- node scripts/tests/focus-regression.js --base http://127.0.0.1:4181",
     "test:focus": "node scripts/ci/run-with-server.js --port 4181 -- node scripts/tests/focus-regression.js --base http://127.0.0.1:4181",
     "icons:generate": "node scripts/pwa/generate-icons.js",
@@ -55,6 +59,8 @@
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.11.3",
+    "ajv": "^8.20.0",
+    "html-validate": "^10.9.0",
     "pixelmatch": "^7.1.0",
     "playwright": "^1.58.2",
     "pngjs": "^7.0.0"
