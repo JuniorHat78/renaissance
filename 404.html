@@ -393,7 +393,7 @@
       function sanitizeHref(url) {
         var clean = String(url || "").trim();
         if (clean.charAt(0) === "/" && clean.charAt(1) !== "/") {
-          return clean;
+          return encodeURI(clean);
         }
         return "#";
       }
@@ -558,7 +558,7 @@
         detail.className = "suggestion-note";
         title.textContent = label;
         detail.textContent = note;
-        link.href = sanitizeHref(href);
+        link.href = encodeURI(sanitizeHref(href));
         link.append(title, detail);
         item.appendChild(link);
         list.appendChild(item);
@@ -573,7 +573,7 @@
         detail.className = "suggestion-note";
         title.textContent = label;
         detail.textContent = note;
-        link.href = sanitizeHref(href);
+        link.href = encodeURI(sanitizeHref(href));
         link.append(title, detail);
         box.replaceChildren(link);
         box.hidden = false;
