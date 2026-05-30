@@ -102,7 +102,19 @@
       "type": "list"
     }
   ],
-  "diagnostics": [],
+  "diagnostics": [
+    {
+      "code": "crlf-normalized",
+      "details": {},
+      "message": "Normalized carriage returns to line feeds.",
+      "offset": 0,
+      "position": {
+        "column": 1,
+        "line": 1
+      },
+      "severity": "info"
+    }
+  ],
   "sourceName": "list-blocks",
   "stats": {
     "blocks": 2,
