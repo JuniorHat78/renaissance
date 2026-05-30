@@ -89,6 +89,48 @@
     return link;
   }
 
+  function normalizeWords(value) {
+    return String(value || "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim();
+  }
+
+  function prettySlug(slug) {
+    return String(slug || "")
+      .replace(/-/g, " ")
+      .replace(/\b\w/g, (letter) => letter.toUpperCase());
+  }
+
+  function publishedEssays(essays) {
+    return (Array.isArray(essays) ? essays : []).filter((essay) => essay && essay.published !== false);
+  }
+
+  function scoreNeedle(needle, haystack) {
+    const query = normalizeWords(needle);
+    const target = normalizeWords(haystack);
+    if (!query || !target) {
+      return 0;
+    }
+    if (target.includes(query)) {
+      return query.length + 20;
+    }
+    return query.split(/\s+/).reduce((score, word) => {
+      return score + (word.length > 2 && target.includes(word) ? word.length : 0);
+    }, 0);
+  }
+
+  function closestEssay(essays, seed) {
+    let best = null;
+    publishedEssays(essays).forEach((essay) => {
+      const score = scoreNeedle(seed, [essay.slug, essay.title, essay.summary].join(" "));
+      if (score > 0 && (!best || score > best.score)) {
+        best = { essay, score };
+      }
+    });
+    return best ? best.essay : null;
+  }
+
   function setRobotsNoIndex() {
     let robots = document.querySelector('meta[name="robots"]');
     if (!robots) {
@@ -99,7 +141,8 @@
     robots.setAttribute("content", "noindex");
   }
 
-  function showEssayMessage(title, body) {
+  function showEssayMessage(title, body, options) {
+    const settings = options || {};
     const message = String(title || "Unable to load this essay.");
     const description = String(body || "The requested essay is not available.").trim();
     essayTitle.textContent = message;
@@ -111,9 +154,25 @@
     const item = document.createElement("li");
     item.className = "muted";
     const paragraph = document.createElement("p");
-    paragraph.textContent = "Start again from one of these routes.";
+    paragraph.textContent = settings.note || "Try a nearby drawer in the archive.";
     const actions = document.createElement("p");
     actions.className = "reader-message-actions";
+    if (settings.closestEssay) {
+      actions.appendChild(makeActionLink(
+        router.build("essay", { essaySlug: settings.closestEssay.slug }),
+        "Open " + settings.closestEssay.title,
+        "button"
+      ));
+      actions.appendChild(document.createTextNode(" "));
+    }
+    if (settings.query) {
+      actions.appendChild(makeActionLink(
+        router.build("search", { query: settings.query }),
+        "Search \"" + settings.query + "\"",
+        settings.closestEssay ? "button button-ghost" : "button"
+      ));
+      actions.appendChild(document.createTextNode(" "));
+    }
     actions.appendChild(makeActionLink(router.build("archive", {}), "Return to the archive", "button"));
     actions.appendChild(document.createTextNode(" "));
     actions.appendChild(makeActionLink(router.build("search", {}), "Search the essays", "button button-ghost"));
@@ -506,9 +565,18 @@
     } catch (error) {
       const message = String((error && error.message) || "");
       if (/essay not found/i.test(message)) {
+        const requested = queryEssaySlug();
+        const essays = await loadEssays().catch(() => []);
+        const closest = closestEssay(essays, requested);
+        const query = normalizeWords(requested).replace(/\s+/g, " ") || prettySlug(requested);
         showEssayMessage(
           "Essay not found.",
-          "That essay slug is not published here. The archive and search page are the quickest ways back into the collection."
+          "That essay shelf mark is not published here. The archive can still look for the nearest entry.",
+          {
+            closestEssay: closest,
+            query,
+            note: closest ? "This is the closest published essay I found." : "Search the archive for the missing shelf mark."
+          }
         );
         return;
       }

@@ -9,7 +9,7 @@
   },
   "scripts": {
     "dev": "python -m http.server 8000",
-    "check": "npm run check:syntax && npm run test:ast && npm run validate:content && npm run validate:embedded:check && npm run validate:offline-assets:check && npm run validate:discoverability:check",
+    "check": "npm run check:syntax && npm run test:ast && npm run validate:content && npm run validate:embedded:check && npm run validate:site-registry:check && npm run validate:404-catalogue:check && npm run validate:offline-assets:check && npm run validate:discoverability:check && npm run validate:cache-version:check",
     "check:syntax": "node scripts/check-js-syntax.js",
     "ast:doctor": "node scripts/ast-tools/doctor.js",
     "ast:fixture-shape": "node scripts/ast-tools/check-fixture-shape.js",
@@ -84,7 +84,13 @@
     "validate:embedded:check": "node scripts/generate-embedded-data.js --check",
     "discover:generate": "node scripts/generate-discoverability.js",
     "offline-assets:generate": "node scripts/generate-offline-assets.js",
+    "site-registry:generate": "node scripts/generate-site-registry.js",
+    "404-catalogue:generate": "node scripts/generate-404-catalogue.js",
+    "cache-version:generate": "node scripts/generate-cache-version.js",
+    "validate:site-registry:check": "node scripts/generate-site-registry.js --check",
+    "validate:404-catalogue:check": "node scripts/generate-404-catalogue.js --check",
     "validate:offline-assets:check": "node scripts/generate-offline-assets.js --check",
+    "validate:cache-version:check": "node scripts/generate-cache-version.js --check",
     "validate:discoverability:check": "node scripts/generate-discoverability.js --check",
     "test:discoverability": "node scripts/tests/discoverability-regression.js"
   },

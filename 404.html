@@ -376,28 +376,11 @@
     </section>
   </main>
 
+<!-- RECOVERY_CATALOGUE_START -->
+  <script type="application/json" id="recovery-catalogue">{"version":1,"essays":[{"slug":"etching-god-into-sand","title":"Etching God into Sand","summary":"A long-form essay in ten sections tracing sand, silicon, language, and cognition.","route":"essay.html?essay=etching-god-into-sand","sections":[{"number":1,"title":"The Oldest Material","subtitle":"fire, accident, and the thing beneath your feet","route":"section.html?essay=etching-god-into-sand&section=1"},{"number":2,"title":"Nine Nines","subtitle":"one wrong atom in a billion","route":"section.html?essay=etching-god-into-sand&section=2"},{"number":3,"title":"The Amber Twilight","subtitle":"yellow light, slow movement, the human body as contaminant","route":"section.html?essay=etching-god-into-sand&section=3"},{"number":4,"title":"Emet","subtitle":"truth and death, one letter apart","route":"section.html?essay=etching-god-into-sand&section=4"},{"number":5,"title":"Every Possible Book","subtitle":"the library, the librarians, the madness","route":"section.html?essay=etching-god-into-sand&section=5"},{"number":6,"title":"Unmixed Attention","subtitle":"what a mystic called prayer, what an engineer called a mechanism","route":"section.html?essay=etching-god-into-sand&section=6"},{"number":7,"title":"The Omega Point","subtitle":"a priest in the trenches, looking at fossils, seeing the future","route":"section.html?essay=etching-god-into-sand&section=7"},{"number":8,"title":"A World in a Grain","subtitle":"the silence where a name should be","route":"section.html?essay=etching-god-into-sand&section=8"},{"number":9,"title":"While You Were Arguing","subtitle":"it was already here","route":"section.html?essay=etching-god-into-sand&section=9"},{"number":10,"title":"The Roof Is Open","subtitle":"sand, silence, the question","route":"section.html?essay=etching-god-into-sand&section=10"}]}]}</script>
+<!-- RECOVERY_CATALOGUE_END -->
   <script>
     (function () {
-      var catalogue = [
-        {
-          slug: "etching-god-into-sand",
-          title: "Etching God into Sand",
-          summary: "Sand, silicon, language, and cognition.",
-          sections: [
-            { number: 1, title: "The Oldest Material" },
-            { number: 2, title: "Nine Nines" },
-            { number: 3, title: "The Amber Twilight" },
-            { number: 4, title: "Emet" },
-            { number: 5, title: "Every Possible Book" },
-            { number: 6, title: "Unmixed Attention" },
-            { number: 7, title: "The Omega Point" },
-            { number: 8, title: "A World in a Grain" },
-            { number: 9, title: "While You Were Arguing" },
-            { number: 10, title: "The Roof Is Open" }
-          ]
-        }
-      ];
-
       function siteBase() {
         var parts = location.pathname.split("/").filter(Boolean);
         var first = parts[0] || "";
@@ -436,6 +419,114 @@
           .join(" ")
           .replace(/\.[a-z0-9]+$/i, "")
           .replace(/\b(old|link|page|html)\b/gi, " ");
+      }
+
+      function loadCatalogue() {
+        try {
+          var node = document.getElementById("recovery-catalogue");
+          var parsed = JSON.parse(node ? node.textContent : "{}");
+          return Array.isArray(parsed.essays) ? parsed.essays : [];
+        } catch (error) {
+          return [];
+        }
+      }
+
+      function findEssay(catalogue, slug) {
+        return catalogue.find(function (essay) {
+          return essay.slug === slug;
+        }) || null;
+      }
+
+      function findSection(essay, sectionNumber) {
+        if (!essay || !Array.isArray(essay.sections)) {
+          return null;
+        }
+        return essay.sections.find(function (section) {
+          return String(section.number) === String(sectionNumber);
+        }) || null;
+      }
+
+      function nearestSection(essay, sectionNumber) {
+        if (!essay || !Array.isArray(essay.sections) || essay.sections.length === 0) {
+          return null;
+        }
+        var parsed = Number.parseInt(String(sectionNumber), 10);
+        if (!Number.isFinite(parsed)) {
+          return essay.sections[0];
+        }
+        return essay.sections.reduce(function (best, section) {
+          return Math.abs(section.number - parsed) < Math.abs(best.number - parsed) ? section : best;
+        }, essay.sections[0]);
+      }
+
+      function pathExtension() {
+        var clean = location.pathname.split("/").pop() || "";
+        var match = clean.match(/\.([a-z0-9]+)$/i);
+        return match ? match[1].toLowerCase() : "";
+      }
+
+      function classify(params) {
+        var slug = (params.get("essay") || "").trim();
+        var section = (params.get("section") || "").trim();
+        var query = (params.get("q") || params.get("query") || params.get("search") || "").trim();
+        var path = location.pathname.toLowerCase();
+        var extension = pathExtension();
+        if (navigator && navigator.onLine === false) {
+          return "offline";
+        }
+        if (slug && section) {
+          return "section";
+        }
+        if (slug) {
+          return "essay";
+        }
+        if (query || /(^|\/)search([./-]|$)/.test(path)) {
+          return "search";
+        }
+        if (/^(html|txt|png|jpg|jpeg|webp|svg|pdf|xml|json)$/.test(extension)) {
+          return "asset";
+        }
+        return "unknown";
+      }
+
+      function applyModeCopy(mode) {
+        var copy = {
+          unknown: {
+            eyebrow: "Missing shelf mark",
+            lead: "The address is not in the catalogue. The page may have moved, or the link may have lost a letter on the way here.",
+            recovery: "Try a nearby drawer"
+          },
+          essay: {
+            eyebrow: "Misfiled catalogue entry",
+            lead: "This essay shelf mark does not open cleanly, but the archive can still look for the nearest entry.",
+            recovery: "Possible essay matches"
+          },
+          section: {
+            eyebrow: "Missing folio",
+            lead: "The essay may exist, but this folio number is not where the link expected it to be.",
+            recovery: "Possible section matches"
+          },
+          search: {
+            eyebrow: "Smudged index card",
+            lead: "The search route is not valid anymore, but the terms can still be sent through the archive index.",
+            recovery: "Recover the search"
+          },
+          asset: {
+            eyebrow: "Missing enclosure",
+            lead: "The requested file is no longer attached to this card. Its name may still point toward the right essay.",
+            recovery: "Trace the enclosure"
+          },
+          offline: {
+            eyebrow: "Offline shelf",
+            lead: "The network is out. Cached pages may still open, but live search and uncached sections can be incomplete.",
+            recovery: "Try the local shelf"
+          }
+        }[mode] || {};
+
+        document.querySelector(".eyebrow").textContent = copy.eyebrow;
+        document.querySelector(".lead").textContent = copy.lead;
+        document.getElementById("recovery-title").textContent = copy.recovery;
+        document.body.setAttribute("data-recovery-mode", mode);
       }
 
       function scoreNeedle(needle, haystack) {
@@ -500,6 +591,7 @@
         return best;
       }
 
+      var catalogue = loadCatalogue();
       var base = siteBase();
       var params = new URLSearchParams(location.search);
       var archive = document.getElementById("archive-link");
@@ -507,8 +599,10 @@
       var suggestions = document.getElementById("suggestions");
       var queryInput = document.getElementById("notfound-query");
       var missingPath = safeDecode(location.pathname + location.search);
+      var mode = classify(params);
       var seed = normalizeWords(
         params.get("q") ||
+        params.get("query") ||
         params.get("search") ||
         params.get("essay") ||
         pathSearchSeed()
@@ -518,34 +612,59 @@
       search.href = base + "search.html";
       document.getElementById("missing-path").textContent = missingPath || "Unknown shelf mark";
       queryInput.value = seed.replace(/\brenaissance\b/g, "").trim();
+      applyModeCopy(mode);
 
       var slug = (params.get("essay") || "").trim();
       var section = (params.get("section") || "").trim();
-      if (/^[a-z0-9][a-z0-9-]*$/i.test(slug)) {
-        if (/^\d+$/.test(section)) {
+      var essay = findEssay(catalogue, slug);
+      if (mode === "section" && /^[a-z0-9][a-z0-9-]*$/i.test(slug)) {
+        var exactSection = findSection(essay, section);
+        var fallbackSection = exactSection || nearestSection(essay, section);
+        if (essay && fallbackSection) {
           renderPrimary(
-            base + "section.html?essay=" + encodeURIComponent(slug) + "&section=" + encodeURIComponent(section),
-            "Open " + prettySlug(slug) + ", section " + section,
-            "Closest match from the old section link"
+            base + fallbackSection.route,
+            essay.title + ": " + fallbackSection.title,
+            exactSection ? "Exact section from the old link" : "Nearest valid section in this essay"
+          );
+          appendSuggestion(suggestions, base + essay.route, "Open " + essay.title, "Return to the essay table of contents");
+        } else {
+          var sectionBest = bestCatalogueMatch(slug + " " + section + " " + seed);
+          if (sectionBest && sectionBest.type === "section") {
+            renderPrimary(
+              base + sectionBest.section.route,
+              sectionBest.essay.title + ": " + sectionBest.section.title,
+              "Closest section in the catalogue"
+            );
+          }
+        }
+      } else if (mode === "essay" && /^[a-z0-9][a-z0-9-]*$/i.test(slug)) {
+        if (essay) {
+          renderPrimary(
+            base + essay.route,
+            "Open " + essay.title,
+            "Exact essay from the old link"
           );
         } else {
-          renderPrimary(
-            base + "essay.html?essay=" + encodeURIComponent(slug),
-            "Open " + prettySlug(slug),
-            "Closest match from the old essay link"
-          );
+          var essayBest = bestCatalogueMatch(slug);
+          if (essayBest) {
+            renderPrimary(
+              base + (essayBest.type === "section" ? essayBest.section.route : essayBest.essay.route),
+              essayBest.type === "section" ? essayBest.essay.title + ": " + essayBest.section.title : essayBest.essay.title,
+              "Closest catalogue match"
+            );
+          }
         }
       } else {
         var best = bestCatalogueMatch(seed);
         if (best && best.type === "section") {
           renderPrimary(
-            base + "section.html?essay=" + encodeURIComponent(best.essay.slug) + "&section=" + String(best.section.number),
+            base + best.section.route,
             best.essay.title + ": " + best.section.title,
             "Closest section in the catalogue"
           );
         } else if (best) {
           renderPrimary(
-            base + "essay.html?essay=" + encodeURIComponent(best.essay.slug),
+            base + best.essay.route,
             best.essay.title,
             "Closest essay in the catalogue"
           );
@@ -557,11 +676,21 @@
           suggestions,
           base + "search.html?q=" + encodeURIComponent(queryInput.value),
           "Search for \"" + queryInput.value + "\"",
-          "Look across every published essay"
+          mode === "offline" ? "Try this when the network returns" : "Look across every published essay"
         );
       }
-      appendSuggestion(suggestions, base + "index.html", "Return to the archive", "Start from the catalogue");
-      appendSuggestion(suggestions, base + "search.html", "Open search", "Use the full search page");
+      appendSuggestion(
+        suggestions,
+        base + "index.html",
+        mode === "offline" ? "Open cached archive shell" : "Return to the archive",
+        mode === "offline" ? "May already be available offline" : "Start from the catalogue"
+      );
+      appendSuggestion(
+        suggestions,
+        base + "search.html",
+        mode === "offline" ? "Open search shell" : "Open search",
+        mode === "offline" ? "Full results may need the network" : "Use the full search page"
+      );
 
       document.getElementById("notfound-search").addEventListener("submit", function (event) {
         event.preventDefault();

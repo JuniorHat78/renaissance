@@ -712,6 +712,56 @@
     return link;
   }
 
+  function normalizeWords(value) {
+    return String(value || "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim();
+  }
+
+  function publishedEssays(essays) {
+    return (Array.isArray(essays) ? essays : []).filter((essay) => essay && essay.published !== false);
+  }
+
+  function scoreNeedle(needle, haystack) {
+    const query = normalizeWords(needle);
+    const target = normalizeWords(haystack);
+    if (!query || !target) {
+      return 0;
+    }
+    if (target.includes(query)) {
+      return query.length + 20;
+    }
+    return query.split(/\s+/).reduce((score, word) => {
+      return score + (word.length > 2 && target.includes(word) ? word.length : 0);
+    }, 0);
+  }
+
+  function closestEssay(essays, seed) {
+    let best = null;
+    publishedEssays(essays).forEach((essay) => {
+      const score = scoreNeedle(seed, [essay.slug, essay.title, essay.summary].join(" "));
+      if (score > 0 && (!best || score > best.score)) {
+        best = { essay, score };
+      }
+    });
+    return best ? best.essay : null;
+  }
+
+  function nearestSectionNumber(essay, sectionNumber) {
+    const sections = Array.isArray(essay && essay.section_order) ? essay.section_order : [];
+    if (sections.length === 0) {
+      return null;
+    }
+    const parsed = Number.parseInt(String(sectionNumber), 10);
+    if (!Number.isFinite(parsed)) {
+      return sections[0];
+    }
+    return sections.reduce((best, candidate) => {
+      return Math.abs(candidate - parsed) < Math.abs(best - parsed) ? candidate : best;
+    }, sections[0]);
+  }
+
   function setRobotsNoIndex() {
     let robots = document.querySelector('meta[name="robots"]');
     if (!robots) {
@@ -738,6 +788,39 @@
 
     const actions = document.createElement("p");
     actions.className = "reader-message-actions";
+    if (settings.closestEssay) {
+      actions.appendChild(makeActionLink(
+        essayUrl(settings.closestEssay.slug),
+        "Open " + settings.closestEssay.title,
+        "button"
+      ));
+      actions.appendChild(document.createTextNode(" "));
+    }
+    if (settings.closestSection && settings.closestEssayForSection) {
+      const display = sectionDisplay(settings.closestEssayForSection, settings.closestSection);
+      actions.appendChild(makeActionLink(
+        sectionUrl(settings.closestEssayForSection.slug, settings.closestSection),
+        "Open " + display.title,
+        "button"
+      ));
+      actions.appendChild(document.createTextNode(" "));
+    }
+    if (settings.essayContents) {
+      actions.appendChild(makeActionLink(
+        essayUrl(settings.essayContents.slug),
+        "Open " + settings.essayContents.title,
+        settings.closestSection ? "button button-ghost" : "button"
+      ));
+      actions.appendChild(document.createTextNode(" "));
+    }
+    if (settings.query) {
+      actions.appendChild(makeActionLink(
+        router.build("search", { query: settings.query }),
+        "Search \"" + settings.query + "\"",
+        "button button-ghost"
+      ));
+      actions.appendChild(document.createTextNode(" "));
+    }
     actions.appendChild(makeActionLink(router.build("archive", {}), "Return to the archive", "button"));
     actions.appendChild(document.createTextNode(" "));
     actions.appendChild(makeActionLink(router.build("search", {}), "Search the essays", "button button-ghost"));
@@ -2193,8 +2276,13 @@
       const essaySlug = await resolveEssaySlug();
       const essay = await loadEssay(essaySlug);
       if (!essay) {
+        const essays = await loadEssays().catch(() => []);
+        const closest = closestEssay(essays, essaySlug);
+        const query = normalizeWords(essaySlug).replace(/\s+/g, " ");
         showMessage("Essay not found.", {
-          body: "That essay slug is not published here. The archive and search page are the quickest ways back into the collection."
+          body: "That essay shelf mark is not published here. The archive can still look for the nearest entry.",
+          closestEssay: closest,
+          query
         });
         return;
       }
@@ -2208,8 +2296,12 @@
 
       const sectionNumber = querySectionNumber() || essay.section_order[0];
       if (!essay.section_order.includes(sectionNumber)) {
+        const nearest = nearestSectionNumber(essay, sectionNumber);
         showMessage("Section not found.", {
-          body: "That section is not part of this essay. Return to the essay page to choose an available section."
+          body: "That folio number is outside this essay. Use the nearest section or return to the essay contents.",
+          closestEssayForSection: essay,
+          closestSection: nearest,
+          essayContents: essay
         });
         return;
       }

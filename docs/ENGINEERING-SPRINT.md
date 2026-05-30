@@ -24,13 +24,13 @@ staleness, or route fragility.
 
 These are the current execution rules for the long sprint.
 
-- [ ] Start only after the user explicitly says `go`.
-- [ ] Create a dedicated sprint branch before implementation begins.
-- [ ] Keep work scoped to this repository.
-- [ ] Treat this document as the live checklist; update checkboxes and notes as
+- [x] Start only after the user explicitly says `go`.
+- [x] Create a dedicated sprint branch before implementation begins.
+- [x] Keep work scoped to this repository.
+- [x] Treat this document as the live checklist; update checkboxes and notes as
       phases progress.
-- [ ] Commit in small, reviewable chunks.
-- [ ] Push to GitHub often so GitHub Actions can do the heavy verification.
+- [x] Commit in small, reviewable chunks.
+- [x] Push to GitHub often so GitHub Actions can do the heavy verification.
 - [ ] Merge the sprint branch only after the sprint is complete and CI is in an
       acceptable state.
 - [ ] Prefer GitHub Actions over heavy local test loops.
@@ -89,11 +89,11 @@ This sprint should therefore favor:
 
 Goal: separate the current docs/interface/404 work from the long sprint.
 
-- [ ] Review current diff and group changes by intent.
-- [ ] Commit documentation cleanup separately if not already committed.
-- [ ] Commit interface-control polish separately if not already committed.
-- [ ] Commit initial 404 magic shell/spec separately if not already committed.
-- [ ] Confirm the working tree is clean before beginning Phase 1.
+- [x] Review current diff and group changes by intent.
+- [x] Commit documentation cleanup separately if not already committed.
+- [x] Commit interface-control polish separately if not already committed.
+- [x] Commit initial 404 magic shell/spec separately if not already committed.
+- [x] Confirm the working tree is clean before beginning Phase 1.
 
 Suggested commits:
 
@@ -105,20 +105,20 @@ Suggested commits:
 
 Goal: implement the mode system described in `docs/404-MAGIC-SPEC.md`.
 
-- [ ] Add route classification inside `404.html`.
-- [ ] Detect unknown path mode.
-- [ ] Detect essay-link mode from `essay=<slug>` or essay-like path tokens.
-- [ ] Detect section-link mode from `essay=<slug>&section=<number>`.
-- [ ] Detect search-link mode from `q=`, `query=`, `search=`, or old search
+- [x] Add route classification inside `404.html`.
+- [x] Detect unknown path mode.
+- [x] Detect essay-link mode from `essay=<slug>` or essay-like path tokens.
+- [x] Detect section-link mode from `essay=<slug>&section=<number>`.
+- [x] Detect search-link mode from `q=`, `query=`, `search=`, or old search
       paths.
-- [ ] Detect asset/old-file mode from missing extensions such as `.html`,
+- [x] Detect asset/old-file mode from missing extensions such as `.html`,
       `.txt`, `.png`, `.jpg`, `.svg`, `.pdf`, `.xml`, and `.json`.
-- [ ] Detect offline mode from `navigator.onLine === false`.
-- [ ] Swap eyebrow, lead copy, primary suggestion, search prefill, and secondary
+- [x] Detect offline mode from `navigator.onLine === false`.
+- [x] Swap eyebrow, lead copy, primary suggestion, search prefill, and secondary
       suggestions by mode.
-- [ ] Keep one physical `404.html`; do not create separate 404 files that
+- [x] Keep one physical `404.html`; do not create separate 404 files that
       GitHub Pages cannot route to directly.
-- [ ] Keep existing recovery hooks stable: `#archive-link`, `#search-link`,
+- [x] Keep existing recovery hooks stable: `#archive-link`, `#search-link`,
       `#did-you-mean`.
 
 Suggested commit:
@@ -130,15 +130,15 @@ Suggested commit:
 Goal: make in-app 200-response not-found states feel like the same archive
 system.
 
-- [ ] Improve `essay.html?essay=<bad-slug>` recovery copy and links.
-- [ ] Improve `section.html?essay=<bad-slug>&section=<n>` recovery copy and
+- [x] Improve `essay.html?essay=<bad-slug>` recovery copy and links.
+- [x] Improve `section.html?essay=<bad-slug>&section=<n>` recovery copy and
       links.
-- [ ] Improve `section.html?essay=<valid>&section=<bad>` recovery copy and
+- [x] Improve `section.html?essay=<valid>&section=<bad>` recovery copy and
       links.
-- [ ] Suggest nearest valid essay or section where deterministic.
-- [ ] Preserve `meta[name="robots"] content="noindex"` for app-shell failures.
-- [ ] Keep recovery links under the project subpath.
-- [ ] Avoid large visual redesign of essay/section shells.
+- [x] Suggest nearest valid essay or section where deterministic.
+- [x] Preserve `meta[name="robots"] content="noindex"` for app-shell failures.
+- [x] Keep recovery links under the project subpath.
+- [x] Avoid large visual redesign of essay/section shells.
 
 Suggested commit:
 
@@ -148,10 +148,10 @@ Suggested commit:
 
 Goal: reduce stale shell risk from manual service-worker cache versions.
 
-- [ ] Audit current `sw.js` cache version behavior.
-- [ ] Add generated cache metadata or an asset-content-derived version stamp.
-- [ ] Add a check that fails when generated cache metadata is stale.
-- [ ] Keep the service worker install path deterministic.
+- [x] Audit current `sw.js` cache version behavior.
+- [x] Add generated cache metadata or an asset-content-derived version stamp.
+- [x] Add a check that fails when generated cache metadata is stale.
+- [x] Keep the service worker install path deterministic.
 - [ ] Consider a bounded network timeout for navigations before falling back to
       cached shell pages on slow/flaky networks.
 - [ ] Preserve current offline reading guarantees.
@@ -166,14 +166,14 @@ Suggested commit:
 
 Goal: stop hand-maintaining 404/recovery suggestion metadata.
 
-- [ ] Generate compact published essay/section metadata from `data/essays.json`
+- [x] Generate compact published essay/section metadata from `data/essays.json`
       and source manifests.
-- [ ] Include only published essays in production recovery suggestions.
-- [ ] Include essay slug, title, summary, section numbers, and section titles.
-- [ ] Keep browser-level 404 path-depth safe by embedding or otherwise safely
+- [x] Include only published essays in production recovery suggestions.
+- [x] Include essay slug, title, summary, section numbers, and section titles.
+- [x] Keep browser-level 404 path-depth safe by embedding or otherwise safely
       loading the catalogue.
-- [ ] Add validation that the generated catalogue is fresh.
-- [ ] Add tests that unpublished essays do not leak into recovery suggestions.
+- [x] Add validation that the generated catalogue is fresh.
+- [x] Add tests that unpublished essays do not leak into recovery suggestions.
 
 Suggested commit:
 
@@ -199,7 +199,7 @@ Suggested commit:
 
 Goal: create one source of truth for valid site routes and metadata.
 
-- [ ] Generate a route registry from published essays, sections, shell pages,
+- [x] Generate a route registry from published essays, sections, shell pages,
       feeds, sitemap, manifest, and static recovery routes.
 - [ ] Use the registry to validate internal links.
 - [ ] Use the registry to seed 404/recovery suggestions.
@@ -207,7 +207,7 @@ Goal: create one source of truth for valid site routes and metadata.
       practical.
 - [ ] Use the registry to derive service-worker shell precache expectations where
       practical.
-- [ ] Add stale-registry checks.
+- [x] Add stale-registry checks.
 - [ ] Document the registry in `docs/ARCHITECTURE.md`.
 
 Suggested commit:
