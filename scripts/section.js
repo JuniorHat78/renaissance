@@ -18,6 +18,7 @@
     toAbsoluteUrl
   } = window.RenaissanceMeta;
   const readingState = window.RenaissanceReadingState;
+  const clipboardCitation = window.RenaissanceClipboardCitation;
 
   const backToEssay = document.getElementById("back-to-essay");
   const essayLine = document.getElementById("essay-line");
@@ -199,33 +200,34 @@
   }
 
   function citationPlainText(selectedText, url, tier) {
+    if (clipboardCitation && typeof clipboardCitation.plainText === "function") {
+      return clipboardCitation.plainText({
+        selectedText,
+        url,
+        tier,
+        sourceLabel: citationSourceLabel()
+      });
+    }
+
     const body = String(selectedText || "").replace(/^\s+|\s+$/g, "");
-    if (tier === "none") {
-      return body;
-    }
-    if (tier === "full") {
-      const source = citationSourceLabel();
-      const lead = source ? "— " + source + "\n  " : "— ";
-      return body + "\n\n" + lead + url;
-    }
-    return body + "\n\n— " + url;
+    return tier === "none" ? body : body + "\n\n\u2014 " + String(url || "");
   }
 
-  function citationHtml(selectedHtml, url, tier) {
-    if (tier === "none" || !selectedHtml) {
+  function citationHtml(selectedText, url, tier) {
+    if (tier === "none" || !selectedText) {
       return "";
     }
 
-    const link =
-      '<a href="' + escapeHtml(url) + '" rel="noopener noreferrer">' + escapeHtml(url) + "</a>";
-    const quote = "<blockquote>" + selectedHtml + "</blockquote>";
-
-    if (tier === "full") {
-      const source = citationSourceLabel();
-      const cite = source ? "<cite>" + escapeHtml(source) + "</cite><br>" : "";
-      return quote + '<p class="renaissance-citation">— ' + cite + link + "</p>";
+    if (clipboardCitation && typeof clipboardCitation.html === "function") {
+      return clipboardCitation.html({
+        selectedText,
+        url,
+        tier,
+        sourceLabel: citationSourceLabel()
+      });
     }
-    return quote + '<p class="renaissance-citation">— ' + link + "</p>";
+
+    return "<blockquote><p>" + escapeHtml(selectedText) + "</p></blockquote>";
   }
 
   function joinMetaParts(parts) {
@@ -1997,16 +1999,6 @@
     };
   }
 
-  function htmlFromRange(range) {
-    if (!range) {
-      return "";
-    }
-
-    const container = document.createElement("div");
-    container.appendChild(range.cloneContents());
-    return container.innerHTML;
-  }
-
   function decorateClipboardWithSource(event) {
     if (!event.clipboardData || !currentEssay || !currentSectionNumber) {
       return;
@@ -2036,7 +2028,7 @@
     const sourceUrl = buildShareUrl(details);
     event.clipboardData.setData("text/plain", citationPlainText(selected.text, sourceUrl, tier));
 
-    const html = citationHtml(htmlFromRange(selected.range), sourceUrl, tier);
+    const html = citationHtml(selected.text, sourceUrl, tier);
     if (html) {
       event.clipboardData.setData("text/html", html);
     }

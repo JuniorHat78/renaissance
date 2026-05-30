@@ -12,7 +12,7 @@
  *  - A versioned cache; bump VERSION to force a clean re-precache.
  */
 
-const VERSION = "v2";
+const VERSION = "v3";
 const CACHE = "renaissance-" + VERSION;
 
 const PRECACHE = [
@@ -25,6 +25,7 @@ const PRECACHE = [
   "styles/site.css",
   "scripts/ast/index.js",
   "scripts/archive.js",
+  "scripts/clipboard-citation.js",
   "scripts/content.js",
   "scripts/essay.js",
   "scripts/essays-data.js",
