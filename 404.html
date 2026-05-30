@@ -393,9 +393,17 @@
       function sanitizeHref(url) {
         var clean = String(url || "").trim();
         if (clean.charAt(0) === "/" && clean.charAt(1) !== "/") {
-          return encodeURI(clean);
+          return clean;
         }
         return "#";
+      }
+
+      function safeDecodeURI(url) {
+        try {
+          return decodeURI(url);
+        } catch (error) {
+          return url;
+        }
       }
 
       function normalizeWords(value) {
@@ -558,7 +566,7 @@
         detail.className = "suggestion-note";
         title.textContent = label;
         detail.textContent = note;
-        link.href = encodeURI(sanitizeHref(href));
+        link.href = encodeURI(safeDecodeURI(sanitizeHref(href)));
         link.append(title, detail);
         item.appendChild(link);
         list.appendChild(item);
@@ -573,7 +581,7 @@
         detail.className = "suggestion-note";
         title.textContent = label;
         detail.textContent = note;
-        link.href = encodeURI(sanitizeHref(href));
+        link.href = encodeURI(safeDecodeURI(sanitizeHref(href)));
         link.append(title, detail);
         box.replaceChildren(link);
         box.hidden = false;
@@ -613,8 +621,8 @@
         pathSearchSeed()
       );
 
-      archive.href = sanitizeHref(base + "index.html");
-      search.href = sanitizeHref(base + "search.html");
+      archive.href = encodeURI(safeDecodeURI(sanitizeHref(base + "index.html")));
+      search.href = encodeURI(safeDecodeURI(sanitizeHref(base + "search.html")));
       document.getElementById("missing-path").textContent = missingPath || "Unknown shelf mark";
       queryInput.value = seed.replace(/\brenaissance\b/g, "").trim();
       applyModeCopy(mode);
@@ -700,7 +708,7 @@
       document.getElementById("notfound-search").addEventListener("submit", function (event) {
         event.preventDefault();
         var query = queryInput.value.trim();
-        location.href = sanitizeHref(base + "search.html" + (query ? "?q=" + encodeURIComponent(query) : ""));
+        location.href = encodeURI(safeDecodeURI(sanitizeHref(base + "search.html" + (query ? "?q=" + encodeURIComponent(query) : ""))));
       });
     })();
   </script>
