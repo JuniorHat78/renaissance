@@ -26,6 +26,39 @@ async function main() {
     assert.deepEqual(hits, []);
   });
 
+  check("case sensitivity is explicit and deterministic", () => {
+    const loose = Search.findOccurrencesInText("Alpha alpha", "alpha", { mode: "contains", caseSensitive: false });
+    const strict = Search.findOccurrencesInText("Alpha alpha", "alpha", { mode: "contains", caseSensitive: true });
+    assert.deepEqual(loose.map((hit) => hit.matchedText), ["Alpha", "alpha"]);
+    assert.deepEqual(strict.map((hit) => hit.matchedText), ["alpha"]);
+  });
+
+  check("exact phrase mode tolerates whitespace but not empty noise", () => {
+    const hits = Search.findOccurrencesInText("alpha\nbeta alpha   beta", "alpha beta", { mode: "exact_phrase" });
+    assert.deepEqual(hits.map((hit) => hit.matchedText), ["alpha\nbeta", "alpha   beta"]);
+    assert.deepEqual(Search.findOccurrencesInText("alpha beta", "   ", { mode: "exact_phrase" }), []);
+  });
+
+  check("fuzzy mode tokenizes punctuation-heavy queries", () => {
+    const hits = Search.findOccurrencesInText("silicon, language; cognition", "langauge!!!", { mode: "fuzzy" });
+    assert.deepEqual(hits.map((hit) => hit.matchedText), ["language"]);
+  });
+
+  check("search urls normalize empty and noisy state", () => {
+    assert.equal(Search.buildSearchUrl({ query: "   " }), "search.html");
+    assert.equal(
+      Search.buildSearchUrl({
+        query: " Alpha ",
+        mode: "bogus",
+        sort: "mystery",
+        page: "nope",
+        pageSize: 999,
+        caseSensitive: true
+      }),
+      "search.html?q=Alpha&case=1"
+    );
+  });
+
   await check("search result cache evicts old entries", async () => {
     const engine = Search.createSearchEngine(fakeContentApi());
 
@@ -60,12 +93,53 @@ async function main() {
     assert.ok(section.fuzzyBuckets.size > 0, "fuzzy candidate buckets should not be empty");
   });
 
+  await check("search index build timing is visible", async () => {
+    const engine = Search.createSearchEngine(fakeContentApi());
+    const started = performance.now();
+    const index = await engine.ensureIndex();
+    const duration = performance.now() - started;
+    const tokenCount = index.sections.reduce((count, section) => count + section.tokens.length, 0);
+
+    assert.equal(index.sections.length, 1);
+    assert.ok(tokenCount > 0, "timing output should include indexed token work");
+    console.log(
+      "INFO search index build: " +
+      duration.toFixed(2) +
+      "ms for " +
+      String(index.sections.length) +
+      " sections / " +
+      String(tokenCount) +
+      " tokens"
+    );
+  });
+
   await check("fuzzy search uses indexed section records", async () => {
     const engine = Search.createSearchEngine(fakeContentApi());
     const result = await engine.search({ query: "alhpa", mode: "fuzzy" });
 
     assert.equal(result.totalHits, 1);
     assert.equal(result.hits[0].matchedText, "alpha");
+  });
+
+  await check("relevance ranking boosts essay and section titles over body hits", async () => {
+    const engine = Search.createSearchEngine(rankingContentApi());
+    const result = await engine.search({ query: "alpha", mode: "contains", sort: "relevance" });
+
+    assert.ok(result.hits.length >= 3, "fixture should produce title, section, and body hits");
+    assert.equal(result.hits[0].field, "essay_title");
+    assert.equal(result.hits[1].field, "section_title");
+    assert.ok(
+      result.hits.findIndex((hit) => hit.field === "body") > 1,
+      "body hit should rank after title fields"
+    );
+  });
+
+  await check("empty query returns an empty stable result", async () => {
+    const engine = Search.createSearchEngine(fakeContentApi());
+    const result = await engine.search({ query: "   ", mode: "contains" });
+    assert.equal(result.totalHits, 0);
+    assert.deepEqual(result.hits, []);
+    assert.equal(result.state.query, "");
   });
 
   console.log("Search engine regression checks passed.");
@@ -99,6 +173,40 @@ function fakeContentApi() {
         label: "Section " + String(sectionNumber),
         title: "Fixture Section",
         searchLabel: "Section " + String(sectionNumber) + " | Fixture Section",
+      };
+    },
+  };
+}
+
+function rankingContentApi() {
+  const essay = {
+    slug: "ranking-fixture",
+    title: "Alpha Archive",
+    summary: "Ranking fixture",
+    published: true,
+    section_order: [1],
+  };
+
+  return {
+    async loadEssays() {
+      return [essay];
+    },
+    async loadEssaySections() {
+      return {
+        essay,
+        sections: [
+          {
+            sectionNumber: 1,
+            searchableText: "A body paragraph mentions alpha once.",
+          },
+        ],
+      };
+    },
+    sectionDisplay() {
+      return {
+        label: "Section 1",
+        title: "Alpha Notes",
+        searchLabel: "Section 1 | Alpha Notes",
       };
     },
   };

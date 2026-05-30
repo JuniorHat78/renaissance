@@ -1,0 +1,1 @@
+A paragraph with strong text, literal *code*, and safe link.

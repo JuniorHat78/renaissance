@@ -68,6 +68,17 @@ check("404.html is precached so it works offline", () => {
   assert.ok(precacheSet.has("404.html"), "404.html should be precached");
 });
 
+check("cache version is generated from assets", () => {
+  const match = swSource.match(/const VERSION = "([^"]+)";/);
+  assert.ok(match, "service worker needs a VERSION constant");
+  assert.match(match[1], /^asset-[a-f0-9]{12}$/, "service worker VERSION should be an asset hash");
+});
+
+check("navigation network fallback is bounded", () => {
+  assert.match(swSource, /NAVIGATION_NETWORK_TIMEOUT_MS\s*=\s*\d+/, "navigation fallback should declare a network timeout");
+  assert.match(swSource, /Promise\.race\(\[network,\s*timeoutAfter/, "navigation fetch should race the timeout");
+});
+
 check("every precached path exists on disk (no dangling entries)", () => {
   for (const entry of precache) {
     if (entry === "./") {

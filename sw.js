@@ -12,9 +12,10 @@
  *  - A versioned cache; bump VERSION to force a clean re-precache.
  */
 
-const VERSION = "v4";
+const VERSION = "asset-0d8e20aa92e4";
 const CACHE = "renaissance-" + VERSION;
 const OFFLINE_ASSET_MANIFEST = "data/offline-assets.json";
+const NAVIGATION_NETWORK_TIMEOUT_MS = 4500;
 
 const PRECACHE = [
   "./",
@@ -32,8 +33,10 @@ const PRECACHE = [
   "scripts/essay.js",
   "scripts/essays-data.js",
   "scripts/meta.js",
+  "scripts/archive-select.js",
   "scripts/preview-card.js",
   "scripts/reading-state.js",
+  "scripts/recovery-engine.js",
   "scripts/router.js",
   "scripts/search-engine.js",
   "scripts/search-page.js",
@@ -96,19 +99,7 @@ self.addEventListener("fetch", (event) => {
   }
 
   if (request.mode === "navigate") {
-    event.respondWith(
-      fetch(request)
-        .then((response) => {
-          const copy = response.clone();
-          caches.open(CACHE).then((cache) => cache.put(request, copy));
-          return response;
-        })
-        .catch(() =>
-          caches.match(request, { ignoreSearch: true }).then(
-            (cached) => cached || caches.match("404.html") || Response.error()
-          )
-        )
-    );
+    event.respondWith(networkFirstNavigation(request));
     return;
   }
 
@@ -128,3 +119,26 @@ self.addEventListener("fetch", (event) => {
     })
   );
 });
+
+function timeoutAfter(ms) {
+  return new Promise((resolve, reject) => {
+    setTimeout(() => reject(new Error("navigation network timeout")), ms);
+  });
+}
+
+function cachedNavigationFallback(request) {
+  return caches.match(request, { ignoreSearch: true }).then(
+    (cached) => cached || caches.match("404.html") || Response.error()
+  );
+}
+
+function networkFirstNavigation(request) {
+  const network = fetch(request).then((response) => {
+    const copy = response.clone();
+    caches.open(CACHE).then((cache) => cache.put(request, copy));
+    return response;
+  });
+
+  return Promise.race([network, timeoutAfter(NAVIGATION_NETWORK_TIMEOUT_MS)])
+    .catch(() => cachedNavigationFallback(request));
+}

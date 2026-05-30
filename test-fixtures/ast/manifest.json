@@ -1,9 +1,12 @@
 {
-  "version": 1,
   "fixtures": [
     {
       "name": "basic-paragraph",
       "purpose": "Paragraph splitting and soft line joining."
+    },
+    {
+      "name": "blockquote-blocks",
+      "purpose": "Multi-line blockquote parsing with inline children."
     },
     {
       "name": "curly-quotes",
@@ -34,6 +37,10 @@
       "purpose": "Two trailing spaces create an explicit hard break."
     },
     {
+      "name": "headings",
+      "purpose": "Heading levels and clamping behavior."
+    },
+    {
       "name": "html-encoded-entities-are-text",
       "purpose": "Encoded HTML entities stay text and do not become markup."
     },
@@ -42,16 +49,20 @@
       "purpose": "Event-handler-looking HTML stays escaped prose."
     },
     {
-      "name": "headings",
-      "purpose": "Heading levels and clamping behavior."
-    },
-    {
       "name": "html-is-text",
       "purpose": "HTML-looking prose is rendered as text."
     },
     {
       "name": "html-malformed-tags-are-text",
       "purpose": "Malformed HTML-looking prose stays escaped text."
+    },
+    {
+      "name": "inline-strong-code-link",
+      "purpose": "Strong text, inline code, and safe inline links."
+    },
+    {
+      "name": "list-blocks",
+      "purpose": "Unordered and ordered list block parsing."
     },
     {
       "name": "literal-asterisk-bullet-looking-line",
@@ -74,6 +85,10 @@
       "purpose": "Straight quote pull-quote detection without quote stripping."
     },
     {
+      "name": "recursive-inline-mixed",
+      "purpose": "Recursive inline parsing inside emphasis wrappers."
+    },
+    {
       "name": "script-tag-is-text",
       "purpose": "Script-looking input is escaped, not executed markup."
     },
@@ -81,5 +96,6 @@
       "name": "unicode-punctuation",
       "purpose": "Unicode punctuation remains stable through parsing and rendering."
     }
-  ]
+  ],
+  "version": 1
 }

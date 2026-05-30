@@ -21,6 +21,7 @@
     toAbsoluteUrl
   } = window.RenaissanceMeta;
   const readingState = window.RenaissanceReadingState;
+  const recovery = window.RenaissanceRecovery;
 
   const PREVIEW_LIMIT = 3;
 
@@ -99,7 +100,8 @@
     robots.setAttribute("content", "noindex");
   }
 
-  function showEssayMessage(title, body) {
+  function showEssayMessage(title, body, options) {
+    const settings = options || {};
     const message = String(title || "Unable to load this essay.");
     const description = String(body || "The requested essay is not available.").trim();
     essayTitle.textContent = message;
@@ -111,9 +113,25 @@
     const item = document.createElement("li");
     item.className = "muted";
     const paragraph = document.createElement("p");
-    paragraph.textContent = "Start again from one of these routes.";
+    paragraph.textContent = settings.note || "Try a nearby drawer in the archive.";
     const actions = document.createElement("p");
     actions.className = "reader-message-actions";
+    if (settings.closestEssay) {
+      actions.appendChild(makeActionLink(
+        router.build("essay", { essaySlug: settings.closestEssay.slug }),
+        "Open " + settings.closestEssay.title,
+        "button"
+      ));
+      actions.appendChild(document.createTextNode(" "));
+    }
+    if (settings.query) {
+      actions.appendChild(makeActionLink(
+        router.build("search", { query: settings.query }),
+        "Search \"" + settings.query + "\"",
+        settings.closestEssay ? "button button-ghost" : "button"
+      ));
+      actions.appendChild(document.createTextNode(" "));
+    }
     actions.appendChild(makeActionLink(router.build("archive", {}), "Return to the archive", "button"));
     actions.appendChild(document.createTextNode(" "));
     actions.appendChild(makeActionLink(router.build("search", {}), "Search the essays", "button button-ghost"));
@@ -506,9 +524,18 @@
     } catch (error) {
       const message = String((error && error.message) || "");
       if (/essay not found/i.test(message)) {
+        const requested = queryEssaySlug();
+        const essays = await loadEssays().catch(() => []);
+        const closest = recovery.closestEssay(essays, requested);
+        const query = recovery.normalizeWords(requested).replace(/\s+/g, " ") || recovery.prettySlug(requested);
         showEssayMessage(
           "Essay not found.",
-          "That essay slug is not published here. The archive and search page are the quickest ways back into the collection."
+          "That essay shelf mark is not published here. The archive can still look for the nearest entry.",
+          {
+            closestEssay: closest,
+            query,
+            note: closest ? "This is the closest published essay I found." : "Search the archive for the missing shelf mark."
+          }
         );
         return;
       }

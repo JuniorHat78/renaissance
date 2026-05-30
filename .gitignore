@@ -7,11 +7,19 @@ Thumbs.db
 desktop.ini
 .vscode/
 .idea/
+.antigravitycli/
 
 # Temp/log files
 *.log
 *.tmp
 *.temp
+RUN-LOG.txt
+TODO.txt
+TEMP-*.md
+
+# Local experiments
+exp-env.html
+scripts/exp-env.js
 
 # Local perf report artifacts
 .tmp-lh-*.json

@@ -82,6 +82,7 @@ a {
   display: grid;
   justify-items: end;
   gap: 0.48rem;
+  position: relative;
 }
 
 .eyebrow {
@@ -322,11 +323,11 @@ h2 {
 
 .archive-panel {
   border-top: 1px solid var(--line);
-  padding-top: 0.65rem;
+  padding-top: 0.36rem;
 }
 
 .essay-list {
-  margin: 1rem 0 0;
+  margin: 0.42rem 0 0;
   padding: 0;
   list-style: none;
   border-top: 1px solid var(--line);
@@ -338,7 +339,7 @@ h2 {
 
 .essay-item a {
   display: block;
-  padding: 0.95rem 0.25rem 0.98rem;
+  padding: 0.46rem 0.25rem 0.5rem;
   text-decoration: none;
   transition: background-color var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease);
 }
@@ -353,12 +354,12 @@ h2 {
 }
 
 .essay-summary {
-  margin: 0.35rem 0 0;
+  margin: 0.14rem 0 0;
   color: var(--muted);
 }
 
 .essay-meta {
-  margin: 0.38rem 0 0;
+  margin: 0.16rem 0 0;
   color: var(--muted);
   font-family: var(--font-ui);
   font-size: 0.76rem;
@@ -392,6 +393,7 @@ h2 {
   display: grid;
   justify-items: end;
   gap: 0.48rem;
+  position: relative;
 }
 
 .essay-main-title {
@@ -436,6 +438,38 @@ h2 {
   align-items: stretch;
 }
 
+.search-inline-form .button {
+  align-self: center;
+  min-height: 1.62rem;
+  border-color: color-mix(in srgb, var(--accent-hover) 74%, #2a2018 26%);
+  border-radius: 2px;
+  background:
+    linear-gradient(90deg, rgba(255, 247, 239, 0.2), transparent 42%),
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--accent) 82%, #4a2b1d 18%),
+      color-mix(in srgb, var(--accent-hover) 78%, #24170f 22%)
+    );
+  box-shadow: 0 1px 0 rgba(255, 247, 239, 0.18) inset, 0 2px 0 rgba(24, 14, 8, 0.16);
+  clip-path: polygon(0.28rem 0, 100% 0, calc(100% - 0.28rem) 100%, 0 100%);
+  color: var(--accent-ink);
+  font-size: 0.74rem;
+  padding: 0.2rem 0.58rem;
+}
+
+.search-inline-form .button:hover,
+.search-inline-form .button:focus-visible {
+  border-color: var(--accent);
+  background:
+    linear-gradient(90deg, rgba(255, 247, 239, 0.26), transparent 42%),
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--accent-hover) 90%, #3b2418 10%),
+      color-mix(in srgb, var(--accent) 70%, #2a2018 30%)
+    );
+  color: var(--accent-ink);
+}
+
 .search-inline-form-wide {
   width: min(44rem, 100%);
 }
@@ -457,38 +491,61 @@ h2 {
 }
 
 .search-advanced {
-  width: min(34rem, 100%);
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--paper) 92%, transparent);
-  padding: 0.64rem;
+  width: max-content;
+  max-width: min(34rem, calc(100vw - 2rem));
+  border: 1px solid color-mix(in srgb, var(--line) 82%, var(--accent) 18%);
+  border-radius: 5px 2px 5px 2px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--paper) 92%, var(--canvas) 8%), var(--paper));
+  padding: 0.46rem 0.48rem 0.5rem;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.42rem);
+  z-index: 90;
+  box-shadow: 0 2px 7px rgba(24, 14, 8, 0.12);
+}
+
+.search-advanced:not([hidden]) {
+  transform-origin: top right;
+  animation: search-advanced-in 160ms var(--motion-ease) both;
 }
 
 .search-advanced-wide {
-  width: min(44rem, 100%);
+  max-width: min(44rem, calc(100vw - 2rem));
+}
+
+.search-page-hero .search-advanced {
+  left: 0;
+  right: auto;
+  top: calc(100% - 0.5rem);
+}
+
+.search-page-hero .search-advanced:not([hidden]) {
+  transform-origin: top left;
 }
 
 .search-advanced-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.56rem 0.62rem;
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: 0.44rem;
 }
 
 .search-advanced-grid-wide {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  display: flex;
 }
 
 .search-advanced-grid-wide .search-checkbox {
-  grid-column: 1 / -1;
+  flex-basis: 100%;
 }
 
 .search-advanced label {
   display: grid;
-  gap: 0.16rem;
+  gap: 0.12rem;
   min-width: 0;
 }
 
-.search-advanced label span {
+.search-advanced label > span:first-child {
   font-family: var(--font-ui);
   color: var(--muted);
   font-size: 0.72rem;
@@ -498,11 +555,12 @@ h2 {
 .search-advanced .search-checkbox {
   display: inline-flex;
   align-items: center;
-  gap: 0.4rem;
-  min-height: 2rem;
-  align-self: center;
+  gap: 0.32rem;
+  min-height: 1.82rem;
+  align-self: end;
   justify-self: start;
   white-space: nowrap;
+  margin-bottom: 0;
 }
 
 .search-advanced .search-checkbox span {
@@ -514,17 +572,48 @@ h2 {
 }
 
 .search-advanced .search-checkbox input {
+  -webkit-appearance: none;
+  appearance: none;
+  display: grid;
+  place-content: center;
   margin: 0;
-  width: 0.96rem;
-  height: 0.96rem;
-  accent-color: var(--accent);
+  width: 0.92rem;
+  height: 0.92rem;
+  border: 1px solid color-mix(in srgb, var(--line) 76%, var(--muted) 24%);
+  border-radius: 3px 1px 3px 1px;
+  background: color-mix(in srgb, var(--paper) 90%, var(--canvas) 10%);
+  cursor: pointer;
+}
+
+.search-advanced .search-checkbox input::before {
+  content: "";
+  width: 0.46rem;
+  height: 0.46rem;
+  transform: scale(0);
+  transition: transform var(--motion-fast) var(--motion-ease);
+  background: var(--accent);
+  clip-path: polygon(14% 54%, 34% 74%, 82% 20%, 92% 30%, 36% 88%, 6% 62%);
+}
+
+.search-advanced .search-checkbox input:checked {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent-wash) 58%, var(--paper) 42%);
+}
+
+.search-advanced .search-checkbox input:checked::before {
+  transform: scale(1);
+}
+
+.search-advanced .search-checkbox input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 select,
 input[type="search"] {
   width: 100%;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: 4px;
   background: color-mix(in srgb, var(--paper) 96%, transparent);
   color: var(--text);
   font: inherit;
@@ -533,7 +622,7 @@ input[type="search"] {
 select {
   -webkit-appearance: none;
   appearance: none;
-  padding: 0.44rem 1.54rem 0.44rem 0.56rem;
+  padding: 0.38rem 1.46rem 0.38rem 0.52rem;
   background-image:
     linear-gradient(45deg, transparent 50%, var(--muted) 50%),
     linear-gradient(135deg, var(--muted) 50%, transparent 50%);
@@ -550,6 +639,134 @@ input[type="search"] {
 
 select::-ms-expand {
   display: none;
+}
+
+.native-select-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.archive-select {
+  position: relative;
+  display: inline-block;
+  justify-self: start;
+  width: fit-content;
+  max-width: 100%;
+  min-width: 0;
+  font: inherit;
+}
+
+.archive-select-button {
+  display: inline-flex;
+  min-height: 1.76rem;
+  width: fit-content;
+  max-width: 100%;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.26rem;
+  border: 1px solid var(--line);
+  border-radius: 4px 2px 4px 2px;
+  background: color-mix(in srgb, var(--paper) 88%, var(--canvas) 12%);
+  color: var(--text);
+  cursor: pointer;
+  font-family: var(--font-ui);
+  font-size: 0.76rem;
+  letter-spacing: 0.02em;
+  padding: 0.25rem 0.3rem 0.25rem 0.42rem;
+  transition:
+    background-color var(--motion-fast) var(--motion-ease),
+    border-color var(--motion-fast) var(--motion-ease),
+    color var(--motion-fast) var(--motion-ease);
+}
+
+.archive-select-button::after {
+  content: "";
+  flex: 0 0 auto;
+  width: 0.38rem;
+  height: 0.38rem;
+  border-right: 1px solid var(--muted);
+  border-bottom: 1px solid var(--muted);
+  transform: translateY(-0.08rem) rotate(45deg);
+  transition:
+    border-color var(--motion-fast) var(--motion-ease),
+    transform var(--motion-fast) var(--motion-ease);
+}
+
+.archive-select[data-open="true"] .archive-select-button,
+.archive-select-button:hover {
+  border-color: color-mix(in srgb, var(--accent) 62%, var(--line) 38%);
+  background: color-mix(in srgb, var(--paper) 88%, var(--accent-wash) 12%);
+  color: var(--accent);
+}
+
+.archive-select[data-open="true"] .archive-select-button::after {
+  border-color: var(--accent);
+  transform: translateY(0.08rem) rotate(225deg);
+}
+
+.archive-select-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.archive-select-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.archive-select-menu {
+  position: absolute;
+  z-index: 80;
+  top: calc(100% + 0.28rem);
+  left: 0;
+  min-width: 100%;
+  width: max-content;
+  max-width: min(24rem, calc(100vw - 2rem));
+  display: grid;
+  gap: 0.08rem;
+  max-height: min(16rem, 52vh);
+  overflow: auto;
+  border: 1px solid color-mix(in srgb, var(--line) 80%, var(--accent) 20%);
+  border-radius: 4px 2px 4px 2px;
+  background: var(--paper);
+  box-shadow: 0 2px 8px rgba(24, 14, 8, 0.13);
+  padding: 0.18rem;
+}
+
+.archive-select[data-open="true"] .archive-select-menu {
+  animation: archive-select-in 120ms var(--motion-ease) both;
+}
+
+.archive-select-option {
+  display: block;
+  border-radius: 3px 1px 3px 1px;
+  color: var(--text);
+  cursor: pointer;
+  font-family: var(--font-ui);
+  font-size: 0.77rem;
+  letter-spacing: 0.02em;
+  line-height: 1.25;
+  padding: 0.38rem 0.42rem;
+}
+
+.archive-select-option:hover,
+.archive-select-option:focus,
+.archive-select-option[aria-selected="true"] {
+  background: var(--accent-wash);
+  color: var(--accent);
+  outline: none;
+}
+
+.archive-select-option[aria-disabled="true"] {
+  color: var(--muted);
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .search-hint {
@@ -716,6 +933,7 @@ select::-ms-expand {
   margin-bottom: 1.4rem;
   border-bottom: 1px solid var(--line);
   padding-bottom: 0.95rem;
+  position: relative;
 }
 
 .search-result-kicker {
@@ -1366,10 +1584,10 @@ select::-ms-expand {
   background: var(--accent);
   color: var(--accent-ink);
   font-family: var(--font-ui);
-  font-size: 0.82rem;
-  letter-spacing: 0.04em;
+  font-size: 0.78rem;
+  letter-spacing: 0.03em;
   text-decoration: none;
-  padding: 0.44rem 0.72rem;
+  padding: 0.36rem 0.62rem;
   cursor: pointer;
   transition: background-color var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease), border-color var(--motion-fast) var(--motion-ease);
 }
@@ -1450,6 +1668,28 @@ mark.reader-highlight-target.reader-highlight-arrival {
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@keyframes archive-select-in {
+  from {
+    opacity: 0;
+    transform: translateY(-0.18rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes search-advanced-in {
+  from {
+    opacity: 0;
+    transform: translateY(-0.24rem) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
   }
 }
 

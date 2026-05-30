@@ -1,0 +1,113 @@
+{
+  "children": [
+    {
+      "children": [
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "First item with "
+            },
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "strong text"
+                }
+              ],
+              "type": "strong"
+            }
+          ],
+          "position": {
+            "endOffset": 33,
+            "line": 1,
+            "startOffset": 2
+          },
+          "type": "list_item"
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "Second item with "
+            },
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "archive link"
+                }
+              ],
+              "href": "index.html",
+              "type": "link"
+            }
+          ],
+          "position": {
+            "endOffset": 79,
+            "line": 2,
+            "startOffset": 36
+          },
+          "type": "list_item"
+        }
+      ],
+      "ordered": false,
+      "position": {
+        "endOffset": 79,
+        "line": 1,
+        "startOffset": 0
+      },
+      "type": "list"
+    },
+    {
+      "children": [
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "Ordered first"
+            }
+          ],
+          "position": {
+            "endOffset": 97,
+            "line": 4,
+            "startOffset": 84
+          },
+          "type": "list_item"
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "Ordered second with "
+            },
+            {
+              "type": "code",
+              "value": "code"
+            }
+          ],
+          "position": {
+            "endOffset": 127,
+            "line": 5,
+            "startOffset": 101
+          },
+          "type": "list_item"
+        }
+      ],
+      "ordered": true,
+      "position": {
+        "endOffset": 127,
+        "line": 4,
+        "startOffset": 81
+      },
+      "type": "list"
+    }
+  ],
+  "diagnostics": [],
+  "sourceName": "list-blocks",
+  "stats": {
+    "blocks": 2,
+    "words": 16
+  },
+  "type": "document",
+  "version": "0.2.0"
+}
