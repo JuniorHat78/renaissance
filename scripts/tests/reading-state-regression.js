@@ -192,6 +192,7 @@ async function main() {
         maxProgress: parsed.essays["etching-god-into-sand"]["1"].maxProgress,
         resumeParagraphIndex: parsed.essays["etching-god-into-sand"]["1"].resumeParagraphIndex,
         resumeParagraphRatio: parsed.essays["etching-god-into-sand"]["1"].resumeParagraphRatio,
+        resumeParagraphSignature: parsed.essays["etching-god-into-sand"]["1"].resumeParagraphSignature,
         transform: bar ? String(bar.style.transform || "") : ""
       };
     }, STORAGE_KEY);
@@ -199,6 +200,7 @@ async function main() {
     assert.ok(snapshot.maxProgress >= snapshot.progress, "high-water progress should be retained");
     assert.ok(snapshot.resumeParagraphIndex > 0, "nearest paragraph should be saved");
     assert.ok(snapshot.resumeParagraphRatio >= 0 && snapshot.resumeParagraphRatio <= 1, "paragraph ratio should be saved");
+    assert.ok(snapshot.resumeParagraphSignature && snapshot.resumeParagraphSignature.length > 20, "paragraph signature should be saved");
     assert.match(snapshot.transform, /scaleX\((?!0\.0000)/);
   }, failures);
 
@@ -236,6 +238,38 @@ async function main() {
     assertRestoreGeometry(snapshot, 0.46, "semantic restore");
     assert.equal(snapshot.savedParagraphIndex, 3, "restore should not rewrite the saved paragraph immediately");
     assert.equal(snapshot.savedParagraphRatio, 0.46, "restore should not rewrite the saved ratio immediately");
+  }, failures);
+
+  await runCase("paragraph signature restore survives shifted paragraph indexes", browser, null, async (context) => {
+    const page = await context.newPage();
+    const url = sectionUrl(options.base, 1);
+    await openReadySection(page, url);
+    const signature = await page.evaluate(() => {
+      const paragraph = document.querySelector('p[data-paragraph-index="3"]');
+      return window.RenaissanceReadingState.paragraphSignatureFromText(paragraph ? paragraph.textContent : "");
+    });
+
+    await context.addInitScript(({ key, value }) => {
+      window.localStorage.setItem(key, JSON.stringify(value));
+    }, {
+      key: STORAGE_KEY,
+      value: stateWithRecord({
+        progress: 0.42,
+        maxProgress: 0.42,
+        scrollY: 0,
+        resumeParagraphIndex: 1,
+        resumeParagraphRatio: 0.46,
+        resumeParagraphSignature: signature
+      })
+    });
+    await page.close();
+
+    const restorePage = await context.newPage();
+    await openReadySection(restorePage, url);
+    const snapshot = await readerRestoreSnapshot(restorePage);
+    assert.equal(snapshot.paragraphIndex, "3", "signature restore should prefer the matching paragraph over the stale index");
+    assert.equal(snapshot.savedParagraphIndex, 1, "test fixture should preserve the intentionally stale index");
+    assertRestoreGeometry(snapshot, 0.46, "signature semantic restore");
   }, failures);
 
   await runCase("semantic reader position survives mobile layout", browser, stateWithRecord({

@@ -92,6 +92,25 @@ Fuzzy search work is bounded and cached for the current corpus size. Larger
 archive plans, such as generated search data or Web Worker query execution, live
 in `docs/IDEAS.md`.
 
+## Reading State
+
+Reader continuity is stored in `localStorage` through `scripts/reading-state.js`.
+Each section record keeps progress, max progress, scroll position, paragraph
+index, paragraph ratio, and a normalized paragraph text signature.
+
+Restore prefers semantic paragraph data over pixels:
+
+- use the saved paragraph signature if an inserted or removed paragraph makes
+  the saved index point at the wrong text;
+- use the saved paragraph index and ratio when the signature is absent;
+- derive a paragraph ratio from saved `scrollY` when possible;
+- fall back to raw `scrollY` only when semantic targets cannot be resolved.
+
+The current restore thresholds are intentionally conservative: restore only
+between 3% and 90% progress, show Continue Reading after roughly 4% meaningful
+progress, and mark completion at 92%. Tune these only with reader-journey tests,
+because short and long sections feel different.
+
 ## Routing And Subpath Safety
 
 Internal routes are built through `scripts/router.js`. Runtime links stay

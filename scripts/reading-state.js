@@ -5,6 +5,7 @@
   const MIN_MEANINGFUL_PROGRESS = 0.04;
   const MIN_RESTORE_PROGRESS = 0.03;
   const MAX_RESTORE_PROGRESS = 0.9;
+  const MAX_PARAGRAPH_SIGNATURE_LENGTH = 220;
 
   function emptyState() {
     return {
@@ -48,6 +49,19 @@
     return Number.isFinite(number) ? clamp(number, 0, 1) : null;
   }
 
+  function paragraphSignatureFromText(value) {
+    return String(value || "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase()
+      .slice(0, MAX_PARAGRAPH_SIGNATURE_LENGTH);
+  }
+
+  function normalizeParagraphSignature(value) {
+    const signature = paragraphSignatureFromText(value);
+    return signature || null;
+  }
+
   function sectionKey(sectionNumber) {
     return String(sectionNumber);
   }
@@ -70,6 +84,7 @@
     const updatedAt = Math.max(0, Number(raw.updatedAt) || 0);
     const resumeParagraphIndex = normalizePositiveInteger(raw.resumeParagraphIndex);
     const resumeParagraphRatio = normalizeRatio(raw.resumeParagraphRatio);
+    const resumeParagraphSignature = normalizeParagraphSignature(raw.resumeParagraphSignature);
 
     return {
       essaySlug,
@@ -81,6 +96,7 @@
       updatedAt,
       resumeParagraphIndex,
       resumeParagraphRatio,
+      resumeParagraphSignature,
       essayTitle: String(raw.essayTitle || "").trim(),
       sectionTitle: String(raw.sectionTitle || "").trim(),
       sectionLabel: String(raw.sectionLabel || "").trim()
@@ -185,6 +201,8 @@
     const resolvedResumeParagraphRatio = resumeParagraphRatio !== null
       ? resumeParagraphRatio
       : previous ? previous.resumeParagraphRatio : null;
+    const resumeParagraphSignature = normalizeParagraphSignature(source.resumeParagraphSignature) ||
+      (previous ? previous.resumeParagraphSignature : null);
 
     const record = {
       essaySlug,
@@ -196,6 +214,7 @@
       updatedAt,
       resumeParagraphIndex,
       resumeParagraphRatio: resolvedResumeParagraphRatio,
+      resumeParagraphSignature,
       essayTitle: String(source.essayTitle || (previous && previous.essayTitle) || "").trim(),
       sectionTitle: String(source.sectionTitle || (previous && previous.sectionTitle) || "").trim(),
       sectionLabel: String(source.sectionLabel || (previous && previous.sectionLabel) || "").trim()
@@ -217,7 +236,7 @@
     return (
       normalized.progress >= MIN_RESTORE_PROGRESS &&
       normalized.progress <= MAX_RESTORE_PROGRESS &&
-      (normalized.scrollY > 80 || normalized.resumeParagraphIndex !== null)
+      (normalized.scrollY > 80 || normalized.resumeParagraphIndex !== null || normalized.resumeParagraphSignature !== null)
     );
   }
 
@@ -284,6 +303,7 @@
     getLastRecord,
     getSectionRecord,
     isMeaningful,
+    paragraphSignatureFromText,
     saveSectionProgress,
     shouldRestore
   };

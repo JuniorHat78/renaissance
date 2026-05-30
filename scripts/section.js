@@ -907,6 +907,26 @@
     return sectionContent.querySelector('p[data-paragraph-index="' + String(safeIndex) + '"]');
   }
 
+  function paragraphSignatureFromElement(paragraph) {
+    if (!paragraph || !readingState || typeof readingState.paragraphSignatureFromText !== "function") {
+      return null;
+    }
+    return readingState.paragraphSignatureFromText(paragraph.textContent || "");
+  }
+
+  function paragraphSignatureMatches(paragraph, signature) {
+    return Boolean(paragraph && signature && paragraphSignatureFromElement(paragraph) === signature);
+  }
+
+  function paragraphBySignature(signature) {
+    if (!signature) {
+      return null;
+    }
+
+    const paragraphs = Array.from(sectionContent.querySelectorAll("p[data-paragraph-index]"));
+    return paragraphs.find((paragraph) => paragraphSignatureMatches(paragraph, signature)) || null;
+  }
+
   function paragraphRatioAtY(paragraph, viewportY) {
     if (!paragraph) {
       return null;
@@ -952,7 +972,8 @@
     return {
       paragraph,
       paragraphIndex: paragraphIndexFromElement(paragraph),
-      paragraphRatio: paragraphRatioAtY(paragraph, readingLineY())
+      paragraphRatio: paragraphRatioAtY(paragraph, readingLineY()),
+      paragraphSignature: paragraphSignatureFromElement(paragraph)
     };
   }
 
@@ -991,6 +1012,7 @@
       scrollY: documentScrollY(),
       resumeParagraphIndex: pointer ? pointer.paragraphIndex : null,
       resumeParagraphRatio: pointer ? pointer.paragraphRatio : null,
+      resumeParagraphSignature: pointer ? pointer.paragraphSignature : null,
       essayTitle: currentEssay.title,
       sectionTitle: currentDisplay.title,
       sectionLabel: currentDisplay.label
@@ -1091,9 +1113,15 @@
 
   function resolveRestoreTarget(record) {
     const savedScrollY = clamp(Number(record && record.scrollY) || 0, 0, maxDocumentScrollY());
-    const savedParagraph = record && record.resumeParagraphIndex
+    const savedSignature = record && record.resumeParagraphSignature ? record.resumeParagraphSignature : null;
+    const indexedParagraph = record && record.resumeParagraphIndex
       ? paragraphByIndex(record.resumeParagraphIndex)
       : null;
+    const signatureParagraph = savedSignature ? paragraphBySignature(savedSignature) : null;
+    const savedParagraph = signatureParagraph && !paragraphSignatureMatches(indexedParagraph, savedSignature)
+      ? signatureParagraph
+      : indexedParagraph || signatureParagraph;
+    const usedSignatureFallback = Boolean(signatureParagraph && savedParagraph === signatureParagraph && savedParagraph !== indexedParagraph);
 
     if (savedParagraph) {
       const recordRatio = normalizeParagraphRatio(record.resumeParagraphRatio);
@@ -1104,10 +1132,13 @@
       const paragraphIndex = paragraphIndexFromElement(savedParagraph);
 
       return {
-        mode: recordRatio !== null ? "semantic" : derivedRatio !== null ? "semantic-derived" : "paragraph-top",
+        mode: usedSignatureFallback
+          ? "semantic-signature"
+          : recordRatio !== null ? "semantic" : derivedRatio !== null ? "semantic-derived" : "paragraph-top",
         paragraphElement: savedParagraph,
         paragraphIndex,
         paragraphRatio,
+        paragraphSignature: paragraphSignatureFromElement(savedParagraph),
         scrollY: scrollTargetForParagraph(savedParagraph, paragraphRatio)
       };
     }
@@ -1136,6 +1167,7 @@
       paragraphElement: pointer.paragraph,
       paragraphIndex: pointer.paragraphIndex,
       paragraphRatio: pointer.paragraphRatio,
+      paragraphSignature: pointer.paragraphSignature,
       scrollY: documentScrollY()
     };
   }
@@ -1168,6 +1200,7 @@
       mode: target.mode,
       paragraphIndex: target.paragraphIndex,
       paragraphRatio: target.paragraphRatio,
+      paragraphSignature: target.paragraphSignature,
       scrollY: Math.round(target.scrollY)
     };
   }
@@ -2332,6 +2365,12 @@
       renderBlocks(sectionContent, contentAst);
       annotateParagraphIndices();
       applySectionMetadata(essay, display, sectionNumber, payload);
+      const hasAnchor = hasReaderAnchorIntent();
+      const shouldAttemptRestore = !hasAnchor && readingState &&
+        readingState.shouldRestore(readingState.getSectionRecord(currentEssay.slug, currentSectionNumber));
+      if (shouldAttemptRestore) {
+        startRestoreSaveSuppression();
+      }
       initializeReadingProgress(display);
 
       const currentIndex = essay.section_order.indexOf(sectionNumber);
@@ -2342,8 +2381,10 @@
       setLink(nextLink, next ? sectionUrl(essay.slug, next) : null, "Next Section");
       setLink(nextCta, next ? sectionUrl(essay.slug, next) : null, "Next Section");
 
-      const hasAnchor = hasReaderAnchorIntent();
-      const didRestore = !hasAnchor && restoreReadingPosition();
+      const didRestore = shouldAttemptRestore && restoreReadingPosition();
+      if (shouldAttemptRestore && !didRestore) {
+        releaseRestoreSaveSuppressionSoon();
+      }
       resolveInitialAnchor();
       window.setTimeout(() => {
         syncReadingProgress({ save: didRestore ? false : undefined });

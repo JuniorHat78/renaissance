@@ -322,14 +322,14 @@ Suggested commit:
 
 Goal: improve resume behavior without changing the reader design.
 
-- [ ] Add paragraph text signatures or stable paragraph IDs as a fallback before
+- [x] Add paragraph text signatures or stable paragraph IDs as a fallback before
       absolute `scrollY`.
-- [ ] Add tests for content edits that shift paragraph indices.
-- [ ] Add tests for mobile/desktop reflow where semantic restore should win over
+- [x] Add tests for content edits that shift paragraph indices.
+- [x] Add tests for mobile/desktop reflow where semantic restore should win over
       pixel restore.
-- [ ] Document current threshold constants and when to tune them.
+- [x] Document current threshold constants and when to tune them.
 - [ ] Consider dynamic completion/restore thresholds based on document length.
-- [ ] Keep existing reading-state data backward compatible.
+- [x] Keep existing reading-state data backward compatible.
 
 Suggested commit:
 
