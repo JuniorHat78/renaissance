@@ -67,11 +67,17 @@ async function main() {
       Boolean(document.activeElement && document.activeElement.classList.contains("skip-link"))
     );
     assert.ok(onSkip, "first Tab should land on the skip link");
-    const visibleTop = await page.evaluate(() => {
+    // Poll the rendered position until the focused link is inside the viewport,
+    // rather than sampling computed style once (which races the focus restyle /
+    // slide-in transition and is timing-dependent across machines).
+    await page.waitForFunction(() => {
       const el = document.querySelector(".skip-link");
-      return parseFloat(getComputedStyle(el).top);
+      if (!el) return false;
+      const rect = el.getBoundingClientRect();
+      return rect.top >= 0 && rect.left >= 0;
+    }, { timeout: 5000 }).catch(() => {
+      throw new Error("focused skip link never slid into the viewport (top stayed < 0)");
     });
-    assert.ok(visibleTop >= 0, "focused skip link should slide into view (top >= 0), got " + visibleTop);
   });
 
   await step("activating the skip link moves focus into main", async () => {
