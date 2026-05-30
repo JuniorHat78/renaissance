@@ -81,6 +81,8 @@ jobs:
         with:
           name: lighthouse-reports
           if-no-files-found: warn
+          # .lighthouseci starts with a dot; v4 skips hidden paths by default.
+          include-hidden-files: true
           path: .lighthouseci/**
 
   cross-browser:

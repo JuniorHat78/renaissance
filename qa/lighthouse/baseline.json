@@ -1,0 +1,10 @@
+{
+  "capturedAt": "2026-05-30",
+  "sourceRun": "26680329302",
+  "note": "Performance scores are noisy on shared runners; the summarizer flags drops >= 8pts only. Seeded from the first CI run that produced reports (CHROME_PATH fix). Refresh via `npm run lighthouse:baseline` from a downloaded artifact.",
+  "scores": {
+    "Home": 100,
+    "Essay": 91,
+    "Section": 95
+  }
+}
