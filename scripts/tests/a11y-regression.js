@@ -17,7 +17,6 @@
 // flipped after load, so no transition is ever in flight when axe samples colors
 // — that makes motion=no-preference safe and the audit deterministic.
 
-const assert = require("node:assert/strict");
 const { AxeBuilder } = require("@axe-core/playwright");
 const { browserType, resolveBrowserName } = require("./lib/browser");
 

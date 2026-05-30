@@ -7,7 +7,6 @@
 // This catches "someone dropped a 300KB library into the reader" before it ships,
 // without the flakiness of a timing-based metric.
 
-const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 

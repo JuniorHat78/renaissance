@@ -7,7 +7,6 @@
 // Schema-validates against schema/essays.schema.json, then adds the cross-field
 // checks JSON Schema can't express (every ordered section has metadata).
 
-const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const Ajv = require("ajv");

@@ -490,10 +490,6 @@
     copyHintTimer = setTimeout(dismissCopyHint, COPY_HINT_VISIBLE_MS);
   }
 
-  function clamp(value, min, max) {
-    return Math.min(Math.max(value, min), max);
-  }
-
   function clearContextualHideTimer() {
     if (hideContextualTimer) {
       clearTimeout(hideContextualTimer);
@@ -1364,7 +1360,7 @@
     }
 
     const middle = node.splitText(start);
-    const tail = middle.splitText(length);
+    middle.splitText(length);
     const mark = document.createElement("mark");
     mark.dataset.autoHighlight = "1";
     mark.className = "reader-highlight-target";
@@ -1592,22 +1588,24 @@
 
   function highlightOccurrence(query, occurrence, mode, caseSensitive) {
     const startedAt = nowMs();
-    if (!query || !occurrence) {
+    const safeQuery = String(query || "");
+    const safeOccurrence = Number.parseInt(occurrence, 10);
+    if (!safeQuery || !Number.isFinite(safeOccurrence) || safeOccurrence <= 0) {
       logHighlightPerf("anchor_occurrence", startedAt, { applied: false, reason: "missing_query_or_occurrence" });
       return false;
     }
 
     const renderedText = sectionContent.textContent || "";
-    const hits = findOccurrencesInText(renderedText, query, {
+    const hits = findOccurrencesInText(renderedText, safeQuery, {
       mode,
       caseSensitive
     });
-    const target = hits[occurrence - 1];
+    const target = hits[safeOccurrence - 1];
     if (!target) {
       logHighlightPerf("anchor_occurrence", startedAt, {
         applied: false,
         hits: hits.length,
-        occurrence
+        occurrence: safeOccurrence
       });
       return false;
     }
@@ -1618,7 +1616,7 @@
     logHighlightPerf("anchor_occurrence", startedAt, {
       applied,
       hits: hits.length,
-      occurrence
+      occurrence: safeOccurrence
     });
     return applied;
   }

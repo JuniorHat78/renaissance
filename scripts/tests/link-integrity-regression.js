@@ -13,7 +13,6 @@
 // Router-generated links (essay.html?essay=...) are produced by JS at runtime
 // and are covered by the browser subpath/journey suites, not here.
 
-const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 

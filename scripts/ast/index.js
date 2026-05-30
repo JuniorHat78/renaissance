@@ -860,7 +860,7 @@
   }
 
   function isClosingBoundary(value) {
-    return /[\s)\]}.!?",'<>:;,-]/.test(value);
+    return /[\s)\]}.!?",'<>:;\-]/.test(value);
   }
 
   function countLeadingWhitespace(value) {

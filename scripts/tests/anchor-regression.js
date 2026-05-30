@@ -59,10 +59,6 @@ function parseArgs(argv) {
   return options;
 }
 
-function normalizeText(value) {
-  return String(value || "").replace(/\s+/g, " ").trim();
-}
-
 function sectionUrl(base, params) {
   const url = new URL("/section.html", base);
   Object.entries(params).forEach(([key, value]) => {
