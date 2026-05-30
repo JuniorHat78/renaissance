@@ -35,6 +35,7 @@
     "test:notfound": "node scripts/ci/run-with-server.js --port 4177 --mount /renaissance/ -- node scripts/tests/notfound-regression.js",
     "test:crossbrowser": "node scripts/ci/run-with-server.js --port 4178 -- node scripts/tests/cross-browser-regression.js",
     "test:a11y": "node scripts/ci/run-with-server.js --port 4179 -- node scripts/tests/a11y-regression.js --base http://127.0.0.1:4179",
+    "smoke:live": "node scripts/tests/cross-browser-regression.js --browsers chromium && node scripts/tests/subpath-regression.js && node scripts/tests/notfound-regression.js",
     "og:generate": "node scripts/og/generate-cards.js",
     "visual:capture": "node scripts/visual/capture.js",
     "visual:diff": "node scripts/visual/diff.js",

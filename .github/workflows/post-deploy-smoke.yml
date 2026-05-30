@@ -1,0 +1,75 @@
+name: Post-Deploy Live Smoke
+
+# Runs AFTER GitHub Pages publishes, against the real public URL. This catches
+# deploy-config drift the local server can't: wrong base path, missing assets,
+# Pages serving the wrong 404, CDN/headers surprises. It runs post-deploy, so it
+# does not gate a PR — a red run here is an ALARM that production is broken.
+
+on:
+  deployment_status:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "Base URL to smoke (defaults to the project Pages URL)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: post-deploy-smoke
+  cancel-in-progress: false
+
+jobs:
+  live-smoke:
+    # Only on a successful github-pages deployment, or a manual run.
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.deployment_status.state == 'success' &&
+       github.event.deployment_status.environment == 'github-pages')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install Node Dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Resolve live base URL
+        run: |
+          URL="${{ github.event.inputs.url }}"
+          if [ -z "$URL" ]; then URL="${{ github.event.deployment_status.environment_url }}"; fi
+          if [ -z "$URL" ]; then URL="https://juniorhat78.github.io/renaissance"; fi
+          URL="${URL%/}"
+          echo "RENAISSANCE_BASE_URL=$URL" >> "$GITHUB_ENV"
+          echo "Resolved live base: $URL"
+
+      - name: Wait for the live site to serve the new deploy
+        run: |
+          set -u
+          for attempt in $(seq 1 20); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" "$RENAISSANCE_BASE_URL/index.html" || echo 000)
+            if [ "$code" = "200" ]; then
+              echo "Live ($code) after attempt $attempt."
+              exit 0
+            fi
+            echo "Not ready yet (HTTP $code), attempt $attempt/20 — waiting 6s."
+            sleep 6
+          done
+          echo "::error title=Live site not reachable::$RENAISSANCE_BASE_URL/index.html never returned 200."
+          exit 1
+
+      - name: Live Smoke (core journey + subpath + custom 404)
+        run: npm run smoke:live
