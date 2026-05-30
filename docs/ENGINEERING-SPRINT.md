@@ -252,24 +252,24 @@ Suggested commit:
 
 Goal: harden search behavior and prepare scaling without committing to a new UI.
 
-- [ ] Generate a compact search metadata manifest if it helps recovery/search
-      plumbing.
-- [ ] Add size/budget checks for generated search/recovery artifacts.
-- [ ] Document the threshold for moving from runtime indexing to a generated
+- [x] Decide that the generated site registry is sufficient compact
+      search/recovery metadata for this sprint.
+- [x] Add size/budget checks for generated search/recovery artifacts.
+- [x] Document the threshold for moving from runtime indexing to a generated
       index or Web Worker.
-- [ ] Keep the current runtime search behavior working.
-- [ ] Do not redesign the search UI or Spotlight UI in this phase.
+- [x] Keep the current runtime search behavior working.
+- [x] Do not redesign the search UI or Spotlight UI in this phase.
 - [x] Write a ranking spec: title > section title > exact phrase > body
       occurrence > fuzzy match.
 - [x] Add ranking fixtures with deterministic expected order.
-- [ ] Add query parser fixtures for phrases, punctuation, case sensitivity, and
+- [x] Add query parser fixtures for phrases, punctuation, case sensitivity, and
       empty/noisy input.
 - [x] Add field boosts for essay title, section title, headings, and body when
       supported by current data.
 - [x] Add tie-break rules that remain stable across browsers.
-- [ ] Consider a generated lightweight index artifact if it can stay within the
+- [x] Consider a generated lightweight index artifact if it can stay within the
       size budget.
-- [ ] Consider a Web Worker boundary if runtime indexing grows beyond the
+- [x] Consider a Web Worker boundary if runtime indexing grows beyond the
       documented threshold.
 
 Suggested commit:
@@ -388,11 +388,11 @@ Suggested commit:
 
 Goal: make growth visible before it becomes slow.
 
-- [ ] Add budgets for generated JS/data artifacts.
+- [x] Add budgets for generated JS/data artifacts.
 - [ ] Add search index build timing instrumentation in dev/test where practical.
 - [ ] Add service-worker precache size reporting.
 - [ ] Add route/recovery catalogue size reporting.
-- [ ] Document thresholds that trigger generated index or worker migration.
+- [x] Document thresholds that trigger generated index or worker migration.
 - [ ] Keep Lighthouse warning-only but record meaningful deltas.
 
 Suggested commit:

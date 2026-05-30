@@ -62,3 +62,9 @@ Preferred next steps, in order:
 2. add artifact size budgets
 3. move indexing into a Web Worker
 4. consider a prebuilt index only if runtime indexing remains too slow
+
+Current decision: do not generate a standalone search index yet. The generated
+site registry already provides compact recovery/search metadata, the current
+runtime index remains inside the asset budget, and query behavior is covered by
+fixtures for whitespace, punctuation, case sensitivity, fuzzy typo input, and
+empty/noisy state.

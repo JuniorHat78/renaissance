@@ -26,6 +26,39 @@ async function main() {
     assert.deepEqual(hits, []);
   });
 
+  check("case sensitivity is explicit and deterministic", () => {
+    const loose = Search.findOccurrencesInText("Alpha alpha", "alpha", { mode: "contains", caseSensitive: false });
+    const strict = Search.findOccurrencesInText("Alpha alpha", "alpha", { mode: "contains", caseSensitive: true });
+    assert.deepEqual(loose.map((hit) => hit.matchedText), ["Alpha", "alpha"]);
+    assert.deepEqual(strict.map((hit) => hit.matchedText), ["alpha"]);
+  });
+
+  check("exact phrase mode tolerates whitespace but not empty noise", () => {
+    const hits = Search.findOccurrencesInText("alpha\nbeta alpha   beta", "alpha beta", { mode: "exact_phrase" });
+    assert.deepEqual(hits.map((hit) => hit.matchedText), ["alpha\nbeta", "alpha   beta"]);
+    assert.deepEqual(Search.findOccurrencesInText("alpha beta", "   ", { mode: "exact_phrase" }), []);
+  });
+
+  check("fuzzy mode tokenizes punctuation-heavy queries", () => {
+    const hits = Search.findOccurrencesInText("silicon, language; cognition", "langauge!!!", { mode: "fuzzy" });
+    assert.deepEqual(hits.map((hit) => hit.matchedText), ["language"]);
+  });
+
+  check("search urls normalize empty and noisy state", () => {
+    assert.equal(Search.buildSearchUrl({ query: "   " }), "search.html");
+    assert.equal(
+      Search.buildSearchUrl({
+        query: " Alpha ",
+        mode: "bogus",
+        sort: "mystery",
+        page: "nope",
+        pageSize: 999,
+        caseSensitive: true
+      }),
+      "search.html?q=Alpha&case=1"
+    );
+  });
+
   await check("search result cache evicts old entries", async () => {
     const engine = Search.createSearchEngine(fakeContentApi());
 
@@ -79,6 +112,14 @@ async function main() {
       result.hits.findIndex((hit) => hit.field === "body") > 1,
       "body hit should rank after title fields"
     );
+  });
+
+  await check("empty query returns an empty stable result", async () => {
+    const engine = Search.createSearchEngine(fakeContentApi());
+    const result = await engine.search({ query: "   ", mode: "contains" });
+    assert.equal(result.totalHits, 0);
+    assert.deepEqual(result.hits, []);
+    assert.equal(result.state.query, "");
   });
 
   console.log("Search engine regression checks passed.");
