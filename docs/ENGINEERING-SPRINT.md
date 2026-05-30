@@ -56,14 +56,14 @@ motion, predictable controls, strong accessibility, and fast interactions.
 
 This sprint should therefore favor:
 
-- [ ] canonical route/data registries over duplicated ad hoc lookups
-- [ ] generated artifacts with freshness checks
-- [ ] stable component/control primitives before new visual flourishes
-- [ ] shared interaction semantics for popovers, menus, previews, recovery, and
+- [x] canonical route/data registries over duplicated ad hoc lookups
+- [x] generated artifacts with freshness checks
+- [x] stable component/control primitives before new visual flourishes
+- [x] shared interaction semantics for popovers, menus, previews, recovery, and
       future Spotlight
-- [ ] performance budgets for generated artifacts and runtime work
-- [ ] accessibility helpers and regression journeys for keyboard/reduced motion
-- [ ] clear design-token documentation even if the final visual pass happens
+- [x] performance budgets for generated artifacts and runtime work
+- [x] accessibility helpers and regression journeys for keyboard/reduced motion
+- [x] clear design-token documentation even if the final visual pass happens
       later
 
 ## Operating Rules
@@ -77,12 +77,12 @@ This sprint should therefore favor:
 - [x] Run only focused local checks during development.
 - [x] Let GitHub Actions carry the expensive browser/device/visual matrix.
 - [x] Prefer rerunning failed GitHub jobs over pounding the laptop.
-- [ ] Keep warning-only visual and Lighthouse results as review signals.
-- [ ] Add CI coverage rather than relying on local manual confidence when a new
+- [x] Keep warning-only visual and Lighthouse results as review signals.
+- [x] Add CI coverage rather than relying on local manual confidence when a new
       backend/recovery/cache/search/parser surface is introduced.
-- [ ] Do not start Spotlight Search UI in this sprint unless all recovery/cache
+- [x] Do not start Spotlight Search UI in this sprint unless all recovery/cache
       foundations are complete and only backend registry prep remains.
-- [ ] Do not redesign visual taste surfaces unless needed for recovery or shared
+- [x] Do not redesign visual taste surfaces unless needed for recovery or shared
       component primitives.
 
 ## Phase 0: Checkpoint Current Work
@@ -339,14 +339,14 @@ Suggested commit:
 
 Goal: make later Apple-feel UI work easier and less ad hoc.
 
-- [ ] Extract or document common open/close behavior for popovers, previews,
+- [x] Extract or document common open/close behavior for popovers, previews,
       menus, and future Spotlight.
-- [ ] Add a reusable keyboard pattern for Escape, outside click, focus restore,
+- [x] Add a reusable keyboard pattern for Escape, outside click, focus restore,
       and roving option focus.
-- [ ] Audit custom select/listbox semantics.
-- [ ] Add forced-colors and reduced-motion notes for custom controls.
-- [ ] Add interaction-state tests where practical.
-- [ ] Keep styling changes minimal unless needed to support the primitive.
+- [x] Audit custom select/listbox semantics.
+- [x] Add forced-colors and reduced-motion notes for custom controls.
+- [x] Add interaction-state tests where practical.
+- [x] Keep styling changes minimal unless needed to support the primitive.
 
 Suggested commit:
 
@@ -356,14 +356,14 @@ Suggested commit:
 
 Goal: prepare for a later Apple-feel surface pass without doing that pass now.
 
-- [ ] Inventory current color, spacing, radius, shadow, typography, and motion
+- [x] Inventory current color, spacing, radius, shadow, typography, and motion
       values.
-- [ ] Define a small token scale for spacing, radius, shadow, and motion.
-- [ ] Document component roles: primary action, ghost action, search action,
+- [x] Define a small token scale for spacing, radius, shadow, and motion.
+- [x] Document component roles: primary action, ghost action, search action,
       field, select, checkbox, popover, recovery slip, result row, pagination.
-- [ ] Identify one-off CSS that should later fold into component primitives.
-- [ ] Add comments sparingly only where tokens need explanation.
-- [ ] Avoid broad restyling in this phase.
+- [x] Identify one-off CSS that should later fold into component primitives.
+- [x] Add comments sparingly only where tokens need explanation.
+- [x] Avoid broad restyling in this phase.
 
 Suggested commit:
 
@@ -373,12 +373,12 @@ Suggested commit:
 
 Goal: make richer UI safe before Spotlight and future component polish.
 
-- [ ] Add helper patterns or docs for focus management.
-- [ ] Add roving tabindex/listbox expectations.
-- [ ] Extend keyboard journey tests for custom menus and recovery flows.
-- [ ] Extend forced-colors expectations where automated checks are reliable.
-- [ ] Keep axe forced-colors limitations documented.
-- [ ] Add reduced-motion checks for new animation surfaces.
+- [x] Add helper patterns or docs for focus management.
+- [x] Add roving tabindex/listbox expectations.
+- [x] Extend keyboard journey tests for custom menus and recovery flows.
+- [x] Extend forced-colors expectations where automated checks are reliable.
+- [x] Keep axe forced-colors limitations documented.
+- [x] Add reduced-motion checks for new animation surfaces.
 
 Suggested commit:
 
