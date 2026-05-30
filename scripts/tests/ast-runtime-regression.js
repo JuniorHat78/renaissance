@@ -43,6 +43,21 @@ check("parsed AST documents validate cleanly", () => {
   assert.deepEqual(Ast.validateDocument(documentNode), []);
 });
 
+check("parser diagnostics include severity and source position", () => {
+  const documentNode = Ast.parseDocument("Opening line\n\n#### Too deep\n\nTrailing *marker");
+  assert.equal(documentNode.diagnostics.length, 2);
+
+  const headingDiagnostic = documentNode.diagnostics.find((diagnostic) => diagnostic.code === "heading-level-clamped");
+  assert.ok(headingDiagnostic, "Expected heading clamp diagnostic");
+  assert.equal(headingDiagnostic.severity, "info");
+  assert.deepEqual(headingDiagnostic.position, { line: 3, column: 1 });
+
+  const emphasisDiagnostic = documentNode.diagnostics.find((diagnostic) => diagnostic.code === "unmatched-emphasis-marker");
+  assert.ok(emphasisDiagnostic, "Expected unmatched emphasis diagnostic");
+  assert.equal(emphasisDiagnostic.severity, "info");
+  assert.deepEqual(emphasisDiagnostic.position, { line: 5, column: 10 });
+});
+
 check("validator reports structured invariant errors", () => {
   const errors = Ast.validateDocument({
     type: "document",

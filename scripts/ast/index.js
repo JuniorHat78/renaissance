@@ -61,10 +61,10 @@
   function parseDocument(source, options) {
     const settings = Object.assign({ sourceName: null }, options || {});
     const normalized = normalizeSource(source);
-    const diagnostics = normalized.diagnostics.slice();
     const sourceText = normalized.value;
     const lines = sourceText.split("\n");
     const lineOffsets = computeLineOffsets(sourceText);
+    const diagnostics = normalized.diagnostics.slice();
     const blocks = [];
     let pendingParagraph = [];
 
@@ -101,7 +101,9 @@
       version: VERSION,
       sourceName: settings.sourceName,
       children: blocks,
-      diagnostics,
+      diagnostics: diagnostics.map(function addPosition(diagnostic) {
+        return attachDiagnosticPosition(diagnostic, lineOffsets);
+      }),
     };
 
     ast.stats = {
@@ -832,12 +834,40 @@
     };
   }
 
-  function createDiagnostic(code, message, offset, details) {
+  function createDiagnostic(code, message, offset, details, severity) {
     return {
       code,
+      severity: severity || "info",
       message,
       offset,
       details: details || {},
+    };
+  }
+
+  function attachDiagnosticPosition(diagnostic, lineOffsets) {
+    if (!diagnostic || diagnostic.position) {
+      return diagnostic;
+    }
+
+    return Object.assign({}, diagnostic, {
+      position: positionAtOffset(diagnostic.offset || 0, lineOffsets),
+    });
+  }
+
+  function positionAtOffset(offset, lineOffsets) {
+    const safeOffset = Math.max(0, Number(offset) || 0);
+    let lineIndex = 0;
+
+    for (let index = 0; index < lineOffsets.length; index += 1) {
+      if (lineOffsets[index] > safeOffset) {
+        break;
+      }
+      lineIndex = index;
+    }
+
+    return {
+      line: lineIndex + 1,
+      column: safeOffset - lineOffsets[lineIndex] + 1,
     };
   }
 

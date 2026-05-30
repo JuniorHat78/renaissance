@@ -3,6 +3,11 @@
     "code": "unmatched-emphasis-marker",
     "details": {},
     "message": "Treating unmatched emphasis marker as literal text.",
-    "offset": 21
+    "offset": 21,
+    "position": {
+      "column": 22,
+      "line": 1
+    },
+    "severity": "info"
   }
 ]
