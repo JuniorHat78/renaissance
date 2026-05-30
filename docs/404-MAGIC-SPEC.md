@@ -188,9 +188,10 @@ The browser-level `404.html` should inspire but not replace app-shell failures:
 - Both should remain `noindex`.
 - Both should link to archive and full search under the project subpath.
 
-Future improvement:
-- Share a small recovery helper between essay/section shell scripts if the copy
-  and suggestion logic start duplicating too much.
+Implemented helper:
+- `scripts/recovery-engine.js` shares essay/section suggestion scoring and route
+  mode classification for app-shell recovery tests. `404.html` keeps embedded
+  path-safe logic because it may be served from arbitrary missing URLs.
 
 ## Phased Plan
 

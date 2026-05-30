@@ -236,13 +236,13 @@ Suggested commit:
 
 Goal: move recovery classification/suggestion logic out of ad hoc page code.
 
-- [ ] Create a pure recovery helper that accepts route/search/catalogue state and
+- [x] Create a pure recovery helper that accepts route/search/catalogue state and
       returns a mode plus suggestions.
-- [ ] Support unknown, essay, section, search, asset/old-file, and offline modes.
-- [ ] Use the helper for browser-level 404 where path-depth safety allows.
-- [ ] Use the helper for essay/section app-shell failures.
-- [ ] Unit test mode classification and suggestion ranking without a browser.
-- [ ] Keep DOM rendering separate from recovery decisions.
+- [x] Support unknown, essay, section, search, asset/old-file, and offline modes.
+- [x] Use the helper for browser-level 404 where path-depth safety allows.
+- [x] Use the helper for essay/section app-shell failures.
+- [x] Unit test mode classification and suggestion ranking without a browser.
+- [x] Keep DOM rendering separate from recovery decisions.
 
 Suggested commit:
 
@@ -403,9 +403,9 @@ Suggested commit:
 
 Goal: make recovery behavior hard to regress.
 
-- [ ] Extend not-found regression coverage for every 404 mode.
-- [ ] Extend app-shell recovery tests for bad essay and bad section routes.
-- [ ] Add subpath assertions for every new recovery link.
+- [x] Extend not-found regression coverage for every 404 mode.
+- [x] Extend app-shell recovery tests for bad essay and bad section routes.
+- [x] Add subpath assertions for every new recovery link.
 - [ ] Add reduced-motion assertions for 404 animations where practical.
 - [ ] Add offline/PWA assertions for cached 404 and recovery behavior where
       practical.

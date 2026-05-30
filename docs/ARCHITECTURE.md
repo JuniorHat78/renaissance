@@ -140,6 +140,11 @@ subpath `/renaissance/`.
 Subpath navigation, custom 404 behavior, and live production smoke tests are CI
 guards because this class of bug has broken production before.
 
+`scripts/recovery-engine.js` holds pure recovery scoring/classification helpers
+for app-shell failures and tests. `404.html` keeps embedded route-mode logic
+because GitHub Pages may serve it from arbitrary missing paths where relative
+script URLs are not reliable.
+
 ## Shared Helpers
 
 - `scripts/content.js`: content loading, AST parsing, section metadata, and
@@ -147,6 +152,8 @@ guards because this class of bug has broken production before.
 - `scripts/search-engine.js`: query parsing, matching, ranking, URLs, and result
   caching.
 - `scripts/router.js`: route parsing/building, history state, and query cleanup.
+- `scripts/recovery-engine.js`: pure not-found mode classification and nearest
+  essay/section suggestions.
 - `scripts/reading-state.js`: local reader progress and Continue Reading data.
 - `scripts/meta.js`: canonical URL, social image, and document metadata helpers.
 - `scripts/theme.js`: theme storage and toggle behavior.

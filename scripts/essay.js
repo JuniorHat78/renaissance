@@ -21,6 +21,7 @@
     toAbsoluteUrl
   } = window.RenaissanceMeta;
   const readingState = window.RenaissanceReadingState;
+  const recovery = window.RenaissanceRecovery;
 
   const PREVIEW_LIMIT = 3;
 
@@ -87,48 +88,6 @@
     link.className = className;
     link.textContent = label;
     return link;
-  }
-
-  function normalizeWords(value) {
-    return String(value || "")
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, " ")
-      .trim();
-  }
-
-  function prettySlug(slug) {
-    return String(slug || "")
-      .replace(/-/g, " ")
-      .replace(/\b\w/g, (letter) => letter.toUpperCase());
-  }
-
-  function publishedEssays(essays) {
-    return (Array.isArray(essays) ? essays : []).filter((essay) => essay && essay.published !== false);
-  }
-
-  function scoreNeedle(needle, haystack) {
-    const query = normalizeWords(needle);
-    const target = normalizeWords(haystack);
-    if (!query || !target) {
-      return 0;
-    }
-    if (target.includes(query)) {
-      return query.length + 20;
-    }
-    return query.split(/\s+/).reduce((score, word) => {
-      return score + (word.length > 2 && target.includes(word) ? word.length : 0);
-    }, 0);
-  }
-
-  function closestEssay(essays, seed) {
-    let best = null;
-    publishedEssays(essays).forEach((essay) => {
-      const score = scoreNeedle(seed, [essay.slug, essay.title, essay.summary].join(" "));
-      if (score > 0 && (!best || score > best.score)) {
-        best = { essay, score };
-      }
-    });
-    return best ? best.essay : null;
   }
 
   function setRobotsNoIndex() {
@@ -567,8 +526,8 @@
       if (/essay not found/i.test(message)) {
         const requested = queryEssaySlug();
         const essays = await loadEssays().catch(() => []);
-        const closest = closestEssay(essays, requested);
-        const query = normalizeWords(requested).replace(/\s+/g, " ") || prettySlug(requested);
+        const closest = recovery.closestEssay(essays, requested);
+        const query = recovery.normalizeWords(requested).replace(/\s+/g, " ") || recovery.prettySlug(requested);
         showEssayMessage(
           "Essay not found.",
           "That essay shelf mark is not published here. The archive can still look for the nearest entry.",
