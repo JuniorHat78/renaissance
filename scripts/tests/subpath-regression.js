@@ -7,7 +7,7 @@
 // subpath and surface here as a 404.
 
 const assert = require("node:assert/strict");
-const { chromium } = require("playwright");
+const { browserType, resolveBrowserName } = require("./lib/browser");
 
 function parseArgs(argv) {
   const options = { base: process.env.RENAISSANCE_BASE_URL || "http://127.0.0.1:4176/renaissance" };
@@ -28,7 +28,7 @@ function mountPrefix(base) {
 async function main() {
   const options = parseArgs(process.argv);
   const prefix = mountPrefix(options.base);
-  const browser = await chromium.launch({ headless: true });
+  const browser = await browserType().launch({ headless: true });
   const context = await browser.newContext({ locale: "en-US", timezoneId: "UTC", colorScheme: "light" });
   const page = await context.newPage();
 
@@ -91,7 +91,7 @@ async function main() {
     failures.forEach((failure) => console.error("  - " + failure));
     process.exit(1);
   }
-  console.log("Subpath regression checks passed.");
+  console.log("Subpath regression checks passed (" + resolveBrowserName() + ").");
 }
 
 main().catch((error) => {
