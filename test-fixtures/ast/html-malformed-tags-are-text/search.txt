@@ -1,0 +1,1 @@
+Broken tags like <div><span title="oops">unfinished are prose, even without closing tags.

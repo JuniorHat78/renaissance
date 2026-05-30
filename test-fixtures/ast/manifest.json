@@ -34,12 +34,24 @@
       "purpose": "Two trailing spaces create an explicit hard break."
     },
     {
+      "name": "html-encoded-entities-are-text",
+      "purpose": "Encoded HTML entities stay text and do not become markup."
+    },
+    {
+      "name": "html-event-attributes-are-text",
+      "purpose": "Event-handler-looking HTML stays escaped prose."
+    },
+    {
       "name": "headings",
       "purpose": "Heading levels and clamping behavior."
     },
     {
       "name": "html-is-text",
       "purpose": "HTML-looking prose is rendered as text."
+    },
+    {
+      "name": "html-malformed-tags-are-text",
+      "purpose": "Malformed HTML-looking prose stays escaped text."
     },
     {
       "name": "literal-asterisk-bullet-looking-line",
@@ -52,6 +64,10 @@
     {
       "name": "long-paragraph",
       "purpose": "Large paragraphs parse deterministically."
+    },
+    {
+      "name": "nested-emphasis-conservative",
+      "purpose": "Nested-looking emphasis markers lock in conservative parsing."
     },
     {
       "name": "pull-quote",

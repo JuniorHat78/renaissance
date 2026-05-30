@@ -1,0 +1,26 @@
+{
+  "children": [
+    {
+      "children": [
+        {
+          "type": "text",
+          "value": "An image tag <img src=x onerror=\"alert(1)\"> remains prose, not markup."
+        }
+      ],
+      "position": {
+        "endOffset": 70,
+        "line": 1,
+        "startOffset": 0
+      },
+      "type": "paragraph"
+    }
+  ],
+  "diagnostics": [],
+  "sourceName": "html-event-attributes-are-text",
+  "stats": {
+    "blocks": 1,
+    "words": 10
+  },
+  "type": "document",
+  "version": "0.1.0"
+}

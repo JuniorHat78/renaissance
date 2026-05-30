@@ -1,0 +1,1 @@
+Encoded entities like &lt;script&gt;alert(1)&lt;/script&gt; and &#x3c;img src=x&#x3e; remain text.
