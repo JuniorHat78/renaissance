@@ -38,6 +38,41 @@ check("leading headings can be removed without mutating the source document", ()
   assert.equal(Ast.toSearchableText(content), "Body text.");
 });
 
+check("parsed AST documents validate cleanly", () => {
+  const documentNode = Ast.parseDocument("# Title\n\nBody with *emphasis*.\n\n---");
+  assert.deepEqual(Ast.validateDocument(documentNode), []);
+});
+
+check("validator reports structured invariant errors", () => {
+  const errors = Ast.validateDocument({
+    type: "document",
+    children: [
+      { type: "raw_html", value: "<script></script>" },
+      { type: "heading", level: 9, children: [{ type: "text", value: "Bad" }] },
+      { type: "divider", children: [{ type: "text", value: "Nope" }] },
+      {
+        type: "paragraph",
+        position: { line: 0, startOffset: 8, endOffset: 2 },
+        children: [
+          { type: "text", value: "" },
+          { type: "hard_break", value: "\n" },
+          { type: "html", value: "<b>raw</b>" },
+        ],
+      },
+    ],
+  });
+  const codes = errors.map((error) => error.code);
+  assert.ok(codes.includes("unknown-block-type"), "unknown block types should be rejected");
+  assert.ok(codes.includes("invalid-heading-level"), "bad heading levels should be rejected");
+  assert.ok(codes.includes("divider-children"), "divider children should be rejected");
+  assert.ok(codes.includes("invalid-position-line"), "bad position lines should be rejected");
+  assert.ok(codes.includes("invalid-position-range"), "bad position ranges should be rejected");
+  assert.ok(codes.includes("empty-text-value"), "empty text nodes should be rejected");
+  assert.ok(codes.includes("invalid-hard-break"), "hard breaks should not carry payload");
+  assert.ok(codes.includes("unknown-inline-type"), "unknown inline nodes should be rejected");
+  assert.ok(errors.every((error) => error.severity === "error"), "validation errors should carry severity");
+});
+
 check("DOM renderer builds nodes instead of assigning HTML strings", () => {
   const documentRef = createFakeDocument();
   const container = documentRef.createElement("article");

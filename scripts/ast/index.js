@@ -26,6 +26,14 @@
     HARD_BREAK: "hard_break",
   });
 
+  const BLOCK_TYPE_VALUES = Object.freeze(Object.keys(BLOCK_TYPES).map(function blockTypeValue(key) {
+    return BLOCK_TYPES[key];
+  }));
+
+  const INLINE_TYPE_VALUES = Object.freeze(Object.keys(INLINE_TYPES).map(function inlineTypeValue(key) {
+    return INLINE_TYPES[key];
+  }));
+
   const DIAGNOSTIC_CODES = Object.freeze({
     BOM_REMOVED: "bom-removed",
     CRLF_NORMALIZED: "crlf-normalized",
@@ -501,56 +509,92 @@
     const errors = [];
 
     if (!ast || ast.type !== BLOCK_TYPES.DOCUMENT) {
-      errors.push(createValidationError("document.type", "Root node must be a document."));
+      errors.push(createValidationError("invalid-document-root", "document.type", "Root node must be a document."));
       return errors;
     }
 
     if (!Array.isArray(ast.children)) {
-      errors.push(createValidationError("document.children", "Document children must be an array."));
+      errors.push(createValidationError("invalid-document-children", "document.children", "Document children must be an array."));
       return errors;
     }
 
     ast.children.forEach(function validateBlock(block, index) {
       const path = "document.children[" + index + "]";
       if (!block || typeof block !== "object") {
-        errors.push(createValidationError(path, "Block must be an object."));
+        errors.push(createValidationError("invalid-block", path, "Block must be an object."));
         return;
       }
 
-      if (!Object.keys(BLOCK_TYPES).map(function keyToValue(key) { return BLOCK_TYPES[key]; }).includes(block.type)) {
-        errors.push(createValidationError(path + ".type", "Unknown block type: " + block.type));
+      if (!BLOCK_TYPE_VALUES.includes(block.type)) {
+        errors.push(createValidationError("unknown-block-type", path + ".type", "Unknown block type: " + block.type));
+        return;
       }
 
       if (block.type === BLOCK_TYPES.HEADING) {
-        if (block.level < 1 || block.level > 3) {
-          errors.push(createValidationError(path + ".level", "Heading level must be between 1 and 3."));
+        if (!Number.isFinite(Number(block.level)) || block.level < 1 || block.level > 3) {
+          errors.push(createValidationError("invalid-heading-level", path + ".level", "Heading level must be between 1 and 3."));
         }
       }
 
-      if (block.type !== BLOCK_TYPES.DIVIDER) {
-        validateInline(block.children, path + ".children", errors);
+      validatePosition(block.position, path + ".position", errors);
+
+      if (block.type === BLOCK_TYPES.DIVIDER) {
+        if (block.children !== undefined) {
+          errors.push(createValidationError("divider-children", path + ".children", "Divider blocks must not have inline children."));
+        }
+        return;
       }
+
+      validateInline(block.children, path + ".children", errors);
     });
 
     return errors;
   }
 
+  function validatePosition(position, path, errors) {
+    if (position === undefined) {
+      return;
+    }
+
+    if (!position || typeof position !== "object") {
+      errors.push(createValidationError("invalid-position", path, "Position must be an object when present."));
+      return;
+    }
+
+    const line = Number(position.line);
+    const startOffset = Number(position.startOffset);
+    const endOffset = Number(position.endOffset);
+    if (!Number.isFinite(line) || line < 1) {
+      errors.push(createValidationError("invalid-position-line", path + ".line", "Position line must be a positive number."));
+    }
+    if (!Number.isFinite(startOffset) || !Number.isFinite(endOffset) || endOffset < startOffset) {
+      errors.push(createValidationError("invalid-position-range", path, "Position offsets must be finite and ordered."));
+    }
+  }
+
   function validateInline(nodes, path, errors) {
     if (!Array.isArray(nodes)) {
-      errors.push(createValidationError(path, "Inline children must be an array."));
+        errors.push(createValidationError("invalid-inline-children", path, "Inline children must be an array."));
       return;
     }
 
     nodes.forEach(function validateNode(node, index) {
       const nodePath = path + "[" + index + "]";
       if (!node || typeof node !== "object") {
-        errors.push(createValidationError(nodePath, "Inline node must be an object."));
+        errors.push(createValidationError("invalid-inline-node", nodePath, "Inline node must be an object."));
+        return;
+      }
+
+      if (!INLINE_TYPE_VALUES.includes(node.type)) {
+        errors.push(createValidationError("unknown-inline-type", nodePath + ".type", "Unknown inline type: " + node.type));
         return;
       }
 
       if (node.type === INLINE_TYPES.TEXT) {
         if (typeof node.value !== "string") {
-          errors.push(createValidationError(nodePath + ".value", "Text nodes require a string value."));
+          errors.push(createValidationError("invalid-text-value", nodePath + ".value", "Text nodes require a string value."));
+        } else if (node.value.length === 0) {
+          errors.push(createValidationError("empty-text-value", nodePath + ".value", "Text nodes should not be empty."));
         }
         return;
       }
@@ -561,10 +605,11 @@
       }
 
       if (node.type === INLINE_TYPES.HARD_BREAK) {
+        if (node.children !== undefined || node.value !== undefined) {
+          errors.push(createValidationError("invalid-hard-break", nodePath, "Hard break nodes must not carry text or children."));
+        }
         return;
       }
-
-      errors.push(createValidationError(nodePath + ".type", "Unknown inline type: " + node.type));
     });
   }
 
@@ -796,8 +841,8 @@
     };
   }
 
-  function createValidationError(path, message) {
-    return { path, message };
+  function createValidationError(code, path, message) {
+    return { code, severity: "error", path, message };
   }
 
   function createPosition(line, startOffset, endOffset) {
