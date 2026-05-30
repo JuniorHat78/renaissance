@@ -55,3 +55,19 @@ AST version `0.2.0` adds `blockquote`, `list`, and `list_item` block nodes plus
 `strong`, `code`, and `link` inline nodes. Legacy bridge helpers degrade these
 new structures into plain paragraph text when callers still request legacy
 blocks.
+
+## Legacy Bridge Boundary
+
+`scripts/content.js` still exposes legacy `blocks` and `contentBlocks` for old
+callers and embedded fallback compatibility, but page rendering now prefers
+`contentAst`. The remaining bridge calls are isolated at the content loading
+boundary:
+
+- `parseBlocks(rawText)` for compatibility callers;
+- `loadSection()` legacy `blocks`;
+- `loadSection()` legacy `contentBlocks`;
+- `Ast.renderBlocks()` normalization for callers that still pass legacy arrays.
+
+The bridge should stay until fallback data and scratch tooling no longer need
+legacy arrays. New rendering/search/excerpt work should use AST nodes or AST text
+projections directly.

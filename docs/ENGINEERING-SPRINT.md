@@ -306,13 +306,13 @@ Suggested commit:
 
 Goal: reduce transitional AST/legacy ambiguity without breaking rendering.
 
-- [ ] Inventory every `astToLegacyBlocks` and `legacyBlocksToAst` call site.
-- [ ] Document which render paths still require legacy blocks.
-- [ ] Add tests that compare AST render output to legacy render output on corpus
+- [x] Inventory every `astToLegacyBlocks` and `legacyBlocksToAst` call site.
+- [x] Document which render paths still require legacy blocks.
+- [x] Add tests that compare AST render output to legacy render output on corpus
       fixtures.
-- [ ] Move call sites toward one normalized AST input boundary where practical.
-- [ ] Measure or estimate conversion overhead on current corpus.
-- [ ] Decide whether to keep, isolate, or deprecate the legacy bridge.
+- [x] Move call sites toward one normalized AST input boundary where practical.
+- [x] Measure or estimate conversion overhead on current corpus.
+- [x] Decide whether to keep, isolate, or deprecate the legacy bridge.
 
 Suggested commit:
 
