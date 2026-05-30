@@ -28,19 +28,38 @@ function extractPrecache(source) {
 }
 
 function readAssetForHash(asset) {
-  if (asset === "./") {
-    return fs.readFileSync(path.join(site.root, "index.html"));
-  }
-  const filePath = path.join(site.root, asset);
+  const filePath = asset === "./" ? path.join(site.root, "index.html") : path.join(site.root, asset);
   if (!fs.existsSync(filePath)) {
     throw new Error("precache asset missing: " + asset);
+  }
+  if (isTextAsset(filePath)) {
+    return normalizeTextForHash(fs.readFileSync(filePath, "utf8"));
   }
   return fs.readFileSync(filePath);
 }
 
+function isTextAsset(filePath) {
+  return new Set([
+    ".css",
+    ".html",
+    ".js",
+    ".json",
+    ".md",
+    ".svg",
+    ".txt",
+    ".webmanifest",
+    ".xml"
+  ]).has(path.extname(filePath).toLowerCase());
+}
+
+function normalizeTextForHash(text) {
+  return String(text).replace(/\r\n?/g, "\n");
+}
+
 function computedVersion(source) {
   const hash = crypto.createHash("sha256");
-  const normalizedSw = source.replace(VERSION_RE, 'const VERSION = "__CACHE_VERSION__";');
+  const normalizedSw = normalizeTextForHash(source)
+    .replace(VERSION_RE, 'const VERSION = "__CACHE_VERSION__";');
   hash.update("sw.js\0");
   hash.update(normalizedSw);
   hash.update("\0");

@@ -223,7 +223,7 @@ Goal: make generated artifacts predictable and auditable.
       artifacts are fresh.
 - [x] Add artifact summary output for humans: counts, sizes, published essays,
       sections, routes, cache entries.
-- [ ] Ensure generated outputs are deterministic across Windows/Linux line
+- [x] Ensure generated outputs are deterministic across Windows/Linux line
       endings where practical.
 - [x] Add size budgets for large generated files.
 - [ ] Document the content-to-artifact pipeline.
