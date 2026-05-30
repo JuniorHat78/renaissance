@@ -1,3 +1,12 @@
+"use strict";
+
+// Lighthouse is a MEASURING STICK, never a gate. This summarizer reports the
+// performance score per page and, when a committed baseline exists, the delta
+// against it. A drastic drop (default >= 8 points) is surfaced as a GitHub
+// ::warning for a human to glance at — it never fails the build. Lighthouse
+// scores on shared CI runners are noisy, so the drastic threshold is loose by
+// design: we want to catch "something fell off a cliff", not chase jitter.
+
 const fs = require("fs");
 const path = require("path");
 
@@ -7,9 +16,16 @@ const REPORTS = [
   { label: "Section", file: ".lighthouseci/section.json" }
 ];
 
+const BASELINE_FILE = path.join("qa", "lighthouse", "baseline.json");
+
 function parseThreshold(value) {
   const parsed = Number.parseInt(String(value || ""), 10);
   return Number.isFinite(parsed) && parsed > 0 && parsed <= 100 ? parsed : 90;
+}
+
+function parseDrasticDrop(value) {
+  const parsed = Number.parseInt(String(value || ""), 10);
+  return Number.isFinite(parsed) && parsed > 0 && parsed <= 100 ? parsed : 8;
 }
 
 function readJsonSafe(filePath) {
@@ -25,64 +41,112 @@ function metric(audits, id, fallback) {
   return value ? String(value) : fallback;
 }
 
-function emitWarning(title, message) {
-  console.log(`::warning title=${title}::${message}`);
+function scoreFromReport(data) {
+  const raw = data &&
+    data.categories &&
+    data.categories.performance &&
+    data.categories.performance.score;
+  return Number.isFinite(raw) ? Math.round(raw * 100) : null;
+}
+
+// Pure, deterministic core so the flagging logic can be unit-tested without
+// ever invoking Lighthouse. Returns the markdown lines plus the warnings to
+// emit. Emitting warnings (vs failing) is the caller's job — this never throws.
+function buildSummary({ entries, baseline, threshold, drasticDrop }) {
+  const baseScores = (baseline && baseline.scores) || {};
+  const hasBaseline = baseline && baseline.scores && Object.keys(baseScores).length > 0;
+  const lines = [
+    "## Lighthouse (measuring stick — non-gating)",
+    "",
+    "Absolute warn threshold: " + threshold + " · Drastic-drop flag: -" + drasticDrop + " vs baseline",
+    ""
+  ];
+  if (hasBaseline) {
+    lines.push("Baseline captured: " + (baseline.capturedAt || "unknown") +
+      (baseline.sourceRun ? " (run " + baseline.sourceRun + ")" : ""));
+  } else {
+    lines.push("_No baseline committed — reporting current scores only. Run `npm run lighthouse:baseline` from a trusted run to set one._");
+  }
+  lines.push("");
+
+  const warnings = [];
+
+  for (const entry of entries) {
+    if (entry.score === null || entry.score === undefined) {
+      warnings.push({
+        title: "Lighthouse score missing (" + entry.label + ")",
+        message: "Performance score unavailable for " + entry.label + "."
+      });
+      lines.push("- " + entry.label + ": score unavailable");
+      continue;
+    }
+
+    let deltaText = "";
+    const base = baseScores[entry.label];
+    if (hasBaseline && Number.isFinite(base)) {
+      const delta = entry.score - base;
+      const sign = delta > 0 ? "+" : "";
+      deltaText = " (Δ " + sign + delta + " vs baseline " + base + ")";
+      if (delta <= -drasticDrop) {
+        warnings.push({
+          title: "Lighthouse drastic drop (" + entry.label + ")",
+          message: "Score " + entry.score + " is " + Math.abs(delta) +
+            " points below baseline " + base + " (flag threshold " + drasticDrop + "). Worth a human look — not a gate."
+        });
+      }
+    }
+
+    lines.push("- " + entry.label + ": " + entry.score + deltaText +
+      " (LCP " + entry.lcp + ", TBT " + entry.tbt + ", CLS " + entry.cls + ")");
+
+    if (entry.score < threshold) {
+      warnings.push({
+        title: "Lighthouse performance low (" + entry.label + ")",
+        message: "Score " + entry.score + " is below the absolute warn threshold " + threshold + "."
+      });
+    }
+  }
+
+  return { lines, warnings };
+}
+
+function readEntries() {
+  return REPORTS.map((report) => {
+    const data = readJsonSafe(path.resolve(report.file));
+    if (!data) {
+      return { label: report.label, score: null, lcp: "n/a", tbt: "n/a", cls: "n/a", missing: true };
+    }
+    const audits = data.audits || {};
+    return {
+      label: report.label,
+      score: scoreFromReport(data),
+      lcp: metric(audits, "largest-contentful-paint", "n/a"),
+      tbt: metric(audits, "total-blocking-time", "n/a"),
+      cls: metric(audits, "cumulative-layout-shift", "n/a")
+    };
+  });
 }
 
 function main() {
   const threshold = parseThreshold(process.env.LIGHTHOUSE_WARN_THRESHOLD);
-  const summaryLines = [
-    "## Lighthouse (warning-only)",
-    "",
-    `Warning threshold: ${threshold}`,
-    ""
-  ];
+  const drasticDrop = parseDrasticDrop(process.env.LIGHTHOUSE_DRASTIC_DROP);
+  const baseline = readJsonSafe(path.resolve(BASELINE_FILE));
+  const entries = readEntries();
 
-  for (const report of REPORTS) {
-    const filePath = path.resolve(report.file);
-    const data = readJsonSafe(filePath);
-    if (!data) {
-      emitWarning(
-        `Lighthouse report missing (${report.label})`,
-        `Could not read ${report.file}.`
-      );
-      summaryLines.push(`- ${report.label}: report unavailable`);
-      continue;
-    }
+  const { lines, warnings } = buildSummary({ entries, baseline, threshold, drasticDrop });
 
-    const scoreRaw = data &&
-      data.categories &&
-      data.categories.performance &&
-      data.categories.performance.score;
-    const score = Number.isFinite(scoreRaw) ? Math.round(scoreRaw * 100) : null;
-
-    if (score === null) {
-      emitWarning(
-        `Lighthouse score missing (${report.label})`,
-        `Performance score is unavailable in ${report.file}.`
-      );
-      summaryLines.push(`- ${report.label}: score unavailable`);
-      continue;
-    }
-
-    const audits = data.audits || {};
-    const lcp = metric(audits, "largest-contentful-paint", "n/a");
-    const tbt = metric(audits, "total-blocking-time", "n/a");
-    const cls = metric(audits, "cumulative-layout-shift", "n/a");
-
-    summaryLines.push(`- ${report.label}: ${score} (LCP ${lcp}, TBT ${tbt}, CLS ${cls})`);
-
-    if (score < threshold) {
-      emitWarning(
-        `Lighthouse performance low (${report.label})`,
-        `Score ${score} is below warning threshold ${threshold}.`
-      );
-    }
-  }
+  warnings.forEach((warning) => {
+    console.log("::warning title=" + warning.title + "::" + warning.message);
+  });
+  console.log(lines.join("\n"));
 
   if (process.env.GITHUB_STEP_SUMMARY) {
-    fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, summaryLines.join("\n") + "\n", "utf8");
+    fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.join("\n") + "\n", "utf8");
   }
 }
 
-main();
+if (require.main === module) {
+  main();
+}
+
+module.exports = { buildSummary, parseThreshold, parseDrasticDrop, scoreFromReport, BASELINE_FILE };

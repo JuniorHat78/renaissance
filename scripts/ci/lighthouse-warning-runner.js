@@ -6,6 +6,26 @@ const path = require("path");
 const { spawnSync } = require("child_process");
 const { resolveLighthouseEnv } = require("./resolve-lighthouse-target");
 
+// Lighthouse drives a real Chrome via chrome-launcher, which probes standard
+// install locations. CI installs Playwright's chromium (not in those paths), so
+// without a hint Lighthouse finds nothing and silently produces no report. Point
+// it at the chromium we already installed by exporting CHROME_PATH when unset.
+function ensureChromePath() {
+  if (process.env.CHROME_PATH) {
+    return;
+  }
+  try {
+    const { chromium } = require("playwright");
+    const execPath = chromium.executablePath();
+    if (execPath && fs.existsSync(execPath)) {
+      process.env.CHROME_PATH = execPath;
+      console.log("Using CHROME_PATH=" + execPath + " for Lighthouse.");
+    }
+  } catch (error) {
+    console.log("::warning title=Lighthouse Chrome path::Could not resolve a Chrome binary (" + error.message + "). Lighthouse may not run.");
+  }
+}
+
 function parseArgs(argv) {
   const options = {
     base: process.env.RENAISSANCE_BASE_URL || "http://127.0.0.1:4175"
@@ -71,6 +91,7 @@ function runLighthouse(target) {
 
 function main() {
   const options = parseArgs(process.argv);
+  ensureChromePath();
   const essays = readJson(path.resolve("data", "essays.json"));
   const target = resolveLighthouseEnv(essays);
 
