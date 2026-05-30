@@ -143,21 +143,19 @@ Copy shape:
 
 ## Suggestion Model
 
-The first pass can stay lightweight and inline:
+Implemented:
 
-- Keep a small hardcoded published catalogue in `404.html`.
+- Generate a tiny published recovery catalogue from `data/essays.json` and
+  section metadata.
+- Embed that generated object inline in `404.html` so GitHub Pages can serve the
+  page safely from arbitrary missing path depths.
+- Include only published essay and section metadata.
 - Match against essay slug, essay title, summary, section number, and section
   title.
 - Score exact slug/title containment highest.
 - Score token overlap next.
 - Render at most one primary suggestion and two secondary suggestions.
-
-Later, when the archive grows:
-
-- Generate a tiny `notfound-catalogue` JSON object during the existing content
-  generation step.
-- Include only published essay and section metadata.
-- Keep the 404 page self-contained by embedding that generated object inline.
+- Validate freshness with `npm run validate:404-catalogue:check`.
 
 ## Visual Language
 
@@ -189,52 +187,56 @@ The browser-level `404.html` should inspire but not replace app-shell failures:
 - Both should link to archive and full search under the project subpath.
 
 Implemented helper:
+
 - `scripts/recovery-engine.js` shares essay/section suggestion scoring and route
   mode classification for app-shell recovery tests. `404.html` keeps embedded
   path-safe logic because it may be served from arbitrary missing URLs.
+- Browser-level 404 tests now cover contextual modes, subpath-safe links,
+  unpublished-essay exclusion, reduced-motion animation collapse, and cached
+  offline recovery behavior.
 
 ## Phased Plan
 
 ### Phase 1: Current Shell
 
-- Self-contained 404 layout.
-- Missing path shelf mark.
-- Search form.
-- Essay/section query recognition.
-- Basic suggestions and animation.
+- [x] Self-contained 404 layout.
+- [x] Missing path shelf mark.
+- [x] Search form.
+- [x] Essay/section query recognition.
+- [x] Basic suggestions and animation.
 
 ### Phase 2: Contextual Modes
 
-- Add route mode detection: unknown, essay, section, search, asset, offline.
-- Swap eyebrow, lead copy, primary suggestion, and secondary suggestions per
+- [x] Add route mode detection: unknown, essay, section, search, asset, offline.
+- [x] Swap eyebrow, lead copy, primary suggestion, and secondary suggestions per
   mode.
-- Keep the same visual shell.
+- [x] Keep the same visual shell.
 
 ### Phase 3: Better Matching
 
-- Improve typo/near-match scoring for essay and section names.
-- Show nearest valid section when section number is out of range.
-- Add old asset/file inference.
+- [x] Improve typo/near-match scoring for essay and section names.
+- [x] Show nearest valid section when section number is out of range.
+- [x] Add old asset/file inference.
 
 ### Phase 4: Shared Recovery Tone
 
-- Bring matching recovery copy and suggestions into `essay.html` and
+- [x] Bring matching recovery copy and suggestions into `essay.html` and
   `section.html` app-shell not-found states.
-- Keep noindex behavior.
-- Keep controls consistent with `docs/INTERFACE-GRAMMAR.md`.
+- [x] Keep noindex behavior.
+- [x] Keep controls consistent with `docs/INTERFACE-GRAMMAR.md`.
 
 ### Phase 5: Generated Catalogue
 
-- Generate a compact published catalogue for 404 suggestions.
-- Keep it inline or otherwise path-depth safe.
-- Update QA docs with the expected coverage.
+- [x] Generate a compact published catalogue for 404 suggestions.
+- [x] Keep it inline or otherwise path-depth safe.
+- [x] Update QA docs with the expected coverage.
 
 ## Open Questions
 
 - Should the 404 copy use "shelf mark", "drawer", "folio", or a smaller set of
   recurring archive nouns?
 - Should unpublished essays ever appear in 404 suggestions during local
-  development?
+  development? Current production behaviour says no, and tests protect that.
 - Should a high-confidence exact old URL ever redirect automatically, or should
   all recovery stay user-chosen?
 - How much offline intelligence is worth adding before the site has many cached

@@ -95,7 +95,8 @@ npm run check
 ```
 
 `scripts/artifact-summary.js` gives a compact count/size report for generated
-route, cache, content, and recovery artifacts.
+route, cache, content, and recovery artifacts, including service-worker
+precache weight, offline asset payload weight, and recovery catalogue size.
 
 ## Search
 
@@ -108,9 +109,10 @@ Search surfaces:
 - full results on `search.html`;
 - reader deep links using `q`, `occ`, and highlight fallback parameters.
 
-Fuzzy search work is bounded and cached for the current corpus size. Larger
+Fuzzy search work is bounded and cached for the current corpus size. The search
+regression prints index build timing so growth is visible in CI logs. Larger
 archive plans, such as generated search data or Web Worker query execution, live
-in `docs/IDEAS.md`.
+in `docs/IDEAS.md` and `docs/SEARCH-RANKING-SPEC.md`.
 
 ## Reading State
 

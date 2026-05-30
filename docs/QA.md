@@ -46,6 +46,10 @@ For a human-readable generated artifact inventory:
 npm run artifacts:summary
 ```
 
+The summary reports published essay/section/route counts, service-worker
+precache entry count and byte weight, offline asset payload weight, recovery
+catalogue count/weight, and major generated file sizes.
+
 ## Browser Regressions
 
 With a local server running:
@@ -142,6 +146,7 @@ Push and pull request CI runs the full project gate:
 - custom 404 regression
 - accessibility audit
 - offline/PWA regression
+- search index timing is surfaced in `npm run test:search-engine`
 - focus and keyboard regressions
 - device matrix
 - slow-network journey

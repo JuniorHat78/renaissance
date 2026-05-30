@@ -41,11 +41,11 @@ These are the current execution rules for the long sprint.
 - [x] Avoid large writes to `C:`; the machine is low on C-drive space.
 - [x] Existing Playwright/browser assets may live on `D:`; inspect before using
       during the sprint, but do not install browser bundles locally.
-- [ ] Skip a troublesome subtask only if it blocks unrelated work; record the
-      skip and continue the sprint.
-- [ ] Be aggressive on AST/search work, but protect changes with specs,
+- [x] No troublesome subtask was skipped; if a future sprint skips one, record
+      the skip and continue unrelated work.
+- [x] Be aggressive on AST/search work, but protect changes with specs,
       fixtures, and tests.
-- [ ] Do not ask for permission mid-sprint unless repo access, credentials, or an
+- [x] Do not ask for permission mid-sprint unless repo access, credentials, or an
       irreversible external action is genuinely blocked.
 
 ## Apple-Feel Foundation
@@ -328,8 +328,13 @@ Goal: improve resume behavior without changing the reader design.
 - [x] Add tests for mobile/desktop reflow where semantic restore should win over
       pixel restore.
 - [x] Document current threshold constants and when to tune them.
-- [ ] Consider dynamic completion/restore thresholds based on document length.
+- [x] Consider dynamic completion/restore thresholds based on document length.
 - [x] Keep existing reading-state data backward compatible.
+
+Decision: keep the existing threshold constants for now. The current corpus has
+one published essay, so dynamic thresholds would be speculative. The semantic
+paragraph-signature restore path reduces the real fragility without changing the
+reader's completion contract.
 
 Suggested commit:
 
@@ -389,9 +394,9 @@ Suggested commit:
 Goal: make growth visible before it becomes slow.
 
 - [x] Add budgets for generated JS/data artifacts.
-- [ ] Add search index build timing instrumentation in dev/test where practical.
-- [ ] Add service-worker precache size reporting.
-- [ ] Add route/recovery catalogue size reporting.
+- [x] Add search index build timing instrumentation in dev/test where practical.
+- [x] Add service-worker precache size reporting.
+- [x] Add route/recovery catalogue size reporting.
 - [x] Document thresholds that trigger generated index or worker migration.
 - [ ] Keep Lighthouse warning-only but record meaningful deltas.
 
@@ -406,17 +411,17 @@ Goal: make recovery behavior hard to regress.
 - [x] Extend not-found regression coverage for every 404 mode.
 - [x] Extend app-shell recovery tests for bad essay and bad section routes.
 - [x] Add subpath assertions for every new recovery link.
-- [ ] Add reduced-motion assertions for 404 animations where practical.
-- [ ] Add offline/PWA assertions for cached 404 and recovery behavior where
+- [x] Add reduced-motion assertions for 404 animations where practical.
+- [x] Add offline/PWA assertions for cached 404 and recovery behavior where
       practical.
-- [ ] Run focused local checks.
-- [ ] Push and let GitHub Actions run the full matrix.
+- [x] Run focused local checks.
+- [x] Push and let GitHub Actions run the full matrix.
 - [ ] Read warning-only visual and Lighthouse outputs.
 - [ ] Fix real failures and rerun failed jobs.
 - [ ] Add CI jobs or split existing jobs if the suite becomes too broad to read
       clearly.
-- [ ] Ensure new generated/cache/search/AST checks run in GitHub Actions.
-- [ ] Prefer targeted reruns for failed Actions jobs.
+- [x] Ensure new generated/cache/search/AST checks run in GitHub Actions.
+- [x] Prefer targeted reruns for failed Actions jobs.
 
 Suggested commit:
 
@@ -426,18 +431,19 @@ Suggested commit:
 
 Goal: leave the next session with a clear map.
 
-- [ ] Update `docs/ROADMAP.md` checkboxes.
-- [ ] Update `docs/404-MAGIC-SPEC.md` with any implemented decisions.
-- [ ] Update `docs/INTERFACE-GRAMMAR.md` only for stable control/recovery
+- [x] Update `docs/ROADMAP.md` checkboxes.
+- [x] Update `docs/404-MAGIC-SPEC.md` with any implemented decisions.
+- [x] Update `docs/INTERFACE-GRAMMAR.md` only for stable control/recovery
       language.
-- [ ] Update `docs/QA.md` with new generated/cache checks.
-- [ ] Update `docs/ARCHITECTURE.md` with recovery/cache architecture notes.
-- [ ] Update AST and search docs/specs with implemented decisions.
-- [ ] Update any Apple-feel foundation notes that are stable enough to guide a
+- [x] Update `docs/QA.md` with new generated/cache checks.
+- [x] Update `docs/ARCHITECTURE.md` with recovery/cache architecture notes.
+- [x] Update AST and search docs/specs with implemented decisions.
+- [x] Update any Apple-feel foundation notes that are stable enough to guide a
       later visual rewrite.
-- [ ] Leave this sprint checklist updated with completed, skipped, and deferred
+- [x] Leave this sprint checklist updated with completed, skipped, and deferred
       work.
-- [ ] Archive or remove any obsolete scratch notes.
+- [x] Confirm obsolete tracked scratch notes are archived or replaced by active
+      docs/pointers.
 
 Suggested commit:
 
@@ -445,25 +451,25 @@ Suggested commit:
 
 ## Out Of Scope
 
-- [ ] No broad visual redesign.
-- [ ] No full Spotlight Search UI unless backend registry/recovery foundations
+- [x] No broad visual redesign.
+- [x] No full Spotlight Search UI unless backend registry/recovery foundations
       are already complete.
-- [ ] No large UI taste pass that needs frequent user feedback.
-- [ ] No paid browser/device grid.
+- [x] No large UI taste pass that needs frequent user feedback.
+- [x] No paid browser/device grid.
 
 ## Acceptance Criteria
 
-- [ ] Browser-level 404 has contextual recovery modes.
-- [ ] Essay and section app-shell failures share the recovery tone.
-- [ ] Cache/version workflow no longer relies only on a remembered manual bump.
-- [ ] Recovery suggestions are generated or validated from source content.
-- [ ] New validation catches route/content/cache freshness mistakes.
-- [ ] Tests cover recovery modes and subpath-safe links.
-- [ ] Route/data registries reduce duplicated source-of-truth logic.
-- [ ] Search and AST have specs, fixtures, or safe implementation tracks.
-- [ ] Reading-state fallback is more semantic before pixel fallback.
-- [ ] Interaction and design-token docs make a future Apple-feel rewrite less
+- [x] Browser-level 404 has contextual recovery modes.
+- [x] Essay and section app-shell failures share the recovery tone.
+- [x] Cache/version workflow no longer relies only on a remembered manual bump.
+- [x] Recovery suggestions are generated or validated from source content.
+- [x] New validation catches route/content/cache freshness mistakes.
+- [x] Tests cover recovery modes and subpath-safe links.
+- [x] Route/data registries reduce duplicated source-of-truth logic.
+- [x] Search and AST have specs, fixtures, or safe implementation tracks.
+- [x] Reading-state fallback is more semantic before pixel fallback.
+- [x] Interaction and design-token docs make a future Apple-feel rewrite less
       ad hoc.
-- [ ] The live sprint checklist reflects the actual final state.
+- [x] The live sprint checklist reflects the actual final state.
 - [ ] GitHub Actions pass or have documented warning-only residuals.
-- [ ] Roadmap and architecture docs explain what changed.
+- [x] Roadmap and architecture docs explain what changed.

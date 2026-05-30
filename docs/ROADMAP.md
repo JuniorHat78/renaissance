@@ -31,11 +31,11 @@ Goal: make the docs reflect the project as it exists now.
 
 Goal: make every control feel like it belongs to Renaissance.
 
-- [ ] Define the shared control language for buttons, ghost buttons, search
+- [x] Define the shared control language for buttons, ghost buttons, search
       fields, selects, checkboxes, chips, pagination, and contextual copy UI.
-- [ ] Replace browser-default-looking search options with a quieter, more
+- [x] Replace browser-default-looking search options with a quieter, more
       literary treatment.
-- [ ] Make primary, secondary, and contextual actions visually consistent across
+- [x] Make primary, secondary, and contextual actions visually consistent across
       archive, essay, section, search, and error states.
 - [ ] Keep controls dense enough for repeated reading/search workflows, but
       softer than a generic dashboard.
@@ -45,27 +45,27 @@ Goal: make every control feel like it belongs to Renaissance.
 
 Goal: make recovery states feel like part of the archive instead of dead ends.
 
-- [ ] Rework the 404 into a more wondrous self-contained page.
-- [ ] Implement contextual 404 modes from `docs/404-MAGIC-SPEC.md`.
-- [ ] Keep path-depth safety: the 404 must not depend on relative external
+- [x] Rework the 404 into a more wondrous self-contained page.
+- [x] Implement contextual 404 modes from `docs/404-MAGIC-SPEC.md`.
+- [x] Keep path-depth safety: the 404 must not depend on relative external
       assets that can break at arbitrary missing URLs.
-- [ ] Make app-shell not-found states on `essay.html` and `section.html` share
+- [x] Make app-shell not-found states on `essay.html` and `section.html` share
       the same tone and recovery model.
-- [ ] Consider a small "lost leaf" / "found in the margins" interaction that
+- [x] Consider a small "lost leaf" / "found in the margins" interaction that
       remains subtle, fast, and reduced-motion aware.
-- [ ] Keep archive/search recovery obvious.
+- [x] Keep archive/search recovery obvious.
 
 ## Phase 4: Authoring And Content Doctor Polish
 
 Goal: make the site easier to publish into, not just easier to browse.
 
-- [ ] Add or improve commands for content health, AST diagnostics, generated
+- [x] Add or improve commands for content health, AST diagnostics, generated
       data freshness, and publish readiness.
 - [ ] Consider a `new essay` / `new section` helper if content additions become
       repetitive.
 - [ ] Confirm publish metadata such as `published_at` dates before feed entries
       become canonical.
-- [ ] Keep the AST grammar intentionally small unless real essays need more.
+- [x] Keep the AST grammar intentionally small unless real essays need more.
 
 ## Phase 5: Spotlight Search As Hidden Index
 
@@ -96,3 +96,14 @@ Detailed idea inventory lives in `docs/IDEAS.md`.
 
 The long-form implementation checklist for recovery/offline/backend hardening
 lives in `docs/ENGINEERING-SPRINT.md`.
+
+Latest sprint notes:
+
+- Recovery/offline/cache/generated-artifact hardening is tracked in
+  `docs/ENGINEERING-SPRINT.md`.
+- AST syntax support and legacy bridge boundaries are documented in
+  `docs/AST-DIALECT.md`.
+- Search ranking and growth thresholds are documented in
+  `docs/SEARCH-RANKING-SPEC.md`.
+- Interface-token and interaction grammar is documented in
+  `docs/INTERFACE-GRAMMAR.md`.
