@@ -36,6 +36,7 @@
     "test:crossbrowser": "node scripts/ci/run-with-server.js --port 4178 -- node scripts/tests/cross-browser-regression.js",
     "test:a11y": "node scripts/ci/run-with-server.js --port 4179 -- node scripts/tests/a11y-regression.js --base http://127.0.0.1:4179",
     "smoke:live": "node scripts/tests/cross-browser-regression.js --browsers chromium && node scripts/tests/subpath-regression.js && node scripts/tests/notfound-regression.js",
+    "links:check": "node scripts/external-link-check.js",
     "ci:offline": "node scripts/ci/run-with-server.js --port 4180 --mount /renaissance/ -- node scripts/tests/offline-regression.js",
     "test:offline": "node scripts/ci/run-with-server.js --port 4180 --mount /renaissance/ -- node scripts/tests/offline-regression.js",
     "test:pwa-precache": "node scripts/tests/pwa-precache-regression.js",

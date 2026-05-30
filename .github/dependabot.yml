@@ -1,0 +1,25 @@
+version: 2
+updates:
+  # Keep the dev toolchain (Playwright, axe, ajv, html-validate, pixelmatch...)
+  # current so security fixes and engine updates land as small, reviewable PRs.
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+    commit-message:
+      prefix: "chore(deps)"
+
+  # Keep the GitHub Actions themselves current (also clears the Node 20 runtime
+  # deprecation as newer action majors ship).
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    labels:
+      - dependencies
+      - ci
+    commit-message:
+      prefix: "chore(ci)"

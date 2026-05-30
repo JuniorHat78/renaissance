@@ -1,0 +1,58 @@
+name: Nightly Health
+
+# Scheduled, warning-leaning health watch decoupled from PR CI: catches drift
+# that has nothing to do with a code change — a new dependency advisory, an
+# external link that rotted, or production going unhealthy overnight. Keeping
+# this nightly lets the per-push CI stay fast and focused.
+
+on:
+  schedule:
+    - cron: "0 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install Node Dependencies
+        run: npm ci
+
+      - name: Dependency audit (warning-only)
+        run: |
+          if ! npm audit --audit-level=high; then
+            echo "::warning title=npm audit::High-severity advisories found — review and bump."
+          fi
+
+      - name: External link rot (warning-only)
+        run: npm run links:check
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Live smoke against production
+        env:
+          RENAISSANCE_BASE_URL: https://juniorhat78.github.io/renaissance
+        run: |
+          for attempt in $(seq 1 10); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" "$RENAISSANCE_BASE_URL/index.html" || echo 000)
+            if [ "$code" = "200" ]; then break; fi
+            echo "waiting for production ($code), attempt $attempt"; sleep 6
+          done
+          npm run smoke:live
