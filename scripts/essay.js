@@ -54,6 +54,10 @@
     caseSensitive: false
   };
 
+  function announcePageReady() {
+    window.dispatchEvent(new CustomEvent("renaissance:page-ready"));
+  }
+
   function descriptionForEssay(essay) {
     const summary = String((essay && essay.summary) || "").trim();
     if (summary) {
@@ -544,6 +548,8 @@
         "Unable to load this essay.",
         "The essay could not be loaded right now. Try the archive or search page to keep reading."
       );
+    } finally {
+      announcePageReady();
     }
   }
 

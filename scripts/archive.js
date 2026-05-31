@@ -45,6 +45,10 @@
     caseSensitive: false
   };
 
+  function announcePageReady() {
+    window.dispatchEvent(new CustomEvent("renaissance:page-ready"));
+  }
+
   function allowedScopes() {
     return publishedEssays.map((essay) => essay.slug);
   }
@@ -420,6 +424,8 @@
     } catch (error) {
       essayList.innerHTML = '<li class="muted">Unable to load essays.</li>';
       clearSearchView();
+    } finally {
+      announcePageReady();
     }
   }
 

@@ -33,6 +33,13 @@ function essayUrl(base, essay) {
   return url.toString();
 }
 
+function sectionUrl(base, essay, section) {
+  const url = new URL("/section.html", base);
+  url.searchParams.set("essay", essay);
+  url.searchParams.set("section", String(section));
+  return url.toString();
+}
+
 async function readCard(page) {
   return page.evaluate(() => {
     const card = document.querySelector(".link-preview-card");
@@ -106,6 +113,20 @@ async function main() {
     assert.ok(card, "section preview card should exist");
     assert.ok(card.title.length > 0, "section preview should have a title");
     assert.ok(card.body.length > 0, "section preview should have body text");
+  }, failures);
+
+  await runCase("home link shows an archive preview", async () => {
+    await page.goto(sectionUrl(options.base, options.essay, 1), { waitUntil: "networkidle", timeout: 30000 });
+    await page.waitForSelector('.reader-header-links a[href="index.html"]', { timeout: 30000 });
+
+    await page.hover('.reader-header-links a[href="index.html"]');
+    await page.waitForSelector(".link-preview-card.is-visible", { timeout: 5000 });
+
+    const card = await readCard(page);
+    assert.ok(card, "home preview card should exist");
+    assert.equal(card.kicker, "Archive", "home preview should point to the archive");
+    assert.equal(card.title, "Renaissance", "home preview should name the archive");
+    assert.ok(card.body.length > 0, "home preview should have body text");
   }, failures);
 
   await context.close();

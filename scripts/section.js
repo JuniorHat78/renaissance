@@ -36,6 +36,8 @@
   const copyHighlightStatus = document.getElementById("copy-highlight-status");
   const highlightCapNote = document.getElementById("highlight-cap-note");
   const readerProgressBar = document.getElementById("reader-progress-bar");
+  const readerLayout = document.querySelector(".reader-layout");
+  const chapterArticle = document.querySelector(".chapter-article");
   let selectionCopyChip = document.getElementById("selection-copy-chip");
   let selectionCopyBar = document.getElementById("selection-copy-bar");
   let selectionCopyBarButton = document.getElementById("selection-copy-bar-button");
@@ -48,6 +50,9 @@
   const MIN_READING_LINE_Y = 80;
   const RESTORE_SAVE_SUPPRESS_MS = 720;
   const BOOKMARK_AUTO_CLEAR_MS = 5600;
+  const SECTION_NAV_SELECTOR = "#prev-link, #next-link, #next-cta";
+  const SECTION_TURN_OUT_MS = 130;
+  const SECTION_TURN_IN_MS = 260;
 
   let currentEssay = null;
   let currentSectionNumber = null;
@@ -77,6 +82,11 @@
   let copyHintElement = null;
   let copyHintTimer = null;
   let copyHintActive = false;
+  let pendingRouteTransition = false;
+  let pendingRouteScrollTop = false;
+  let pendingRouteDirection = "next";
+  let routeLoadToken = 0;
+  const prefetchedSections = new Set();
   const shouldLogHighlightPerf = (() => {
     const protocol = String(window.location.protocol || "").toLowerCase();
     if (protocol === "file:") {
@@ -86,6 +96,10 @@
     const host = String(window.location.hostname || "").toLowerCase();
     return host === "localhost" || host === "127.0.0.1";
   })();
+
+  function announcePageReady() {
+    window.dispatchEvent(new CustomEvent("renaissance:page-ready"));
+  }
 
   function cleanSpaces(text) {
     return String(text || "").replace(//g, "").replace(/\s+/g, " ").trim();
@@ -250,6 +264,153 @@
     link.classList.remove("hidden");
     link.href = url;
     link.textContent = label;
+  }
+
+  function isPlainNavigationClick(event) {
+    return event.button === 0 &&
+      !event.metaKey &&
+      !event.ctrlKey &&
+      !event.shiftKey &&
+      !event.altKey;
+  }
+
+  function routeFromLink(link) {
+    if (!link || !link.href) {
+      return null;
+    }
+    try {
+      return router.parse(link.getAttribute("href"));
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  function wait(ms) {
+    return new Promise((resolve) => {
+      window.setTimeout(resolve, ms);
+    });
+  }
+
+  function nextFrame() {
+    return new Promise((resolve) => {
+      window.requestAnimationFrame(() => {
+        resolve();
+      });
+    });
+  }
+
+  function sectionDirection(sectionNumber) {
+    if (!currentSectionNumber) {
+      return "next";
+    }
+    return Number(sectionNumber) < Number(currentSectionNumber) ? "previous" : "next";
+  }
+
+  function normalizedSectionDirection(value) {
+    return value === "previous" ? "previous" : "next";
+  }
+
+  function clearSectionTurnClasses() {
+    if (readerLayout) {
+      readerLayout.classList.remove(
+        "is-section-queued",
+        "is-section-queued-next",
+        "is-section-queued-previous",
+        "is-section-turning",
+        "is-section-turning-next",
+        "is-section-turning-previous",
+        "is-section-entering",
+        "is-section-entering-next",
+        "is-section-entering-previous"
+      );
+      readerLayout.removeAttribute("aria-busy");
+    }
+    document.documentElement.classList.remove("reader-section-is-turning");
+  }
+
+  function setSectionQueued(direction) {
+    clearSectionTurnClasses();
+    if (!readerLayout) {
+      return;
+    }
+    const normalized = normalizedSectionDirection(direction);
+    document.documentElement.classList.add("reader-section-is-turning");
+    readerLayout.classList.add("is-section-queued", "is-section-queued-" + normalized);
+    readerLayout.setAttribute("aria-busy", "true");
+  }
+
+  function setSectionTurnPhase(phase, direction) {
+    clearSectionTurnClasses();
+    if (!readerLayout || !phase) {
+      return;
+    }
+    const normalized = normalizedSectionDirection(direction);
+    document.documentElement.classList.add("reader-section-is-turning");
+    readerLayout.classList.add("is-section-" + phase, "is-section-" + phase + "-" + normalized);
+    readerLayout.setAttribute("aria-busy", "true");
+  }
+
+  function freezeArticleHeight() {
+    if (!chapterArticle) {
+      return;
+    }
+    const rect = chapterArticle.getBoundingClientRect();
+    if (rect && rect.height > 0) {
+      chapterArticle.style.minHeight = String(Math.ceil(rect.height)) + "px";
+    }
+  }
+
+  function releaseArticleHeight() {
+    if (chapterArticle) {
+      chapterArticle.style.minHeight = "";
+    }
+  }
+
+  async function swapSectionContent(callback, options) {
+    const settings = options || {};
+    if (
+      settings.transition !== true ||
+      prefersReducedMotion() ||
+      !readerLayout ||
+      !chapterArticle
+    ) {
+      callback();
+      return;
+    }
+
+    const direction = normalizedSectionDirection(settings.direction);
+    freezeArticleHeight();
+    try {
+      setSectionTurnPhase("turning", direction);
+      await wait(SECTION_TURN_OUT_MS);
+
+      callback();
+      setSectionTurnPhase("entering", direction);
+      void chapterArticle.offsetWidth;
+      await nextFrame();
+
+      clearSectionTurnClasses();
+      await wait(SECTION_TURN_IN_MS);
+    } finally {
+      clearSectionTurnClasses();
+      releaseArticleHeight();
+    }
+  }
+
+  function prefetchSectionFromLink(link) {
+    const route = routeFromLink(link);
+    if (!route || route.view !== "section" || !route.essaySlug || !route.sectionNumber) {
+      return;
+    }
+
+    const key = route.essaySlug + ":" + String(route.sectionNumber);
+    if (prefetchedSections.has(key)) {
+      return;
+    }
+    prefetchedSections.add(key);
+    loadSection(route.essaySlug, route.sectionNumber).catch(() => {
+      prefetchedSections.delete(key);
+    });
   }
 
   function setFallbackVisible(isVisible) {
@@ -801,6 +962,7 @@
     setLink(nextLink, null, "");
     setLink(nextCta, null, "");
     setReaderProgress(0);
+    announcePageReady();
   }
 
   function clamp(value, min, max) {
@@ -2249,17 +2411,80 @@
     });
   }
 
-  async function init() {
-    initThemeToggle();
-    ensureContextualShareControls();
-    ensureCopyToast();
-    setFallbackVisible(!hasContextualShare);
-    bindHighlightEvents();
+  function bindSectionNavigation() {
+    document.addEventListener("click", (event) => {
+      const link = event.target && event.target.closest
+        ? event.target.closest(SECTION_NAV_SELECTOR)
+        : null;
+      if (!link || !link.href || !isPlainNavigationClick(event)) {
+        return;
+      }
 
+      const route = routeFromLink(link);
+      if (!route || route.view !== "section" || !route.essaySlug || !route.sectionNumber) {
+        return;
+      }
+
+      event.preventDefault();
+      pendingRouteTransition = true;
+      pendingRouteScrollTop = true;
+      pendingRouteDirection = sectionDirection(route.sectionNumber);
+      setSectionQueued(pendingRouteDirection);
+      router.go("section", {
+        essaySlug: route.essaySlug,
+        sectionNumber: route.sectionNumber
+      });
+    });
+
+    document.addEventListener("mouseover", (event) => {
+      const link = event.target && event.target.closest
+        ? event.target.closest(SECTION_NAV_SELECTOR)
+        : null;
+      if (link && link.href) {
+        prefetchSectionFromLink(link);
+      }
+    });
+
+    document.addEventListener("focusin", (event) => {
+      const link = event.target && event.target.closest
+        ? event.target.closest(SECTION_NAV_SELECTOR)
+        : null;
+      if (link && link.href) {
+        prefetchSectionFromLink(link);
+      }
+    });
+
+    window.addEventListener("renaissance:route", (event) => {
+      const route = event.detail || router.parse();
+      if (!route || route.view !== "section") {
+        return;
+      }
+
+      const options = {
+        transition: pendingRouteTransition,
+        scrollToTop: pendingRouteScrollTop,
+        skipRestore: pendingRouteScrollTop,
+        direction: pendingRouteDirection
+      };
+      pendingRouteTransition = false;
+      pendingRouteScrollTop = false;
+      pendingRouteDirection = "next";
+      loadCurrentSection(options);
+    });
+  }
+
+  async function loadCurrentSection(options) {
+    const settings = options || {};
+    const token = routeLoadToken + 1;
+    routeLoadToken = token;
     try {
       const essaySlug = await resolveEssaySlug();
       const essay = await loadEssay(essaySlug);
+      if (token !== routeLoadToken) {
+        return;
+      }
       if (!essay) {
+        clearSectionTurnClasses();
         const essays = await loadEssays().catch(() => []);
         const closest = recovery.closestEssay(essays, essaySlug);
         const query = recovery.normalizeWords(essaySlug).replace(/\s+/g, " ");
@@ -2272,6 +2497,7 @@
       }
 
       if (!essay.section_order.length) {
+        clearSectionTurnClasses();
         showMessage("No sections are available.", {
           body: "This essay exists, but it does not have any readable sections yet."
         });
@@ -2280,6 +2506,7 @@
 
       const sectionNumber = querySectionNumber() || essay.section_order[0];
       if (!essay.section_order.includes(sectionNumber)) {
+        clearSectionTurnClasses();
         const nearest = recovery.nearestSectionNumber(essay, sectionNumber);
         showMessage("Section not found.", {
           body: "That folio number is outside this essay. Use the nearest section or return to the essay contents.",
@@ -2293,31 +2520,48 @@
       const payload = await loadSection(essay.slug, sectionNumber);
       const display = sectionDisplay(essay, sectionNumber);
       const contentAst = payload.contentAst || payload.contentBlocks || payload.blocks;
-      currentEssay = essay;
-      currentSectionNumber = sectionNumber;
-      currentDisplay = display;
-      activeSelectionDetails = null;
-      hideContextualShare();
-      clearResumeBookmark({ fade: false });
-      if (copyHighlightButton) {
-        copyHighlightButton.disabled = false;
+      if (token !== routeLoadToken) {
+        return;
       }
-      copyHighlightStatus.textContent = "";
 
-      backToEssay.href = essayUrl(essay.slug);
-      essayLine.textContent = essay.title;
-      sectionKicker.textContent = display.label;
-      sectionTitle.textContent = display.title;
-      setSectionSubtitle(display.subtitle);
-      sectionMeta.innerHTML = joinMetaParts([
-        formatWordCount(payload.wordCount),
-        formatReadMinutes(payload.readMinutes)
-      ]);
-      renderBlocks(sectionContent, contentAst);
-      annotateParagraphIndices();
-      applySectionMetadata(essay, display, sectionNumber, payload);
       const hasAnchor = hasReaderAnchorIntent();
-      const shouldAttemptRestore = !hasAnchor && readingState &&
+      let didSwap = false;
+      await swapSectionContent(() => {
+        if (token !== routeLoadToken) {
+          return;
+        }
+        currentEssay = essay;
+        currentSectionNumber = sectionNumber;
+        currentDisplay = display;
+        didSwap = true;
+        activeSelectionDetails = null;
+        hideContextualShare();
+        clearResumeBookmark({ fade: false });
+        if (copyHighlightButton) {
+          copyHighlightButton.disabled = false;
+        }
+        copyHighlightStatus.textContent = "";
+
+        backToEssay.href = essayUrl(essay.slug);
+        essayLine.textContent = essay.title;
+        sectionKicker.textContent = display.label;
+        sectionTitle.textContent = display.title;
+        setSectionSubtitle(display.subtitle);
+        sectionMeta.innerHTML = joinMetaParts([
+          formatWordCount(payload.wordCount),
+          formatReadMinutes(payload.readMinutes)
+        ]);
+        renderBlocks(sectionContent, contentAst);
+        annotateParagraphIndices();
+        applySectionMetadata(essay, display, sectionNumber, payload);
+        if (settings.scrollToTop && !hasAnchor) {
+          window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+        }
+      }, settings);
+      if (!didSwap || token !== routeLoadToken) {
+        return;
+      }
+      const shouldAttemptRestore = !settings.skipRestore && !hasAnchor && readingState &&
         readingState.shouldRestore(readingState.getSectionRecord(currentEssay.slug, currentSectionNumber));
       if (shouldAttemptRestore) {
         startRestoreSaveSuppression();
@@ -2341,11 +2585,24 @@
         syncReadingProgress({ save: didRestore ? false : undefined });
         updateReadingStateDebug();
       }, hasAnchor ? 900 : didRestore ? RESTORE_SAVE_SUPPRESS_MS + 160 : 180);
+      announcePageReady();
     } catch (error) {
+      clearSectionTurnClasses();
+      releaseArticleHeight();
       showMessage("Unable to load this section.", {
         body: "The section could not be loaded right now. Try the archive or search page to keep reading."
       });
     }
+  }
+
+  async function init() {
+    initThemeToggle();
+    ensureContextualShareControls();
+    ensureCopyToast();
+    setFallbackVisible(!hasContextualShare);
+    bindHighlightEvents();
+    bindSectionNavigation();
+    loadCurrentSection();
   }
 
   init();

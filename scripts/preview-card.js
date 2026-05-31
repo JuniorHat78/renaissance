@@ -13,7 +13,7 @@
     return;
   }
 
-  const SELECTOR = 'a[href*="essay.html"], a[href*="section.html"]';
+  const SELECTOR = 'a[href*="index.html"], a[href*="essay.html"], a[href*="section.html"]';
   const HOVER_DELAY_MS = 200;
   const GRACE_MS = 100;
   const PREVIEW_CHARS = 140;
@@ -90,7 +90,13 @@
     let data = null;
     try {
       const route = router.parse(href);
-      if (route.view === "essay" && route.essaySlug) {
+      if (route.view === "archive") {
+        data = {
+          kicker: "Archive",
+          title: "Renaissance",
+          body: "A growing log of long-form essays."
+        };
+      } else if (route.view === "essay" && route.essaySlug) {
         const essay = await content.loadEssay(route.essaySlug);
         if (essay) {
           data = {

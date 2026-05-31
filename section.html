@@ -29,6 +29,13 @@
       } catch (error) {
         document.documentElement.setAttribute("data-theme", "light");
       }
+      try {
+        if (!window.matchMedia || !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+          document.documentElement.classList.add("page-transition-prep");
+        }
+      } catch (error) {
+        /* no-op */
+      }
     })();
   </script>
   <link rel="alternate" type="application/atom+xml" href="feed.xml" title="Renaissance — Atom feed">
@@ -103,6 +110,7 @@
   <script src="scripts/search-engine.js" defer></script>
   <script src="scripts/router.js" defer></script>
   <script src="scripts/recovery-engine.js" defer></script>
+  <script src="scripts/page-transition.js" defer></script>
   <script src="scripts/preview-card.js" defer></script>
   <script src="scripts/clipboard-citation.js" defer></script>
   <script src="scripts/section.js" defer></script>

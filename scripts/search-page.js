@@ -49,6 +49,10 @@
     pageSize: DEFAULT_PAGE_SIZE
   };
 
+  function announcePageReady() {
+    window.dispatchEvent(new CustomEvent("renaissance:page-ready"));
+  }
+
   function allowedScopes() {
     return publishedEssays.map((essay) => essay.slug);
   }
@@ -359,6 +363,8 @@
       clearSearchView();
       searchHint.textContent = "Search is unavailable right now.";
       searchResults.innerHTML = '<p class="muted">Unable to load search index.</p>';
+    } finally {
+      announcePageReady();
     }
   }
 

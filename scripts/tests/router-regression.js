@@ -26,6 +26,13 @@ async function openReadyArchive(page, options) {
   );
 }
 
+function sectionUrl(base, sectionNumber) {
+  const url = new URL("/section.html", base);
+  url.searchParams.set("essay", "etching-god-into-sand");
+  url.searchParams.set("section", String(sectionNumber));
+  return url.toString();
+}
+
 async function runCase(name, browser, options, body, failures) {
   let context;
   try {
@@ -297,6 +304,37 @@ async function main() {
     });
     assert.equal(result.savedY, result.actualY, "scrollY should be persisted; actualY=" + result.actualY + " savedY=" + result.savedY);
     assert.ok(result.actualY >= 400, "scroll position should be reached (got " + result.actualY + ")");
+  }, failures);
+
+  await runCase("section nav swaps sections without reloading the document", browser, options, async (page) => {
+    await page.goto(sectionUrl(options.base, 1), {
+      waitUntil: "networkidle",
+      timeout: 30000
+    });
+    await page.waitForSelector("#next-link:not(.hidden)", { timeout: 30000 });
+    await page.evaluate(() => {
+      window.__sectionNavSentinel = "still-here";
+    });
+
+    await page.click("#next-link");
+    await page.waitForFunction(
+      () => document.querySelector("#section-title") &&
+        /Nine Nines/.test(document.querySelector("#section-title").textContent || ""),
+      null,
+      { timeout: 30000 }
+    );
+
+    const result = await page.evaluate(() => ({
+      sentinel: window.__sectionNavSentinel,
+      url: window.location.href,
+      scrollY: window.scrollY,
+      previousVisible: !document.getElementById("prev-link").classList.contains("hidden")
+    }));
+
+    assert.equal(result.sentinel, "still-here", "section navigation should not reload the document");
+    assert.match(result.url, /section=2/, "URL should advance to section 2");
+    assert.ok(result.scrollY < 80, "reader should land near the top of the next section");
+    assert.equal(result.previousVisible, true, "previous link should become available after advancing");
   }, failures);
 
   await browser.close();

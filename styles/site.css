@@ -59,8 +59,164 @@ body {
   font-variant-numeric: oldstyle-nums;
 }
 
+html {
+  --page-enter-y: 0.28rem;
+  --page-exit-y: -0.18rem;
+  --page-source-x: 50vw;
+  --page-source-y: 4.5rem;
+  background: var(--canvas);
+}
+
+html[data-page-motion="back"],
+html[data-page-motion="home"] {
+  --page-enter-y: -0.18rem;
+  --page-exit-y: 0.2rem;
+}
+
+html[data-page-motion="search"] {
+  --page-enter-y: 0.12rem;
+  --page-exit-y: -0.12rem;
+}
+
+html.page-transition-prep body {
+  opacity: 0;
+  transform: translateY(var(--page-enter-y));
+}
+
+html.page-transition-ready body,
+html.page-transition-out body {
+  transition:
+    opacity 220ms var(--motion-ease),
+    transform 320ms cubic-bezier(0.2, 0.82, 0.28, 1),
+    filter 260ms var(--motion-ease);
+}
+
+html.page-transition-ready body {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+html.page-transition-out body {
+  opacity: 0.18;
+  filter: saturate(0.82);
+  transform: translateY(var(--page-exit-y));
+  pointer-events: none;
+}
+
+html.page-transition-ready::before,
+html.page-transition-out::before,
+html.page-transition-ready::after,
+html.page-transition-out::after {
+  content: "";
+  position: fixed;
+  left: 0;
+  z-index: 320;
+  width: 100%;
+  pointer-events: none;
+}
+
+html.page-transition-ready::before,
+html.page-transition-out::before {
+  top: 0;
+  height: 2px;
+  background: color-mix(in srgb, var(--accent) 74%, var(--line) 26%);
+  transform-origin: 0 50%;
+}
+
+html.page-transition-ready::after,
+html.page-transition-out::after {
+  top: clamp(3rem, var(--page-source-y), calc(100vh - 3rem));
+  height: 1px;
+  background:
+    linear-gradient(
+      90deg,
+      transparent 0%,
+      color-mix(in srgb, var(--mark) 46%, transparent) 30%,
+      color-mix(in srgb, var(--accent) 72%, var(--mark) 28%) 50%,
+      color-mix(in srgb, var(--mark) 46%, transparent) 70%,
+      transparent 100%
+    );
+  opacity: 0;
+  transform-origin: var(--page-source-x) 50%;
+}
+
+html.page-transition-ready::before {
+  animation: page-arrival-rule 420ms cubic-bezier(0.2, 0.82, 0.28, 1) both;
+}
+
+html.page-transition-out::before {
+  animation: page-exit-rule 210ms var(--motion-ease) both;
+}
+
+html.page-transition-ready::after {
+  animation: page-arrival-glint 620ms 60ms cubic-bezier(0.18, 0.84, 0.28, 1) both;
+}
+
+html.page-transition-out::after {
+  animation: page-exit-glint 210ms var(--motion-ease) both;
+}
+
+html.page-transition-ready .site-header {
+  animation: page-chrome-in 340ms 30ms cubic-bezier(0.2, 0.82, 0.28, 1) both;
+}
+
+html.page-transition-ready main {
+  animation: page-main-in 420ms 40ms cubic-bezier(0.2, 0.82, 0.28, 1) both;
+}
+
+html.page-transition-out .site-header,
+html.page-transition-out main {
+  transform: translateY(calc(var(--page-exit-y) * 0.58));
+  transition: transform 210ms var(--motion-ease);
+}
+
+html.page-transition-ready .essay-item,
+html.page-transition-ready .toc-item,
+html.page-transition-ready .result-card,
+html.page-transition-ready .search-count-row,
+html.page-transition-ready .search-preview-group {
+  animation: page-item-in 440ms cubic-bezier(0.2, 0.82, 0.28, 1) both;
+}
+
+html.page-transition-ready .essay-item:nth-child(2),
+html.page-transition-ready .toc-item:nth-child(2),
+html.page-transition-ready .result-card:nth-of-type(2),
+html.page-transition-ready .search-count-row:nth-of-type(2),
+html.page-transition-ready .search-preview-group:nth-of-type(2) {
+  animation-delay: 55ms;
+}
+
+html.page-transition-ready .essay-item:nth-child(3),
+html.page-transition-ready .toc-item:nth-child(3),
+html.page-transition-ready .result-card:nth-of-type(3),
+html.page-transition-ready .search-count-row:nth-of-type(3),
+html.page-transition-ready .search-preview-group:nth-of-type(3) {
+  animation-delay: 95ms;
+}
+
+html.page-transition-ready .essay-item:nth-child(n + 4),
+html.page-transition-ready .toc-item:nth-child(n + 4),
+html.page-transition-ready .result-card:nth-of-type(n + 4),
+html.page-transition-ready .search-count-row:nth-of-type(n + 4),
+html.page-transition-ready .search-preview-group:nth-of-type(n + 4) {
+  animation-delay: 130ms;
+}
+
 a {
   color: inherit;
+}
+
+a.is-page-transition-source {
+  color: var(--accent);
+}
+
+.button.is-page-transition-source,
+.chapter-list a.is-page-transition-source,
+.essay-item a.is-page-transition-source,
+.search-preview-hit a.is-page-transition-source,
+.result-card a.is-page-transition-source {
+  border-color: color-mix(in srgb, var(--accent) 64%, var(--line) 36%);
+  background-color: color-mix(in srgb, var(--accent-wash) 64%, transparent);
 }
 
 .site-header {
@@ -1074,6 +1230,12 @@ select::-ms-expand {
   transform-origin: 0 50%;
   background: color-mix(in srgb, var(--accent) 72%, var(--line) 28%);
   box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 28%, transparent);
+  opacity: 1;
+  transition: opacity var(--motion-fast) var(--motion-ease);
+}
+
+.reader-section-is-turning .reader-progress span {
+  opacity: 0.42;
 }
 
 .reader-header-links {
@@ -1091,10 +1253,65 @@ select::-ms-expand {
   padding: 0.55rem 0;
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
+  transition:
+    border-color var(--motion-base) var(--motion-ease),
+    background-color var(--motion-base) var(--motion-ease);
 }
 
 .chapter-article {
   margin-top: 1.2rem;
+  opacity: 1;
+  transform: translateY(0);
+  transition:
+    opacity 190ms var(--motion-ease),
+    transform 260ms cubic-bezier(0.2, 0.82, 0.28, 1);
+  will-change: opacity, transform;
+}
+
+.reader-layout.is-section-turning,
+.reader-layout.is-section-entering {
+  --section-turn-exit-y: -0.38rem;
+  --section-turn-enter-y: 0.58rem;
+}
+
+.reader-layout.is-section-turning-previous,
+.reader-layout.is-section-entering-previous {
+  --section-turn-exit-y: 0.38rem;
+  --section-turn-enter-y: -0.58rem;
+}
+
+.reader-layout.is-section-turning .chapter-article {
+  opacity: 0.2;
+  transform: translateY(var(--section-turn-exit-y));
+}
+
+.reader-layout.is-section-entering .chapter-article {
+  opacity: 0;
+  transform: translateY(var(--section-turn-enter-y));
+  transition-duration: 0ms;
+}
+
+.reader-layout.is-section-queued .chapter-nav-top,
+.reader-layout.is-section-turning .chapter-nav-top,
+.reader-layout.is-section-entering .chapter-nav-top,
+.reader-layout.is-section-queued .chapter-nav-bottom,
+.reader-layout.is-section-turning .chapter-nav-bottom,
+.reader-layout.is-section-entering .chapter-nav-bottom {
+  pointer-events: none;
+}
+
+.reader-layout.is-section-queued .chapter-nav-top,
+.reader-layout.is-section-queued .chapter-nav-bottom,
+.reader-layout.is-section-turning .chapter-nav-top,
+.reader-layout.is-section-turning .chapter-nav-bottom {
+  border-color: color-mix(in srgb, var(--accent) 32%, var(--line) 68%);
+  background-color: color-mix(in srgb, var(--accent-wash) 42%, transparent);
+}
+
+.reader-layout.is-section-queued .chapter-nav-top .button,
+.reader-layout.is-section-turning .chapter-nav-top .button {
+  border-color: color-mix(in srgb, var(--accent) 62%, var(--line) 38%);
+  color: var(--accent);
 }
 
 #chapter-title,
@@ -1569,6 +1786,9 @@ select::-ms-expand {
   border-top: 1px solid var(--line);
   display: flex;
   justify-content: flex-end;
+  transition:
+    border-color var(--motion-base) var(--motion-ease),
+    background-color var(--motion-base) var(--motion-ease);
 }
 
 .muted {
@@ -1664,6 +1884,95 @@ mark.reader-highlight-target.reader-highlight-arrival {
   from {
     opacity: 0;
     transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes page-arrival-rule {
+  0% {
+    opacity: 0;
+    transform: scaleX(0);
+  }
+  34% {
+    opacity: 0.76;
+    transform: scaleX(0.34);
+  }
+  100% {
+    opacity: 0;
+    transform: scaleX(1);
+  }
+}
+
+@keyframes page-exit-rule {
+  from {
+    opacity: 0.62;
+    transform: scaleX(0.18);
+  }
+  to {
+    opacity: 0;
+    transform: scaleX(1);
+  }
+}
+
+@keyframes page-arrival-glint {
+  0% {
+    opacity: 0;
+    transform: scaleX(0.08);
+  }
+  28% {
+    opacity: 0.46;
+  }
+  100% {
+    opacity: 0;
+    transform: scaleX(1);
+  }
+}
+
+@keyframes page-exit-glint {
+  0% {
+    opacity: 0;
+    transform: scaleX(0.12);
+  }
+  40% {
+    opacity: 0.52;
+  }
+  100% {
+    opacity: 0;
+    transform: scaleX(0.72);
+  }
+}
+
+@keyframes page-chrome-in {
+  from {
+    opacity: 0;
+    transform: translateY(-0.18rem);
+    border-color: color-mix(in srgb, var(--accent) 26%, var(--line) 74%);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    border-color: var(--line);
+  }
+}
+
+@keyframes page-main-in {
+  from {
+    opacity: 0;
+    transform: translateY(var(--page-enter-y));
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes page-item-in {
+  from {
+    opacity: 0;
+    transform: translateY(0.34rem);
   }
   to {
     opacity: 1;

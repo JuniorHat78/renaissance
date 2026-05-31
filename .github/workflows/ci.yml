@@ -40,6 +40,9 @@ jobs:
       - name: Browser Regression Suite
         run: npm run ci:regression
 
+      - name: Page Transition Regression
+        run: npm run ci:page-transitions
+
       - name: Subpath Regression Suite (served under /renaissance/)
         run: npm run ci:subpath
 
@@ -132,6 +135,9 @@ jobs:
 
       - name: Core Reader Journey (${{ matrix.browser }})
         run: npm run ci:crossbrowser -- --browsers ${{ matrix.browser }}
+
+      - name: Page Transition Regression (${{ matrix.browser }})
+        run: npm run ci:page-transitions
 
       - name: Subpath Regression (${{ matrix.browser }})
         run: npm run ci:subpath
