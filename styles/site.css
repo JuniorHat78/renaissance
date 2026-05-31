@@ -79,16 +79,8 @@ html[data-page-motion="search"] {
 }
 
 html.page-transition-prep body {
-  opacity: 0;
-  transform: translateY(var(--page-enter-y));
-}
-
-html.page-transition-ready body,
-html.page-transition-out body {
-  transition:
-    opacity 220ms var(--motion-ease),
-    transform 320ms cubic-bezier(0.2, 0.82, 0.28, 1),
-    filter 260ms var(--motion-ease);
+  opacity: 1;
+  transform: translateY(0);
 }
 
 html.page-transition-ready body {
@@ -97,10 +89,14 @@ html.page-transition-ready body {
 }
 
 html.page-transition-out body {
-  opacity: 0.72;
-  filter: saturate(0.94);
-  transform: translateY(var(--page-exit-y));
+  opacity: 0.96;
+  filter: saturate(0.98);
+  transform: translateY(calc(var(--page-exit-y) * 0.42));
   pointer-events: none;
+  transition:
+    opacity 90ms var(--motion-ease),
+    transform 120ms cubic-bezier(0.2, 0.82, 0.28, 1),
+    filter 120ms var(--motion-ease);
 }
 
 html[data-page-arrival="navigation"].page-transition-ready::before,
@@ -1949,12 +1945,10 @@ mark.reader-highlight-target.reader-highlight-arrival {
 
 @keyframes page-chrome-in {
   from {
-    opacity: 0;
     transform: translateY(-0.18rem);
     border-color: color-mix(in srgb, var(--accent) 26%, var(--line) 74%);
   }
   to {
-    opacity: 1;
     transform: translateY(0);
     border-color: var(--line);
   }
@@ -1962,22 +1956,18 @@ mark.reader-highlight-target.reader-highlight-arrival {
 
 @keyframes page-main-in {
   from {
-    opacity: 0;
     transform: translateY(var(--page-enter-y));
   }
   to {
-    opacity: 1;
     transform: translateY(0);
   }
 }
 
 @keyframes page-item-in {
   from {
-    opacity: 0;
-    transform: translateY(0.34rem);
+    transform: translateY(0.22rem);
   }
   to {
-    opacity: 1;
     transform: translateY(0);
   }
 }

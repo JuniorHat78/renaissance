@@ -29,12 +29,15 @@ async function assertPageVisible(page, label) {
   const state = await page.evaluate(() => {
     const root = document.documentElement;
     const body = window.getComputedStyle(document.body);
+    const main = document.querySelector("main");
+    const mainStyle = main ? window.getComputedStyle(main) : null;
     return {
       prep: root.classList.contains("page-transition-prep"),
       out: root.classList.contains("page-transition-out"),
       ready: root.classList.contains("page-transition-ready"),
       busy: root.getAttribute("aria-busy"),
       opacity: Number.parseFloat(body.opacity || "0"),
+      mainOpacity: mainStyle ? Number.parseFloat(mainStyle.opacity || "0") : 1,
       motion: root.getAttribute("data-page-motion") || "",
       arrival: root.getAttribute("data-page-arrival") || "",
       sourceX: window.getComputedStyle(root).getPropertyValue("--page-source-x").trim()
@@ -45,6 +48,7 @@ async function assertPageVisible(page, label) {
   assert.equal(state.ready, true, label + " should be marked ready");
   assert.notEqual(state.busy, "true", label + " should not remain busy");
   assert.ok(state.opacity > 0.95, label + " body should be visible");
+  assert.ok(state.mainOpacity > 0.95, label + " main content should be fully readable");
   return state;
 }
 

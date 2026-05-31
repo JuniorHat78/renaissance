@@ -1,6 +1,6 @@
 (function () {
   const STORAGE_KEY = "renaissance:page-transition";
-  const OUT_DURATION_MS = 45;
+  const OUT_DURATION_MS = 16;
   const CONTENT_READY_FALLBACK_MS = 1200;
   const STORED_MOTION_MAX_AGE_MS = 8000;
   const SECTION_READER_NAV = "#prev-link, #next-link, #next-cta";
@@ -11,6 +11,7 @@
   let ready = false;
   let hasIncomingMotion = false;
   let sourceAnchor = null;
+  let primeClearTimer = null;
 
   function prefersReducedMotion() {
     return Boolean(
@@ -130,6 +131,10 @@
   }
 
   function clearSourceAnchor() {
+    if (primeClearTimer) {
+      window.clearTimeout(primeClearTimer);
+      primeClearTimer = null;
+    }
     if (sourceAnchor) {
       sourceAnchor.classList.remove("is-page-transition-source");
       sourceAnchor = null;
@@ -149,6 +154,18 @@
     root.style.setProperty("--page-source-y", String(Math.round(centerY)) + "px");
     root.setAttribute("data-page-source-motion", motion || "settle");
     return { x: centerX, y: centerY };
+  }
+
+  function clearPrimeSoon() {
+    if (primeClearTimer) {
+      window.clearTimeout(primeClearTimer);
+    }
+    primeClearTimer = window.setTimeout(() => {
+      primeClearTimer = null;
+      if (!leaving) {
+        clearSourceAnchor();
+      }
+    }, 180);
   }
 
   function pageIsSameDocument(url) {
@@ -227,6 +244,21 @@
     }, OUT_DURATION_MS);
   }
 
+  function handlePointerDown(event) {
+    const anchor = event.target && event.target.closest
+      ? event.target.closest("a[href]")
+      : null;
+    if (reducedMotion || !shouldHandleAnchor(anchor, event)) {
+      return;
+    }
+
+    const url = anchor.__renaissanceTransitionUrl;
+    const motion = motionForUrl(url.href);
+    setMotion(motion);
+    markSourceAnchor(anchor, motion);
+    maybePrefetch(anchor);
+  }
+
   function maybePrefetch(anchor) {
     if (!anchor || anchor.matches(SECTION_READER_NAV)) {
       return;
@@ -254,6 +286,10 @@
   }
 
   function bindPrefetch() {
+    document.addEventListener("pointerdown", handlePointerDown, { passive: true });
+    document.addEventListener("pointerup", clearPrimeSoon, { passive: true });
+    document.addEventListener("pointercancel", clearSourceAnchor, { passive: true });
+
     document.addEventListener("mouseover", (event) => {
       const anchor = event.target && event.target.closest
         ? event.target.closest("a[href]")
