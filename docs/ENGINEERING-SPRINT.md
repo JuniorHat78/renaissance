@@ -103,7 +103,7 @@ Suggested commits:
 
 ## Phase 1: Contextual 404 Modes
 
-Goal: implement the mode system described in `docs/404-MAGIC-SPEC.md`.
+Goal: implement the mode system described in `docs/specs/404-MAGIC-SPEC.md`.
 
 - [x] Add route classification inside `404.html`.
 - [x] Detect unknown path mode.
@@ -432,7 +432,7 @@ Suggested commit:
 Goal: leave the next session with a clear map.
 
 - [x] Update `docs/ROADMAP.md` checkboxes.
-- [x] Update `docs/404-MAGIC-SPEC.md` with any implemented decisions.
+- [x] Update `docs/specs/404-MAGIC-SPEC.md` with any implemented decisions.
 - [x] Update `docs/INTERFACE-GRAMMAR.md` only for stable control/recovery
       language.
 - [x] Update `docs/QA.md` with new generated/cache checks.

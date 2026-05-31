@@ -4,7 +4,8 @@ This is the current planning source for Renaissance.
 
 The next work should make the existing reader feel more intentional before
 adding a large new interaction. Spotlight search is still important; it should
-arrive after the interface language feels worthy of it.
+become the first flagship expression of the Renaissance interaction system, not
+a generic command palette.
 
 ## Guiding Shape
 
@@ -13,6 +14,8 @@ arrive after the interface language feels worthy of it.
 - Keep every enhancement graceful under keyboard, touch, reduced motion, offline,
   and the `/renaissance/` GitHub Pages subpath.
 - Keep current CI and content guarantees intact while polishing the surface.
+- Keep zero runtime dependencies as a control strategy for specialized,
+  reader-first interactions, while using development tooling for confidence.
 - Move speculative ideas into `docs/IDEAS.md` instead of deleting them.
 
 ## Phase 1: Documentation And Project Intent
@@ -24,6 +27,9 @@ Goal: make the docs reflect the project as it exists now.
 - [x] Move completed or superseded plans into `docs/archive/`.
 - [x] Update `README.md`, `docs/ARCHITECTURE.md`, and `docs/QA.md` so they
       describe the current site, not older phases.
+- [x] Add `docs/EXPERIENCE.md` for the Apple-feel/Renaissance interaction
+      posture.
+- [x] Group feature-specific contracts under `docs/specs/`.
 - [x] Remove or explicitly ignore local scratch files once their useful ideas
       are captured.
 
@@ -41,12 +47,28 @@ Goal: make every control feel like it belongs to Renaissance.
       softer than a generic dashboard.
 - [ ] Add or update visual QA scenarios for the changed controls.
 
+## Phase 2.5: Renaissance Interaction System
+
+Goal: make Renaissance feel like a small, precise reading OS rather than a
+styled static site.
+
+- [ ] Define Apple-feel in Renaissance terms: quiet, tactile, exact,
+      reader-first, and native where possible.
+- [ ] Promote shared motion, feedback, focus, and control rules into the
+      interaction docs before building larger new surfaces.
+- [ ] Make selection, copying, citation, recovery, offline, and empty states
+      feel authored instead of generic.
+- [ ] Treat `published: false` as an explicit unlisted-public draft state, not a
+      privacy boundary.
+- [ ] Add polish QA scenarios for interaction states, not only layout snapshots.
+- [ ] Use Spotlight as the first major proof of this interaction system.
+
 ## Phase 3: Magical 404 And Empty States
 
 Goal: make recovery states feel like part of the archive instead of dead ends.
 
 - [x] Rework the 404 into a more wondrous self-contained page.
-- [x] Implement contextual 404 modes from `docs/404-MAGIC-SPEC.md`.
+- [x] Implement contextual 404 modes from `docs/specs/404-MAGIC-SPEC.md`.
 - [x] Keep path-depth safety: the 404 must not depend on relative external
       assets that can break at arbitrary missing URLs.
 - [x] Make app-shell not-found states on `essay.html` and `section.html` share
@@ -69,10 +91,13 @@ Goal: make the site easier to publish into, not just easier to browse.
 
 ## Phase 5: Spotlight Search As Hidden Index
 
-Goal: build Spotlight after the interface grammar is settled.
+Goal: build Spotlight as the first flagship expression of the Renaissance
+interaction system.
 
 - [ ] Add a global `Cmd/Ctrl+K` launcher.
 - [ ] Make it feel like opening a hidden index, not a generic command palette.
+- [ ] Reuse the established motion, focus, recovery, and control grammar from
+      `docs/EXPERIENCE.md` and `docs/INTERFACE-GRAMMAR.md`.
 - [ ] Show contextual actions first, including Continue Reading when available.
 - [ ] Update results instantly while typing.
 - [ ] Support keyboard navigation, Enter, Escape, and mobile full-screen use.
@@ -102,8 +127,10 @@ Latest sprint notes:
 - Recovery/offline/cache/generated-artifact hardening is tracked in
   `docs/ENGINEERING-SPRINT.md`.
 - AST syntax support and legacy bridge boundaries are documented in
-  `docs/AST-DIALECT.md`.
+  `docs/specs/AST-DIALECT.md`.
 - Search ranking and growth thresholds are documented in
-  `docs/SEARCH-RANKING-SPEC.md`.
+  `docs/specs/SEARCH-RANKING-SPEC.md`.
+- Experience posture and zero-dependency control strategy are documented in
+  `docs/EXPERIENCE.md`.
 - Interface-token and interaction grammar is documented in
   `docs/INTERFACE-GRAMMAR.md`.
