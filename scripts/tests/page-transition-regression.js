@@ -35,7 +35,9 @@ async function assertPageVisible(page, label) {
       ready: root.classList.contains("page-transition-ready"),
       busy: root.getAttribute("aria-busy"),
       opacity: Number.parseFloat(body.opacity || "0"),
-      motion: root.getAttribute("data-page-motion") || ""
+      motion: root.getAttribute("data-page-motion") || "",
+      arrival: root.getAttribute("data-page-arrival") || "",
+      sourceX: window.getComputedStyle(root).getPropertyValue("--page-source-x").trim()
     };
   });
   assert.equal(state.prep, false, label + " should not keep prep class");
@@ -69,6 +71,8 @@ async function clickInternal(page, selector, expectedPath, expectedMotion) {
   await waitForReady(page);
   const state = await assertPageVisible(page, expectedPath);
   assert.equal(state.motion, expectedMotion, expectedPath + " should receive the expected motion");
+  assert.equal(state.arrival, "navigation", expectedPath + " should mark an internal navigation arrival");
+  assert.match(state.sourceX, /px$/, expectedPath + " should retain source geometry for the arrival flourish");
 }
 
 async function main() {
@@ -100,6 +104,7 @@ async function main() {
     await waitForReady(page);
     const directState = await assertPageVisible(page, "archive");
     assert.equal(directState.motion, "settle", "direct loads should not fake an internal movement");
+    assert.equal(directState.arrival, "", "direct loads should not run internal arrival choreography");
 
     await clickInternal(page, '#essay-list a[href*="essay.html"]', "/essay.html", "forward");
     await clickInternal(page, '#section-list a[href*="section.html"]', "/section.html", "forward");

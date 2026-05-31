@@ -97,8 +97,8 @@ html.page-transition-ready body {
 }
 
 html.page-transition-out body {
-  opacity: 0.18;
-  filter: saturate(0.82);
+  opacity: 0.72;
+  filter: saturate(0.94);
   transform: translateY(var(--page-exit-y));
   pointer-events: none;
 }
@@ -208,6 +208,7 @@ a {
 
 a.is-page-transition-source {
   color: var(--accent);
+  text-decoration-color: color-mix(in srgb, var(--accent) 74%, var(--mark) 26%);
 }
 
 .button.is-page-transition-source,
@@ -217,6 +218,7 @@ a.is-page-transition-source {
 .result-card a.is-page-transition-source {
   border-color: color-mix(in srgb, var(--accent) 64%, var(--line) 36%);
   background-color: color-mix(in srgb, var(--accent-wash) 64%, transparent);
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--accent) 76%, var(--mark) 24%);
 }
 
 .site-header {

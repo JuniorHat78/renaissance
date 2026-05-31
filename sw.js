@@ -12,7 +12,7 @@
  *  - A versioned cache; bump VERSION to force a clean re-precache.
  */
 
-const VERSION = "asset-e3e9eda90be5";
+const VERSION = "asset-c6cb45834f24";
 const CACHE = "renaissance-" + VERSION;
 const OFFLINE_ASSET_MANIFEST = "data/offline-assets.json";
 const NAVIGATION_NETWORK_TIMEOUT_MS = 4500;

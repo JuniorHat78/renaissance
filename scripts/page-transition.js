@@ -2,6 +2,7 @@
   const STORAGE_KEY = "renaissance:page-transition";
   const OUT_DURATION_MS = 45;
   const CONTENT_READY_FALLBACK_MS = 1200;
+  const STORED_MOTION_MAX_AGE_MS = 8000;
   const SECTION_READER_NAV = "#prev-link, #next-link, #next-cta";
 
   const root = document.documentElement;
@@ -72,9 +73,15 @@
       window.sessionStorage.removeItem(STORAGE_KEY);
       if (stored) {
         const parsed = JSON.parse(stored);
-        if (parsed && typeof parsed.motion === "string") {
+        const createdAt = Number(parsed && parsed.createdAt);
+        const age = Number.isFinite(createdAt) ? Date.now() - createdAt : 0;
+        if (parsed && typeof parsed.motion === "string" && age <= STORED_MOTION_MAX_AGE_MS) {
           hasIncomingMotion = true;
           motion = parsed.motion;
+          if (Number.isFinite(parsed.sourceX) && Number.isFinite(parsed.sourceY)) {
+            root.style.setProperty("--page-source-x", String(Math.round(parsed.sourceX)) + "px");
+            root.style.setProperty("--page-source-y", String(Math.round(parsed.sourceY)) + "px");
+          }
         }
       }
     } catch (_error) {
@@ -83,9 +90,14 @@
     return motion;
   }
 
-  function storeOutgoingMotion(motion) {
+  function storeOutgoingMotion(motion, point) {
     try {
-      window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ motion }));
+      window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify({
+        motion,
+        sourceX: point && point.x,
+        sourceY: point && point.y,
+        createdAt: Date.now()
+      }));
     } catch (_error) {
       // Storage is a hint only; navigation should never depend on it.
     }
@@ -136,6 +148,7 @@
     root.style.setProperty("--page-source-x", String(Math.round(centerX)) + "px");
     root.style.setProperty("--page-source-y", String(Math.round(centerY)) + "px");
     root.setAttribute("data-page-source-motion", motion || "settle");
+    return { x: centerX, y: centerY };
   }
 
   function pageIsSameDocument(url) {
@@ -195,9 +208,9 @@
     const url = anchor.__renaissanceTransitionUrl;
     const motion = motionForUrl(url.href);
     leaving = true;
-    storeOutgoingMotion(motion);
     setMotion(motion);
-    markSourceAnchor(anchor, motion);
+    const sourcePoint = markSourceAnchor(anchor, motion);
+    storeOutgoingMotion(motion, sourcePoint);
     event.preventDefault();
 
     if (reducedMotion) {
