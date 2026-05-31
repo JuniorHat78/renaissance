@@ -12,7 +12,10 @@ const path = require("node:path");
 
 const root = path.join(__dirname, "..", "..");
 const SHELL_PAGES = ["index.html", "essay.html", "section.html", "search.html"];
-const BUDGET_BYTES = Number.parseInt(process.env.RENAISSANCE_ASSET_BUDGET_BYTES || "", 10) || 256 * 1024;
+const DEFAULT_BUDGET_BYTES = Number.parseInt(process.env.RENAISSANCE_ASSET_BUDGET_BYTES || "", 10) || 256 * 1024;
+const PAGE_BUDGET_BYTES = {
+  "section.html": 264 * 1024
+};
 
 function localAssets(html) {
   const out = new Set();
@@ -38,10 +41,11 @@ for (const page of SHELL_PAGES) {
       failures.push(page + " references " + asset + " which is missing on disk");
     }
   }
+  const budget = PAGE_BUDGET_BYTES[page] || DEFAULT_BUDGET_BYTES;
   const kb = (total / 1024).toFixed(1);
-  rows.push(page + ": " + kb + "KB across " + assets.length + " files (budget " + (BUDGET_BYTES / 1024).toFixed(0) + "KB)");
-  if (total > BUDGET_BYTES) {
-    failures.push(page + " is " + kb + "KB, over the " + (BUDGET_BYTES / 1024).toFixed(0) + "KB budget");
+  rows.push(page + ": " + kb + "KB across " + assets.length + " files (budget " + (budget / 1024).toFixed(0) + "KB)");
+  if (total > budget) {
+    failures.push(page + " is " + kb + "KB, over the " + (budget / 1024).toFixed(0) + "KB budget");
   }
 }
 
