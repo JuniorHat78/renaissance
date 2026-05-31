@@ -2,7 +2,9 @@
 
 Renaissance controls should feel like they belong to a quiet archive: labels,
 index slips, bookmarks, and ledger lines. The interface should not feel like a
-generic web app laid on top of prose.
+generic web app laid on top of prose. The broader experience philosophy lives in
+`docs/EXPERIENCE.md`; this file is the reusable control and interaction
+contract.
 
 ## Principles
 
@@ -30,7 +32,7 @@ generic web app laid on top of prose.
 - **Copy chip/toast**: small archival slips; useful, not decorative.
 - **Recovery actions**: use the same buttons as the rest of the site so error
   states feel like part of the archive. Browser-level 404 behavior is specified
-  in `docs/404-MAGIC-SPEC.md`.
+  in `docs/specs/404-MAGIC-SPEC.md`.
 
 ## Token Scale
 

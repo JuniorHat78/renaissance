@@ -2,7 +2,9 @@
 
 Renaissance is a static, frameworkless reading site built with plain HTML, CSS,
 and browser-side JavaScript. The runtime site has no bundler or framework build
-step.
+step. The experience posture is documented in `docs/EXPERIENCE.md`: zero
+runtime dependencies are a control strategy for durability, predictable loading,
+and precise interaction work rather than a rule against development tooling.
 
 ## Runtime Pages
 
@@ -26,6 +28,11 @@ step.
 The browser loader in `scripts/content.js` reads the registry and raw section
 files when served over HTTP.
 
+`published: false` marks an essay as unlisted, not private. Unlisted essays are
+omitted from public archive listings, search, feeds, sitemap, and recovery
+suggestions, but direct URLs and generated/offline assets may still expose the
+content.
+
 ## AST Content Pipeline
 
 Essay prose is parsed through the runtime AST module in `scripts/ast/index.js`.
@@ -39,7 +46,8 @@ The AST pipeline is intentionally small and safe:
   `test-fixtures/ast/`.
 
 The current grammar is a tiny literary document language, not full Markdown.
-Future syntax ideas are tracked in `docs/IDEAS.md`.
+The dialect contract lives in `docs/specs/AST-DIALECT.md`; future syntax ideas
+are tracked in `docs/IDEAS.md`.
 
 ## Embedded And Offline Data
 
@@ -112,7 +120,7 @@ Search surfaces:
 Fuzzy search work is bounded and cached for the current corpus size. The search
 regression prints index build timing so growth is visible in CI logs. Larger
 archive plans, such as generated search data or Web Worker query execution, live
-in `docs/IDEAS.md` and `docs/SEARCH-RANKING-SPEC.md`.
+in `docs/IDEAS.md` and `docs/specs/SEARCH-RANKING-SPEC.md`.
 
 ## Reading State
 
