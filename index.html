@@ -32,7 +32,8 @@
         document.documentElement.setAttribute("data-theme", "light");
       }
       try {
-        if (!window.matchMedia || !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        var hasPendingTransition = Boolean(sessionStorage.getItem("renaissance:page-transition"));
+        if (hasPendingTransition && (!window.matchMedia || !window.matchMedia("(prefers-reduced-motion: reduce)").matches)) {
           document.documentElement.classList.add("page-transition-prep");
         }
       } catch (error) {

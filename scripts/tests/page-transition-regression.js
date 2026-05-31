@@ -48,14 +48,19 @@ async function assertPageVisible(page, label) {
 
 async function clickInternal(page, selector, expectedPath, expectedMotion) {
   await page.waitForSelector(selector, { timeout: 30000 });
-  await page.evaluate((targetSelector) => {
+  const clickState = await page.evaluate((targetSelector) => {
     document.querySelector(targetSelector).click();
+    return {
+      out: document.documentElement.classList.contains("page-transition-out"),
+      source: Boolean(document.querySelector(".is-page-transition-source")),
+      delay: window.RenaissancePageTransition && window.RenaissancePageTransition.outDelayMs,
+      revealMode: window.RenaissancePageTransition && window.RenaissancePageTransition.revealMode
+    };
   }, selector);
-
-  await page.waitForFunction(() => {
-    const source = document.querySelector(".is-page-transition-source");
-    return document.documentElement.classList.contains("page-transition-out") && Boolean(source);
-  }, null, { timeout: 5000 });
+  assert.equal(clickState.out, true, "click should mark the current page as outgoing immediately");
+  assert.equal(clickState.source, true, "click should mark the source link immediately");
+  assert.ok(clickState.delay <= 75, "outgoing delay should stay below the tap-latency threshold");
+  assert.equal(clickState.revealMode, "immediate", "destination reveal should not be gated on async content");
 
   await page.waitForURL((url) => url.pathname.endsWith(expectedPath), {
     waitUntil: "domcontentloaded",
@@ -93,7 +98,8 @@ async function main() {
 
     await page.goto(options.base + "/index.html", { waitUntil: "domcontentloaded", timeout: 30000 });
     await waitForReady(page);
-    await assertPageVisible(page, "archive");
+    const directState = await assertPageVisible(page, "archive");
+    assert.equal(directState.motion, "settle", "direct loads should not fake an internal movement");
 
     await clickInternal(page, '#essay-list a[href*="essay.html"]', "/essay.html", "forward");
     await clickInternal(page, '#section-list a[href*="section.html"]', "/section.html", "forward");

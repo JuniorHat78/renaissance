@@ -1,13 +1,14 @@
 (function () {
   const STORAGE_KEY = "renaissance:page-transition";
-  const OUT_DURATION_MS = 210;
-  const READY_FALLBACK_MS = 1800;
+  const OUT_DURATION_MS = 45;
+  const CONTENT_READY_FALLBACK_MS = 1200;
   const SECTION_READER_NAV = "#prev-link, #next-link, #next-cta";
 
   const root = document.documentElement;
   const prefetched = new Set();
   let leaving = false;
   let ready = false;
+  let hasIncomingMotion = false;
   let sourceAnchor = null;
 
   function prefersReducedMotion() {
@@ -72,6 +73,7 @@
       if (stored) {
         const parsed = JSON.parse(stored);
         if (parsed && typeof parsed.motion === "string") {
+          hasIncomingMotion = true;
           motion = parsed.motion;
         }
       }
@@ -109,6 +111,10 @@
     root.classList.remove("page-transition-prep", "page-transition-out");
     root.classList.add("page-transition-ready");
     root.removeAttribute("aria-busy");
+  }
+
+  function markContentReady() {
+    root.classList.add("page-transition-content-ready");
   }
 
   function clearSourceAnchor() {
@@ -204,7 +210,7 @@
     root.setAttribute("aria-busy", "true");
 
     window.setTimeout(() => {
-      window.location.href = url.href;
+      window.location.assign(url.href);
     }, OUT_DURATION_MS);
   }
 
@@ -250,14 +256,19 @@
     });
   }
 
-  setMotion(readIncomingMotion());
+  const incomingMotion = readIncomingMotion();
+  setMotion(incomingMotion);
+  if (hasIncomingMotion) {
+    root.setAttribute("data-page-arrival", "navigation");
+  }
 
   if (reducedMotion) {
     revealPage();
+    markContentReady();
   } else {
-    root.setAttribute("aria-busy", "true");
-    window.addEventListener("renaissance:page-ready", revealPage);
-    window.setTimeout(revealPage, READY_FALLBACK_MS);
+    revealPage();
+    window.addEventListener("renaissance:page-ready", markContentReady);
+    window.setTimeout(markContentReady, CONTENT_READY_FALLBACK_MS);
   }
 
   window.addEventListener("pageshow", (event) => {
@@ -274,6 +285,8 @@
   bindPrefetch();
 
   window.RenaissancePageTransition = {
+    outDelayMs: OUT_DURATION_MS,
+    revealMode: "immediate",
     ready: revealPage
   };
 })();
