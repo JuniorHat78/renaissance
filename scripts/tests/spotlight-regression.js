@@ -54,9 +54,15 @@ async function openSpotlight(page) {
 
 async function setSpotlightQuery(page, query) {
   await page.fill("#spotlight-input", query);
-  await page.waitForFunction(() => {
-    return document.querySelectorAll(".spotlight-result").length > 0;
-  }, null, { timeout: 30000 });
+  await page.waitForFunction((expectedQuery) => {
+    const root = document.querySelector(".spotlight-root");
+    const input = document.getElementById("spotlight-input");
+    return root &&
+      input &&
+      input.value.trim().toLowerCase() === String(expectedQuery).trim().toLowerCase() &&
+      root.dataset.hasQuery === "true" &&
+      document.querySelectorAll(".spotlight-result").length > 0;
+  }, query, { timeout: 30000 });
 }
 
 async function screenshot(page, outputDir, name) {
@@ -151,7 +157,10 @@ async function main() {
     assert.match(reverseCycled.focusedClass, /spotlight-result/, "shift-tab should cycle to active result");
 
     await page.keyboard.press("Escape");
-    await page.waitForSelector(".spotlight-root[hidden]", { timeout: 30000 });
+    await page.waitForFunction(() => {
+      const root = document.querySelector(".spotlight-root");
+      return root && root.hidden;
+    }, null, { timeout: 30000 });
     const restored = await page.evaluate(() => document.activeElement && document.activeElement.id);
     assert.equal(restored, "theme-toggle", "escape should restore focus");
     await context.close();
