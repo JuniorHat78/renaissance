@@ -17,6 +17,12 @@ http://localhost:8000/index.html
 
 ## Fast Local Confidence
 
+When local disk or CPU is tight, prefer the manual GitHub Actions workflow in
+the next section over running browser-heavy suites locally. Local checks are
+still useful for focused edits, but remote runners are the normal place for
+large TDD loops, Playwright installs, visual capture, Lighthouse, and dependency
+PR validation.
+
 Run this before most commits:
 
 ```powershell
@@ -75,6 +81,45 @@ Focused browser checks are available through package scripts, including:
 - `npm run test:keyboard`
 - `npm run test:slow-network`
 - `npm run test:sw-update`
+
+## Remote One-Off Checks
+
+Use GitHub-hosted runners for expensive or repeatable validation, especially
+when the local machine is low on disk space. The `Manual Checks` workflow is
+read-only (`contents: read`), accepts only whitelisted suite names, does not run
+arbitrary shell input, and does not push generated files.
+
+GitHub exposes manual workflow dispatch after the workflow file exists on the
+default branch. Once this workflow has landed on `main`, it can run against a
+selected branch/ref.
+
+From the GitHub UI, open **Actions -> Manual Checks -> Run workflow**, choose a
+branch/ref, then choose a suite.
+
+From `gh`:
+
+```powershell
+gh workflow run manual-checks.yml --ref <branch-name> -f suite=standalone
+```
+
+Available suites:
+
+- `check`: syntax, AST, content, and generated-artifact freshness checks.
+- `html`: focused `html-validate` run; use this first for `html-validate`
+  Dependabot PRs.
+- `standalone`: full non-browser gate, equivalent to `npm run ci:standalone`.
+- `browser`: Chromium route, reader, transition, subpath, and not-found checks.
+- `pwa`: offline reading and service-worker update checks.
+- `a11y`: accessibility, focus, and keyboard checks.
+- `devices`: device matrix and slow-network checks.
+- `visual`: visual QA capture/diff with artifacts.
+- `lighthouse`: Lighthouse warning workflow with artifacts.
+- `full-chromium`: standalone plus the Chromium-heavy suites.
+
+For agentic/TDD work, prefer small branch commits, trigger the narrowest remote
+suite that proves the change, inspect the Actions logs, then iterate. Keep
+secrets, deploys, Pages publishing, and write permissions out of manual check
+workflows unless a future task explicitly needs them.
 
 ## Reader-State Debugging
 
@@ -157,6 +202,7 @@ Push and pull request CI runs the full project gate:
 
 Additional workflows:
 
+- `Manual Checks`: one-off read-only validation on a selected branch/ref.
 - `A11y Ablation Matrix`: theme x motion x viewport x forced-colors matrix.
 - `CodeQL`: JavaScript security and quality analysis.
 - `Post-Deploy Live Smoke`: exercises the real GitHub Pages deployment after

@@ -1,0 +1,140 @@
+name: Manual Checks
+
+on:
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: "Whitelisted check suite to run on the selected ref."
+        required: true
+        default: standalone
+        type: choice
+        options:
+          - check
+          - html
+          - standalone
+          - browser
+          - pwa
+          - a11y
+          - devices
+          - visual
+          - lighthouse
+          - full-chromium
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.suite }}
+  cancel-in-progress: true
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22.17.0
+          cache: npm
+
+      - name: Install Node Dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        if: >-
+          ${{ inputs.suite == 'browser' ||
+              inputs.suite == 'pwa' ||
+              inputs.suite == 'a11y' ||
+              inputs.suite == 'devices' ||
+              inputs.suite == 'visual' ||
+              inputs.suite == 'lighthouse' ||
+              inputs.suite == 'full-chromium' }}
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Selected Suite
+        shell: bash
+        run: |
+          case "${{ inputs.suite }}" in
+            check)
+              npm run check
+              ;;
+            html)
+              npm run test:html
+              ;;
+            standalone)
+              npm run ci:standalone
+              ;;
+            browser)
+              npm run ci:regression
+              npm run ci:page-transitions
+              npm run ci:subpath
+              npm run ci:notfound
+              ;;
+            pwa)
+              npm run ci:offline
+              npm run ci:sw-update
+              ;;
+            a11y)
+              npm run ci:a11y
+              npm run ci:focus
+              npm run ci:keyboard
+              ;;
+            devices)
+              npm run ci:devices
+              npm run ci:slow-network
+              ;;
+            visual)
+              npm run ci:visual
+              ;;
+            lighthouse)
+              npm run ci:lighthouse
+              ;;
+            full-chromium)
+              npm run ci:standalone
+              npm run ci:regression
+              npm run ci:page-transitions
+              npm run ci:subpath
+              npm run ci:notfound
+              npm run ci:a11y
+              npm run ci:offline
+              npm run ci:focus
+              npm run ci:devices
+              npm run ci:keyboard
+              npm run ci:slow-network
+              npm run ci:sw-update
+              npm run ci:visual
+              npm run ci:lighthouse
+              ;;
+            *)
+              echo "Unknown suite: ${{ inputs.suite }}" >&2
+              exit 64
+              ;;
+          esac
+
+      - name: Upload Visual QA Artifacts
+        if: ${{ always() && (inputs.suite == 'visual' || inputs.suite == 'full-chromium') }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: manual-visual-qa-${{ inputs.suite }}
+          if-no-files-found: warn
+          path: |
+            qa/visual/current/**
+            qa/visual/diff/**
+            qa/visual/report.json
+            qa/visual/report.md
+
+      - name: Upload Lighthouse Artifacts
+        if: ${{ always() && (inputs.suite == 'lighthouse' || inputs.suite == 'full-chromium') }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: manual-lighthouse-${{ inputs.suite }}
+          if-no-files-found: warn
+          include-hidden-files: true
+          path: .lighthouseci/**
