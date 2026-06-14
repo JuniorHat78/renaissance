@@ -13,6 +13,7 @@ on:
           - html
           - standalone
           - transition-evidence
+          - spotlight
           - browser
           - pwa
           - a11y
@@ -52,6 +53,7 @@ jobs:
         if: >-
           ${{ inputs.suite == 'browser' ||
               inputs.suite == 'transition-evidence' ||
+              inputs.suite == 'spotlight' ||
               inputs.suite == 'pwa' ||
               inputs.suite == 'a11y' ||
               inputs.suite == 'devices' ||
@@ -75,6 +77,9 @@ jobs:
               ;;
             transition-evidence)
               npm run ci:transition-evidence
+              ;;
+            spotlight)
+              npm run ci:spotlight
               ;;
             browser)
               npm run ci:regression
@@ -104,6 +109,7 @@ jobs:
             full-chromium)
               npm run ci:standalone
               npm run ci:transition-evidence
+              npm run ci:spotlight
               npm run ci:regression
               npm run ci:page-transitions
               npm run ci:subpath
@@ -143,6 +149,14 @@ jobs:
           name: manual-transition-evidence-${{ inputs.suite }}
           if-no-files-found: warn
           path: qa/transition-evidence/**
+
+      - name: Upload Spotlight Artifacts
+        if: ${{ always() && (inputs.suite == 'spotlight' || inputs.suite == 'full-chromium') }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: manual-spotlight-${{ inputs.suite }}
+          if-no-files-found: warn
+          path: qa/spotlight/**
 
       - name: Upload Lighthouse Artifacts
         if: ${{ always() && (inputs.suite == 'lighthouse' || inputs.suite == 'full-chromium') }}

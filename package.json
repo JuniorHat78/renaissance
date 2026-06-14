@@ -80,6 +80,8 @@
     "test:page-transitions": "node scripts/ci/run-with-server.js --port 4186 -- node scripts/tests/page-transition-regression.js --base http://127.0.0.1:4186",
     "ci:transition-evidence": "node scripts/ci/run-with-server.js --port 4187 -- node scripts/tests/transition-evidence-regression.js --base http://127.0.0.1:4187",
     "test:transition-evidence": "node scripts/ci/run-with-server.js --port 4187 -- node scripts/tests/transition-evidence-regression.js --base http://127.0.0.1:4187",
+    "ci:spotlight": "node scripts/ci/run-with-server.js --port 4188 -- node scripts/tests/spotlight-regression.js --base http://127.0.0.1:4188",
+    "test:spotlight": "node scripts/ci/run-with-server.js --port 4188 -- node scripts/tests/spotlight-regression.js --base http://127.0.0.1:4188",
     "icons:generate": "node scripts/pwa/generate-icons.js",
     "og:generate": "node scripts/og/generate-cards.js",
     "visual:capture": "node scripts/visual/capture.js",

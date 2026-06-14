@@ -1102,6 +1102,129 @@ select::-ms-expand {
   font-size: 1.04rem;
 }
 
+.spotlight-is-open body {
+  overflow: hidden;
+}
+
+.spotlight-root {
+  position: fixed;
+  inset: 0;
+  z-index: 500;
+  display: grid;
+  align-items: start;
+  justify-items: center;
+  padding: clamp(4.4rem, 10vh, 7rem) 1rem 1.4rem;
+}
+
+.spotlight-backdrop {
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--canvas) 64%, rgba(24, 14, 8, 0.36));
+}
+
+.spotlight-panel {
+  position: relative;
+  z-index: 1;
+  width: min(42rem, 100%);
+  max-height: min(42rem, calc(100vh - 6rem));
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--line) 78%, var(--accent) 22%);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--paper) 98%, transparent);
+  box-shadow: 0 2px 8px rgba(24, 14, 8, 0.18);
+  animation: spotlight-panel-in 150ms cubic-bezier(0.2, 0.82, 0.28, 1) both;
+}
+
+.spotlight-form {
+  border-bottom: 1px solid var(--line);
+}
+
+.spotlight-input {
+  width: 100%;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  caret-color: var(--accent);
+  font-family: var(--font-title);
+  font-size: 1.35rem;
+  line-height: 1.2;
+  padding: 0.78rem 0.92rem;
+}
+
+.spotlight-input:focus {
+  outline: none;
+}
+
+.spotlight-results {
+  display: grid;
+  max-height: min(32rem, calc(100vh - 11rem));
+  overflow: auto;
+  padding: 0.36rem;
+}
+
+.spotlight-result {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.8rem;
+  align-items: center;
+  border-radius: 6px;
+  color: inherit;
+  padding: 0.58rem 0.62rem;
+  text-decoration: none;
+}
+
+.spotlight-result:hover,
+.spotlight-result.is-active {
+  background: var(--accent-wash);
+}
+
+.spotlight-result:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.spotlight-result-main {
+  min-width: 0;
+  display: grid;
+  gap: 0.08rem;
+}
+
+.spotlight-result-title {
+  overflow: hidden;
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 0.86rem;
+  letter-spacing: 0;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.spotlight-result-detail {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.38;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.spotlight-result-kind {
+  color: var(--muted);
+  font-family: var(--font-ui);
+  font-size: 0.66rem;
+  letter-spacing: 0;
+  justify-self: end;
+  white-space: nowrap;
+}
+
+.spotlight-empty {
+  margin: 0;
+  color: var(--muted);
+  padding: 0.72rem 0.66rem 0.86rem;
+}
+
 .chapters-panel {
   padding-top: 0.1rem;
 }
@@ -1867,6 +1990,17 @@ mark.reader-highlight-target.reader-highlight-arrival {
   color: inherit;
 }
 
+@keyframes spotlight-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(-0.18rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 @keyframes selection-chip-in {
   from {
     opacity: 0;
@@ -2181,6 +2315,34 @@ main[tabindex="-1"]:focus {
 
   .search-advanced-grid-wide {
     grid-template-columns: 1fr;
+  }
+
+  .spotlight-root {
+    padding: 3.2rem 0.75rem 1rem;
+  }
+
+  .spotlight-panel {
+    max-height: calc(100vh - 4.2rem);
+  }
+
+  .spotlight-input {
+    font-size: 1.12rem;
+    padding: 0.72rem 0.76rem;
+  }
+
+  .spotlight-results {
+    max-height: calc(100vh - 8.7rem);
+    padding: 0.28rem;
+  }
+
+  .spotlight-result {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.18rem;
+    padding: 0.62rem 0.54rem;
+  }
+
+  .spotlight-result-kind {
+    justify-self: start;
   }
 
   .essay-hero-head {

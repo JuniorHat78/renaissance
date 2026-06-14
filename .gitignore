@@ -32,6 +32,8 @@ qa/visual/current/
 qa/visual/diff/
 qa/visual/report.json
 qa/visual/report.md
+qa/spotlight/
+qa/transition-evidence/
 
 node_modules/
 tmp/

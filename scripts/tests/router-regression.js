@@ -283,8 +283,8 @@ async function main() {
     assert.match(cleaned, /case=1/, "valid case flag preserved");
   }, failures);
 
-  await runCase("self-heal preserves unknown extras (hl, p, r)", browser, options, async (page) => {
-    await page.goto(new URL("/section.html?essay=etching-god-into-sand&section=1&hl=first&p=3", options.base).toString(), {
+  await runCase("self-heal preserves unknown extras beside passage anchors", browser, options, async (page) => {
+    await page.goto(new URL("/section.html?essay=etching-god-into-sand&section=1&hl=first&mark=3&p=3&start=4&end=9", options.base).toString(), {
       waitUntil: "domcontentloaded",
       timeout: 30000
     });
@@ -295,7 +295,10 @@ async function main() {
     );
     const search = await page.evaluate(() => window.location.search);
     assert.match(search, /hl=first/, "unknown extra hl preserved");
-    assert.match(search, /p=3/, "unknown extra p preserved");
+    assert.match(search, /mark=3/, "unknown extra mark preserved");
+    assert.match(search, /p=p3/, "canonical passage id preserved");
+    assert.match(search, /start=4/, "range start preserved");
+    assert.match(search, /end=9/, "range end preserved");
   }, failures);
 
   await runCase("saveScroll() persists scrollY into history.state", browser, options, async (page) => {
