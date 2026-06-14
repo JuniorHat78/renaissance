@@ -64,12 +64,16 @@ Useful evidence records include:
 
 ### Current Sprint State
 
-- Status: planning and specification.
-- Current branch: TBD. This sprint should use a branch before implementation.
-- Implementation started: no.
-- Docs committed: no.
-- Next recommended action: commit the sprint docs on a sprint branch, then begin
-  Phase 0 baseline/evidence work.
+- Status: Phase 0 baseline/evidence started.
+- Current branch: `sprint/transition-spotlight-oracle`.
+- Implementation started: evidence/diagnostics only; no product behavior changes
+  yet.
+- Docs committed: yes, `b187651 docs: define transition spotlight sprint`.
+- Branch pushed: yes, tracking `origin/sprint/transition-spotlight-oracle`.
+- Latest remote run: Manual Checks `check`, run `27505347555`, in progress at
+  Phase 0 start.
+- Next recommended action: map current transition, router, reader, search, PWA,
+  and test surfaces before changing behavior.
 
 ### Active Phase Journal
 
@@ -77,13 +81,14 @@ Use this section during implementation. Move completed phase notes into
 `Live Findings` when the phase closes.
 
 ```text
-Phase:
-Started:
-Goal:
-Current focus:
-Latest run/artifact:
-Blockers:
-Next action:
+Phase: 0 - Baseline And Evidence
+Started: 2026-06-15
+Goal: understand current transition/search/reader behavior before changes.
+Current focus: map transition classes, timing, route paths, and existing tests.
+Latest run/artifact: Manual Checks check run 27505347555 on sprint branch.
+Blockers: none.
+Next action: inspect page-transition, router, section reader, search, PWA, and
+test surfaces; record findings before implementation.
 ```
 
 ### Run Log Template
@@ -1637,6 +1642,9 @@ Add dated notes here as the sprint proceeds.
 - Artifact review is mandatory where it teaches something: traces, screenshots,
   videos, ranking reports, anchor diagnostics, and generated artifact summaries.
 - Next implementation work should happen on a sprint branch.
+- Sprint branch `sprint/transition-spotlight-oracle` created, pushed, and set to
+  track `origin/sprint/transition-spotlight-oracle`.
+- Phase 0 baseline/evidence started. No product behavior changes yet.
 
 ## Run Log
 
@@ -1644,16 +1652,16 @@ Use the run log for meaningful CI/manual validation runs. Do not record every
 tiny local command.
 
 ```text
-Date:
-Run:
-Suite:
-Branch/ref:
-Commit:
-Result:
-Artifacts:
-Reviewed:
-Notes:
-Next:
+Date: 2026-06-15
+Run: 27505347555
+Suite: Manual Checks / check
+Branch/ref: sprint/transition-spotlight-oracle
+Commit: b187651
+Result: in progress at Phase 0 start
+Artifacts: none expected
+Reviewed: pending run completion
+Notes: branch publication and lightweight remote validation for docs contract
+Next: inspect result after baseline mapping begins
 ```
 
 ## Artifact Review Log
