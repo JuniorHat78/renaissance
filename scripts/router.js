@@ -14,6 +14,9 @@
   const NAV_PARAM_ORDER = [
     "essay",
     "section",
+    "p",
+    "start",
+    "end",
     "scope",
     "q",
     "occ",
@@ -58,6 +61,21 @@
   function parsePositiveInt(raw) {
     const parsed = Number.parseInt(raw, 10);
     return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }
+
+  function parseNonNegativeInt(raw) {
+    const parsed = Number.parseInt(raw, 10);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+  }
+
+  function parsePassageId(raw) {
+    const value = String(raw || "").trim().toLowerCase();
+    if (!value) {
+      return "";
+    }
+    const number = value.startsWith("p") ? value.slice(1) : value;
+    const parsed = Number.parseInt(number, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? "p" + String(parsed) : "";
   }
 
   function parseQuery(raw) {
@@ -125,6 +143,9 @@
       view: detectViewFromPath(pathname),
       essaySlug: parseSlug(searchParams.get("essay")),
       sectionNumber: parsePositiveInt(searchParams.get("section")),
+      passageId: parsePassageId(searchParams.get("p")),
+      rangeStart: parseNonNegativeInt(searchParams.get("start")),
+      rangeEnd: parseNonNegativeInt(searchParams.get("end")),
       scope: parseScope(searchParams.get("scope")),
       query: parseQuery(searchParams.get("q")),
       occurrence: parsePositiveInt(searchParams.get("occ")),
@@ -152,6 +173,9 @@
 
     const essaySlug = parseSlug(source.essaySlug);
     const sectionNumber = parsePositiveInt(source.sectionNumber);
+    const passageId = parsePassageId(source.passageId || source.passage);
+    const rangeStart = parseNonNegativeInt(source.rangeStart);
+    const rangeEnd = parseNonNegativeInt(source.rangeEnd);
     const scope = source.scope === undefined ? "all" : parseScope(source.scope);
     const query = parseQuery(source.query);
     const occurrence = parsePositiveInt(source.occurrence);
@@ -167,6 +191,13 @@
     }
     if (sectionNumber !== null) {
       accumulator.section = String(sectionNumber);
+    }
+    if (passageId) {
+      accumulator.p = passageId;
+    }
+    if (passageId && rangeStart !== null && rangeEnd !== null && rangeEnd > rangeStart) {
+      accumulator.start = String(rangeStart);
+      accumulator.end = String(rangeEnd);
     }
     if (scope && scope !== "all") {
       accumulator.scope = scope;
@@ -345,6 +376,9 @@
       const cleanedUrl = build(view, {
         essaySlug: params.get("essay"),
         sectionNumber: params.get("section"),
+        passageId: params.get("p"),
+        rangeStart: params.get("start"),
+        rangeEnd: params.get("end"),
         scope: params.get("scope"),
         query: params.get("q"),
         occurrence: params.get("occ"),

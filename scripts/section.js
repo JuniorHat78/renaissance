@@ -832,10 +832,15 @@
       return null;
     }
 
+    const parsePassageNumber = (part) => {
+      const normalized = String(part || "").trim().toLowerCase().replace(/^p/, "");
+      const parsed = Number.parseInt(normalized, 10);
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+    };
     const parts = value.split("-");
-    const start = Number.parseInt(parts[0], 10);
-    const end = parts.length > 1 ? Number.parseInt(parts[1], 10) : start;
-    if (!Number.isFinite(start) || !Number.isFinite(end) || start <= 0 || end <= 0) {
+    const start = parsePassageNumber(parts[0]);
+    const end = parts.length > 1 ? parsePassageNumber(parts[1]) : start;
+    if (start === null || end === null) {
       return null;
     }
 
@@ -865,10 +870,27 @@
     return { start, end };
   }
 
+  function queryPassageRangeOffsets() {
+    const params = queryParams();
+    if (!params.has("start") || !params.has("end")) {
+      return null;
+    }
+
+    const start = Number.parseInt(params.get("start"), 10);
+    const end = Number.parseInt(params.get("end"), 10);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end <= start) {
+      return null;
+    }
+
+    return { start, end };
+  }
+
   function hasReaderAnchorIntent() {
     const params = queryParams();
     return (
       params.has("p") ||
+      params.has("start") ||
+      params.has("end") ||
       params.has("r") ||
       params.has("hl") ||
       params.has("occ") ||
@@ -1048,6 +1070,19 @@
       return null;
     }
     return sectionContent.querySelector('p[data-paragraph-index="' + String(safeIndex) + '"]');
+  }
+
+  function passageElementByIndex(index) {
+    const safeIndex = Number.parseInt(index, 10);
+    if (!Number.isFinite(safeIndex) || safeIndex <= 0) {
+      return null;
+    }
+    const passageId = "p" + String(safeIndex);
+    return sectionContent.querySelector(
+      '[data-passage-index="' + String(safeIndex) + '"], ' +
+      '[data-passage-id="' + passageId + '"], ' +
+      'p[data-paragraph-index="' + String(safeIndex) + '"]'
+    );
   }
 
   function paragraphSignatureFromElement(paragraph) {
@@ -1543,6 +1578,12 @@
     const paragraphs = sectionContent.querySelectorAll("p");
     paragraphs.forEach((paragraph, index) => {
       paragraph.dataset.paragraphIndex = String(index + 1);
+      if (!paragraph.dataset.passageIndex) {
+        paragraph.dataset.passageIndex = String(index + 1);
+      }
+      if (!paragraph.dataset.passageId) {
+        paragraph.dataset.passageId = "p" + String(index + 1);
+      }
     });
   }
 
@@ -1623,12 +1664,12 @@
     return mark;
   }
 
-  function wrapAbsoluteRange(start, length) {
+  function wrapTextRange(root, start, length) {
     if (!Number.isFinite(start) || !Number.isFinite(length) || length <= 0) {
       return null;
     }
 
-    const index = buildNodeSpans(sectionContent);
+    const index = buildNodeSpans(root || sectionContent);
     const end = start + length;
     const startPos = locateStartOffset(index.spans, start);
     const endPos = locateEndOffset(index.spans, end);
@@ -1654,6 +1695,10 @@
       const safeLength = Math.max(1, (startPos.node.nodeValue || "").length - startPos.offset);
       return splitAndWrapTextNode(startPos.node, startPos.offset, safeLength);
     }
+  }
+
+  function wrapAbsoluteRange(start, length) {
+    return wrapTextRange(sectionContent, start, length);
   }
 
   // Bring an element to rest on the same sightline the reader resumes at
@@ -1953,15 +1998,30 @@
       return false;
     }
 
-    const startParagraph = sectionContent.querySelector('p[data-paragraph-index="' + String(anchor.start) + '"]');
-    const endParagraph = sectionContent.querySelector('p[data-paragraph-index="' + String(anchor.end) + '"]');
-    if (!startParagraph || !endParagraph) {
+    const startPassage = passageElementByIndex(anchor.start);
+    const endPassage = passageElementByIndex(anchor.end);
+    if (!startPassage || !endPassage) {
       return false;
     }
 
-    const start = absoluteOffsetFromDomPoint(startParagraph, 0);
-    const end = absoluteOffsetFromDomPoint(endParagraph, endParagraph.childNodes.length);
+    const start = absoluteOffsetFromDomPoint(startPassage, 0);
+    const end = absoluteOffsetFromDomPoint(endPassage, endPassage.childNodes.length);
     return highlightAbsoluteRange(start, end);
+  }
+
+  function highlightPassageRangeAnchor(anchor, rangeOffsets) {
+    if (!anchor || !rangeOffsets || anchor.start !== anchor.end) {
+      return false;
+    }
+
+    const passage = passageElementByIndex(anchor.start);
+    if (!passage) {
+      return false;
+    }
+
+    const mark = wrapTextRange(passage, rangeOffsets.start, rangeOffsets.end - rangeOffsets.start);
+    focusHighlight(mark);
+    return Boolean(mark);
   }
 
   function resolveInitialAnchor() {
@@ -1970,12 +2030,18 @@
     clearHighlightCapNote();
 
     const paragraphAnchor = queryParagraphAnchor();
+    const passageRangeOffsets = queryPassageRangeOffsets();
     const rangeAnchor = queryRangeAnchor();
     const payload = queryHighlightPayload();
     const query = querySearchTerm();
     const occurrence = queryOccurrence();
     const mode = queryMatchMode();
     const caseSensitive = queryCaseSensitive();
+
+    if (paragraphAnchor && passageRangeOffsets && highlightPassageRangeAnchor(paragraphAnchor, passageRangeOffsets)) {
+      logHighlightPerf("resolve_anchor", startedAt, { strategy: "passage_range" });
+      return;
+    }
 
     if (paragraphAnchor && highlightParagraphAnchor(paragraphAnchor)) {
       logHighlightPerf("resolve_anchor", startedAt, { strategy: "paragraph" });

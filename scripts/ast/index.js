@@ -677,18 +677,76 @@
       container.removeChild(container.firstChild);
     }
 
+    const context = createPassageContext();
     getBlockChildren(ast).forEach(function renderBlockNode(block) {
-      container.appendChild(createBlockElement(container.ownerDocument, block));
+      container.appendChild(createBlockElement(container.ownerDocument, block, context));
     });
 
     return container;
   }
 
-  function createBlockElement(documentRef, block) {
+  function createPassageContext() {
+    return { passageIndex: 0 };
+  }
+
+  function isPassageBlock(block) {
+    return block &&
+      (
+        block.type === BLOCK_TYPES.HEADING ||
+        block.type === BLOCK_TYPES.PARAGRAPH ||
+        block.type === BLOCK_TYPES.PULL_QUOTE ||
+        block.type === BLOCK_TYPES.LIST_ITEM
+      );
+  }
+
+  function passageRecordForBlock(block, context) {
+    if (!isPassageBlock(block)) {
+      return null;
+    }
+
+    const text = blockToSearchableText(block);
+    if (!text) {
+      return null;
+    }
+
+    context.passageIndex += 1;
+    const position = block.position || {};
+    return {
+      passageId: "p" + String(context.passageIndex),
+      passageIndex: context.passageIndex,
+      blockType: block.type,
+      text,
+      sourceStart: Number.isFinite(Number(position.startOffset)) ? Number(position.startOffset) : null,
+      sourceEnd: Number.isFinite(Number(position.endOffset)) ? Number(position.endOffset) : null,
+      sourceLine: Number.isFinite(Number(position.line)) ? Number(position.line) : null,
+    };
+  }
+
+  function applyPassageAttributes(element, block, context) {
+    const record = passageRecordForBlock(block, context);
+    if (!record) {
+      return null;
+    }
+
+    setDomAttribute(element, "data-passage-id", record.passageId);
+    setDomAttribute(element, "data-passage-index", String(record.passageIndex));
+    setDomAttribute(element, "data-passage-type", record.blockType);
+    if (record.sourceStart !== null) {
+      setDomAttribute(element, "data-source-start", String(record.sourceStart));
+    }
+    if (record.sourceEnd !== null) {
+      setDomAttribute(element, "data-source-end", String(record.sourceEnd));
+    }
+    return record;
+  }
+
+  function createBlockElement(documentRef, block, context) {
+    const passageContext = context || createPassageContext();
     if (block.type === BLOCK_TYPES.HEADING) {
       const level = clampHeadingLevel(block.level);
       const element = documentRef.createElement("h" + level);
       appendInlineDom(documentRef, element, block.children || []);
+      applyPassageAttributes(element, block, passageContext);
       return element;
     }
 
@@ -696,19 +754,21 @@
       const element = documentRef.createElement("p");
       element.className = "pull-quote";
       appendInlineDom(documentRef, element, block.children || []);
+      applyPassageAttributes(element, block, passageContext);
       return element;
     }
 
     if (block.type === BLOCK_TYPES.PARAGRAPH) {
       const element = documentRef.createElement("p");
       appendInlineDom(documentRef, element, block.children || []);
+      applyPassageAttributes(element, block, passageContext);
       return element;
     }
 
     if (block.type === BLOCK_TYPES.BLOCK_QUOTE) {
       const element = documentRef.createElement("blockquote");
       (block.children || []).forEach(function appendQuoteBlock(child) {
-        element.appendChild(createBlockElement(documentRef, child));
+        element.appendChild(createBlockElement(documentRef, child, passageContext));
       });
       return element;
     }
@@ -716,7 +776,7 @@
     if (block.type === BLOCK_TYPES.LIST) {
       const element = documentRef.createElement(block.ordered ? "ol" : "ul");
       (block.children || []).forEach(function appendListItem(item) {
-        element.appendChild(createBlockElement(documentRef, item));
+        element.appendChild(createBlockElement(documentRef, item, passageContext));
       });
       return element;
     }
@@ -724,6 +784,7 @@
     if (block.type === BLOCK_TYPES.LIST_ITEM) {
       const element = documentRef.createElement("li");
       appendInlineDom(documentRef, element, block.children || []);
+      applyPassageAttributes(element, block, passageContext);
       return element;
     }
 
@@ -1121,6 +1182,36 @@
   function toSearchableText(input) {
     const ast = normalizeAstInput(input);
     return getBlockChildren(ast).map(blockToSearchableText).filter(Boolean).join(" ");
+  }
+
+  function passagesFromDocument(input) {
+    const ast = normalizeAstInput(input);
+    const context = createPassageContext();
+    const passages = [];
+
+    getBlockChildren(ast).forEach(function appendTopLevel(block) {
+      appendPassageRecords(block, context, passages);
+    });
+
+    return passages;
+  }
+
+  function appendPassageRecords(block, context, passages) {
+    if (!block) {
+      return;
+    }
+
+    if (block.type === BLOCK_TYPES.BLOCK_QUOTE || block.type === BLOCK_TYPES.LIST) {
+      (block.children || []).forEach(function appendChild(child) {
+        appendPassageRecords(child, context, passages);
+      });
+      return;
+    }
+
+    const record = passageRecordForBlock(block, context);
+    if (record) {
+      passages.push(record);
+    }
   }
 
   function blockToPlainText(block) {
@@ -1529,6 +1620,7 @@
     normalizeSource,
     parseDocument,
     parseInline,
+    passagesFromDocument,
     renderBlocks,
     renderDocument,
     serializeBlocks,

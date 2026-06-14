@@ -49,6 +49,21 @@
     return value === "1" || value === "true";
   }
 
+  function normalizePassageId(value) {
+    const raw = String(value || "").trim().toLowerCase();
+    if (!raw) {
+      return "";
+    }
+    const number = raw.startsWith("p") ? raw.slice(1) : raw;
+    const parsed = Number.parseInt(number, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? "p" + String(parsed) : "";
+  }
+
+  function normalizeRangeOffset(value) {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+  }
+
   function normalizeScope(value, allowedScopes) {
     if (!value || value === "all") {
       return "all";
@@ -429,6 +444,22 @@
 
   function searchSectionField(section, entry, query, options) {
     if (entry.field === "body") {
+      if (Array.isArray(section.passages) && section.passages.length > 0) {
+        return section.passages.flatMap((passage) =>
+          findOccurrencesInSection(passage, query, options).map((hit) => ({
+            ...hit,
+            field: "body",
+            passageId: passage.passageId,
+            passageIndex: passage.passageIndex,
+            blockType: passage.blockType,
+            passageStart: hit.index,
+            passageEnd: hit.index + hit.length,
+            snippet: makeSnippet(passage.text, hit.index, hit.length),
+            score: hit.score + FIELD_BOOSTS.body
+          }))
+        );
+      }
+
       return findOccurrencesInSection(section, query, options).map((hit) => ({
         ...hit,
         field: "body",
@@ -439,6 +470,9 @@
   }
 
   function snippetForHit(section, field, hit) {
+    if (hit && hit.snippet) {
+      return hit.snippet;
+    }
     if (field === "body") {
       return makeSnippet(section.text, hit.index, hit.length);
     }
@@ -459,11 +493,28 @@
     return index;
   }
 
+  function resultIndexForHit(hit) {
+    if (hit && hit.field === "body" && Number.isFinite(Number(hit.passageIndex))) {
+      return (Number(hit.passageIndex) * 100000) + hit.index;
+    }
+    return indexForHit(hit.field, hit.index);
+  }
+
   function buildSectionUrl(essaySlug, sectionNumber, query, options) {
     const settings = options || {};
     const params = new URLSearchParams();
     params.set("essay", essaySlug);
     params.set("section", String(sectionNumber));
+    const passageId = normalizePassageId(settings.passageId || settings.passage);
+    const rangeStart = normalizeRangeOffset(settings.rangeStart);
+    const rangeEnd = normalizeRangeOffset(settings.rangeEnd);
+    if (passageId) {
+      params.set("p", passageId);
+    }
+    if (passageId && rangeStart !== null && rangeEnd !== null && rangeEnd > rangeStart) {
+      params.set("start", String(rangeStart));
+      params.set("end", String(rangeEnd));
+    }
     if (query) {
       params.set("q", query);
     }
@@ -525,6 +576,23 @@
     let indexPromise = null;
     const resultCache = new Map();
 
+    function preparePassage(passage) {
+      const text = String((passage && passage.text) || "");
+      const tokens = tokenizeWordSpans(text);
+      return {
+        passageId: normalizePassageId(passage && passage.passageId),
+        passageIndex: Number.parseInt(passage && passage.passageIndex, 10) || null,
+        blockType: String((passage && passage.blockType) || ""),
+        sourceStart: Number.isFinite(Number(passage && passage.sourceStart)) ? Number(passage.sourceStart) : null,
+        sourceEnd: Number.isFinite(Number(passage && passage.sourceEnd)) ? Number(passage.sourceEnd) : null,
+        sourceLine: Number.isFinite(Number(passage && passage.sourceLine)) ? Number(passage.sourceLine) : null,
+        text,
+        lowerText: text.toLowerCase(),
+        tokens,
+        fuzzyBuckets: buildFuzzyBuckets(tokens)
+      };
+    }
+
     async function buildIndex() {
       const essays = (await contentApi.loadEssays()).filter((essay) => essay.published !== false);
       const sections = [];
@@ -538,6 +606,9 @@
           const display = contentApi.sectionDisplay(essay, section.sectionNumber);
           const text = section.searchableText || "";
           const tokens = tokenizeWordSpans(text);
+          const passages = Array.isArray(section.passages)
+            ? section.passages.map(preparePassage).filter((passage) => passage.passageId && passage.text)
+            : [];
 
           sections.push({
             essaySlug: essay.slug,
@@ -552,7 +623,8 @@
             text,
             lowerText: text.toLowerCase(),
             tokens,
-            fuzzyBuckets: buildFuzzyBuckets(tokens)
+            fuzzyBuckets: buildFuzzyBuckets(tokens),
+            passages
           });
         }
       }
@@ -671,8 +743,20 @@
             sectionTitle: section.sectionTitle,
             sectionSearchLabel: section.sectionSearchLabel,
             field: hit.field,
-            index: indexForHit(hit.field, hit.index),
+            index: resultIndexForHit(hit),
             length: hit.length,
+            passageId: hit.passageId || "",
+            passageIndex: hit.passageIndex || null,
+            blockType: hit.blockType || "",
+            rangeStart: Number.isFinite(hit.passageStart) ? hit.passageStart : null,
+            rangeEnd: Number.isFinite(hit.passageEnd) ? hit.passageEnd : null,
+            anchor: hit.passageId
+              ? {
+                  passageId: hit.passageId,
+                  rangeStart: hit.passageStart,
+                  rangeEnd: hit.passageEnd
+                }
+              : null,
             score: hit.score,
             occurrence,
             matchedText: hit.matchedText,

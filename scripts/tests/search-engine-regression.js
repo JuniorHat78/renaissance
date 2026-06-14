@@ -93,6 +93,32 @@ async function main() {
     assert.ok(section.fuzzyBuckets.size > 0, "fuzzy candidate buckets should not be empty");
   });
 
+  await check("body hits carry passage anchors and range offsets", async () => {
+    const engine = Search.createSearchEngine(passageContentApi());
+    const result = await engine.search({ query: "beta", mode: "contains" });
+    const bodyHit = result.hits.find((hit) => hit.field === "body");
+
+    assert.ok(bodyHit, "expected a body hit");
+    assert.equal(bodyHit.passageId, "p2");
+    assert.equal(bodyHit.passageIndex, 2);
+    assert.equal(bodyHit.rangeStart, 0);
+    assert.equal(bodyHit.rangeEnd, 4);
+    assert.deepEqual(bodyHit.anchor, {
+      passageId: "p2",
+      rangeStart: 0,
+      rangeEnd: 4
+    });
+    assert.equal(
+      Search.buildSectionUrl(bodyHit.essaySlug, bodyHit.sectionNumber, "beta", {
+        passageId: bodyHit.passageId,
+        rangeStart: bodyHit.rangeStart,
+        rangeEnd: bodyHit.rangeEnd,
+        occurrence: bodyHit.occurrence
+      }),
+      "section.html?essay=fixture&section=1&p=p2&start=0&end=4&q=beta&occ=1"
+    );
+  });
+
   await check("search index build timing is visible", async () => {
     const engine = Search.createSearchEngine(fakeContentApi());
     const started = performance.now();
@@ -164,6 +190,53 @@ function fakeContentApi() {
           {
             sectionNumber: 1,
             searchableText: "alpha beta gamma term39",
+          },
+        ],
+      };
+    },
+    sectionDisplay(_essay, sectionNumber) {
+      return {
+        label: "Section " + String(sectionNumber),
+        title: "Fixture Section",
+        searchLabel: "Section " + String(sectionNumber) + " | Fixture Section",
+      };
+    },
+  };
+}
+
+function passageContentApi() {
+  const essay = {
+    slug: "fixture",
+    title: "Fixture",
+    published: true,
+    section_order: [1],
+  };
+
+  return {
+    async loadEssays() {
+      return [essay];
+    },
+    async loadEssaySections() {
+      return {
+        essay,
+        sections: [
+          {
+            sectionNumber: 1,
+            searchableText: "alpha beta gamma",
+            passages: [
+              {
+                passageId: "p1",
+                passageIndex: 1,
+                blockType: "paragraph",
+                text: "alpha opens"
+              },
+              {
+                passageId: "p2",
+                passageIndex: 2,
+                blockType: "paragraph",
+                text: "beta lands here"
+              }
+            ],
           },
         ],
       };

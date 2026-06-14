@@ -511,6 +511,7 @@
     const blocks = AST.astToLegacyBlocks(ast);
     const contentBlocks = AST.astToLegacyBlocks(contentAst);
     const searchableText = AST.toSearchableText(contentAst);
+    const passages = AST.passagesFromDocument(contentAst);
     const firstParagraphText = AST.firstParagraphText(contentAst);
     const wordCount = AST.wordCount(searchableText);
     const readMinutes = estimateReadMinutes(wordCount);
@@ -524,6 +525,7 @@
       contentAst,
       blocks,
       contentBlocks,
+      passages,
       searchableText,
       firstParagraphText,
       wordCount,

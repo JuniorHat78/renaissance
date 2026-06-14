@@ -274,6 +274,9 @@
             const occurrenceLink = router.build("section", {
               essaySlug: hit.essaySlug,
               sectionNumber: hit.sectionNumber,
+              passageId: hit.passageId,
+              rangeStart: hit.rangeStart,
+              rangeEnd: hit.rangeEnd,
               query: state.query,
               occurrence: hit.occurrence,
               mode: state.mode,

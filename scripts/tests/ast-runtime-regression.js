@@ -140,6 +140,27 @@ check("DOM renderer builds nodes instead of assigning HTML strings", () => {
   assert.equal(flattenText(container), "A <tag> and emphasis.");
 });
 
+check("passage records and DOM attributes share stable IDs", () => {
+  const documentRef = createFakeDocument();
+  const container = documentRef.createElement("article");
+  const documentNode = Ast.parseDocument("First paragraph.\n\n- Listed thought\n\n> Quoted line.");
+
+  const passages = Ast.passagesFromDocument(documentNode);
+  Ast.renderBlocks(container, documentNode);
+
+  assert.deepEqual(
+    passages.map((passage) => [passage.passageId, passage.passageIndex, passage.blockType, passage.text]),
+    [
+      ["p1", 1, "paragraph", "First paragraph."],
+      ["p2", 2, "list_item", "Listed thought"],
+      ["p3", 3, "paragraph", "Quoted line."]
+    ]
+  );
+  assert.equal(container.children[0].attributes["data-passage-id"], "p1");
+  assert.equal(container.children[1].children[0].attributes["data-passage-id"], "p2");
+  assert.equal(container.children[2].children[0].attributes["data-passage-id"], "p3");
+});
+
 console.log("AST runtime regression checks passed.");
 
 function check(name, fn) {
@@ -172,7 +193,11 @@ function createFakeNode(tagName, documentRef) {
     tagName,
     children: [],
     className: "",
+    attributes: {},
     ownerDocument: documentRef,
+    setAttribute(name, value) {
+      this.attributes[name] = String(value);
+    },
     appendChild(child) {
       this.children.push(child);
       return child;

@@ -261,6 +261,46 @@ async function main() {
     assert.ok(snapshot.marks[0].length > 120, "Expected paragraph-level highlight, not single-term occurrence");
   }, failures);
 
+  await runCase("passage-local range anchor highlights an exact span", async () => {
+    const baseUrl = sectionUrl(options.base, {
+      essay: options.essay,
+      section: options.section
+    });
+    await openSection(page, baseUrl);
+
+    const target = await page.evaluate(() => {
+      const passage = document.querySelector('[data-passage-id="p2"]');
+      const text = String((passage && passage.textContent) || "");
+      if (!text || text.length < 12) {
+        return null;
+      }
+      return {
+        id: passage.getAttribute("data-passage-id"),
+        expected: text.slice(0, 18)
+      };
+    });
+    assert.ok(target, "Expected passage p2 to exist for range-anchor test");
+
+    const url = sectionUrl(options.base, {
+      essay: options.essay,
+      section: options.section,
+      p: target.id,
+      start: 0,
+      end: target.expected.length,
+      q: options.occurrenceQuery,
+      occ: 1
+    });
+    await openSection(page, url);
+    const snapshot = await getHighlightSnapshot(page);
+
+    assert.equal(snapshot.marks.length, 1, "Expected one mark for passage-local range");
+    assert.equal(
+      snapshot.marks[0].replace(/\s+/g, " ").trim(),
+      target.expected.replace(/\s+/g, " ").trim(),
+      "Expected p/start/end to beat q+occ and highlight the exact passage span"
+    );
+  }, failures);
+
   await runCase("range anchor has precedence over q+occ", async () => {
     const baseUrl = sectionUrl(options.base, {
       essay: options.essay,
