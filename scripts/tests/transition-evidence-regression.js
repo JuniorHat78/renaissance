@@ -139,6 +139,7 @@ async function visualState(page) {
       rootClasses: root.className,
       readerClasses: layout ? layout.className : "",
       busy: root.getAttribute("aria-busy"),
+      readerBusy: layout ? layout.getAttribute("aria-busy") : null,
       textLength: main ? String(main.textContent || "").trim().length : 0,
       markText: mark ? String(mark.textContent || "").replace(/\s+/g, " ").trim() : "",
       markTop: markRect ? markRect.top : null,
@@ -305,7 +306,7 @@ async function sectionTurn(page, scenarioDir, base) {
     return {
       beforeTitle: String(title && title.textContent || "").trim(),
       queued: Boolean(layout && layout.classList.contains("is-section-queued")),
-      busy: document.documentElement.getAttribute("aria-busy"),
+      busy: layout ? layout.getAttribute("aria-busy") : null,
       syncMs: performance.now() - started
     };
   });
@@ -338,7 +339,7 @@ async function sectionTurn(page, scenarioDir, base) {
   const state = await visualState(page);
   assertReadable(state, "section next arrival");
   assert.ok(!state.readerClasses.includes("is-section-turning"), "section turn class should clear");
-  assert.notEqual(state.busy, "true", "section turn should clear root busy state");
+  assert.notEqual(state.readerBusy, "true", "section turn should clear reader busy state");
   await page.screenshot({ path: afterPath, fullPage: true });
 
   return {

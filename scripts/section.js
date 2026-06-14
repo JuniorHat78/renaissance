@@ -51,8 +51,9 @@
   const RESTORE_SAVE_SUPPRESS_MS = 720;
   const BOOKMARK_AUTO_CLEAR_MS = 5600;
   const SECTION_NAV_SELECTOR = "#prev-link, #next-link, #next-cta";
-  const SECTION_TURN_OUT_MS = 130;
-  const SECTION_TURN_IN_MS = 260;
+  const SECTION_TURN_OUT_MS = 96;
+  const SECTION_TURN_IN_MS = 220;
+  const SECTION_PAYLOAD_CACHE_MAX = 10;
 
   let currentEssay = null;
   let currentSectionNumber = null;
@@ -86,7 +87,7 @@
   let pendingRouteScrollTop = false;
   let pendingRouteDirection = "next";
   let routeLoadToken = 0;
-  const prefetchedSections = new Set();
+  const prefetchedSections = new Map();
   const shouldLogHighlightPerf = (() => {
     const protocol = String(window.location.protocol || "").toLowerCase();
     if (protocol === "file:") {
@@ -397,20 +398,49 @@
     }
   }
 
-  function prefetchSectionFromLink(link) {
-    const route = routeFromLink(link);
-    if (!route || route.view !== "section" || !route.essaySlug || !route.sectionNumber) {
-      return;
+  function sectionPayloadKey(essaySlug, sectionNumber) {
+    return String(essaySlug) + ":" + String(sectionNumber);
+  }
+
+  function rememberSectionPayload(key, promise) {
+    if (prefetchedSections.has(key)) {
+      prefetchedSections.delete(key);
+    }
+    prefetchedSections.set(key, promise);
+    while (prefetchedSections.size > SECTION_PAYLOAD_CACHE_MAX) {
+      const oldest = prefetchedSections.keys().next().value;
+      prefetchedSections.delete(oldest);
+    }
+    return promise;
+  }
+
+  function loadSectionPayload(essaySlug, sectionNumber) {
+    const key = sectionPayloadKey(essaySlug, sectionNumber);
+    const cached = prefetchedSections.get(key);
+    if (cached) {
+      return cached;
     }
 
-    const key = route.essaySlug + ":" + String(route.sectionNumber);
-    if (prefetchedSections.has(key)) {
-      return;
-    }
-    prefetchedSections.add(key);
-    loadSection(route.essaySlug, route.sectionNumber).catch(() => {
-      prefetchedSections.delete(key);
+    const promise = loadSection(essaySlug, sectionNumber);
+    rememberSectionPayload(key, promise);
+    promise.catch(() => {
+      if (prefetchedSections.get(key) === promise) {
+        prefetchedSections.delete(key);
+      }
     });
+    return promise;
+  }
+
+  function prefetchSectionRoute(route) {
+    if (!route || route.view !== "section" || !route.essaySlug || !route.sectionNumber) {
+      return null;
+    }
+
+    return loadSectionPayload(route.essaySlug, route.sectionNumber).catch(() => null);
+  }
+
+  function prefetchSectionFromLink(link) {
+    return prefetchSectionRoute(routeFromLink(link));
   }
 
   function setFallbackVisible(isVisible) {
@@ -2426,6 +2456,7 @@
       }
 
       event.preventDefault();
+      prefetchSectionRoute(route);
       pendingRouteTransition = true;
       pendingRouteScrollTop = true;
       pendingRouteDirection = sectionDirection(route.sectionNumber);
@@ -2435,6 +2466,27 @@
         sectionNumber: route.sectionNumber
       });
     });
+
+    document.addEventListener("pointerdown", (event) => {
+      if (event.button !== undefined && event.button !== 0) {
+        return;
+      }
+      const link = event.target && event.target.closest
+        ? event.target.closest(SECTION_NAV_SELECTOR)
+        : null;
+      if (link && link.href) {
+        prefetchSectionFromLink(link);
+      }
+    }, { passive: true });
+
+    document.addEventListener("touchstart", (event) => {
+      const link = event.target && event.target.closest
+        ? event.target.closest(SECTION_NAV_SELECTOR)
+        : null;
+      if (link && link.href) {
+        prefetchSectionFromLink(link);
+      }
+    }, { passive: true });
 
     document.addEventListener("mouseover", (event) => {
       const link = event.target && event.target.closest
@@ -2517,7 +2569,7 @@
         return;
       }
 
-      const payload = await loadSection(essay.slug, sectionNumber);
+      const payload = await loadSectionPayload(essay.slug, sectionNumber);
       const display = sectionDisplay(essay, sectionNumber);
       const contentAst = payload.contentAst || payload.contentBlocks || payload.blocks;
       if (token !== routeLoadToken) {

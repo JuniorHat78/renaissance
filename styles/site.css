@@ -1279,12 +1279,12 @@ select::-ms-expand {
 }
 
 .reader-layout.is-section-turning .chapter-article {
-  opacity: 0.2;
-  transform: translateY(var(--section-turn-exit-y));
+  opacity: 0.66;
+  transform: translateY(calc(var(--section-turn-exit-y) * 0.62));
 }
 
 .reader-layout.is-section-entering .chapter-article {
-  opacity: 0;
+  opacity: 0.14;
   transform: translateY(var(--section-turn-enter-y));
   transition-duration: 0ms;
 }
