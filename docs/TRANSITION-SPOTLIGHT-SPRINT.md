@@ -64,16 +64,17 @@ Useful evidence records include:
 
 ### Current Sprint State
 
-- Status: Phase 0 baseline/evidence started.
+- Status: Phase 0 baseline/evidence in progress; first architecture pass
+  complete.
 - Current branch: `sprint/transition-spotlight-oracle`.
 - Implementation started: evidence/diagnostics only; no product behavior changes
   yet.
-- Docs committed: yes, `b187651 docs: define transition spotlight sprint`.
+- Docs committed: yes; see git log for the latest docs checkpoint.
 - Branch pushed: yes, tracking `origin/sprint/transition-spotlight-oracle`.
-- Latest remote run: Manual Checks `check`, run `27505347555`, in progress at
-  Phase 0 start.
-- Next recommended action: map current transition, router, reader, search, PWA,
-  and test surfaces before changing behavior.
+- Latest remote run: Manual Checks `check`, run `27505347555`, passed on
+  commit `b187651`.
+- Next recommended action: add evidence-producing transition/search/anchor
+  gauntlets before product behavior changes.
 
 ### Active Phase Journal
 
@@ -84,11 +85,13 @@ Use this section during implementation. Move completed phase notes into
 Phase: 0 - Baseline And Evidence
 Started: 2026-06-15
 Goal: understand current transition/search/reader behavior before changes.
-Current focus: map transition classes, timing, route paths, and existing tests.
-Latest run/artifact: Manual Checks check run 27505347555 on sprint branch.
+Current focus: convert baseline findings into targeted diagnostic tests and
+artifact-producing Actions suites.
+Latest run/artifact: Manual Checks check run 27505347555 passed on sprint
+branch.
 Blockers: none.
-Next action: inspect page-transition, router, section reader, search, PWA, and
-test surfaces; record findings before implementation.
+Next action: implement transition evidence harness, then begin hardening
+section-turn perceived latency and search-result arrival correctness.
 ```
 
 ### Run Log Template
@@ -1645,6 +1648,49 @@ Add dated notes here as the sprint proceeds.
 - Sprint branch `sprint/transition-spotlight-oracle` created, pushed, and set to
   track `origin/sprint/transition-spotlight-oracle`.
 - Phase 0 baseline/evidence started. No product behavior changes yet.
+- Manual Checks `check` run `27505347555` passed on the sprint branch at
+  commit `b187651`.
+- Subagents are unavailable in this session due account/usage limits. Continue
+  the sprint locally with remote Actions for independent compute signal.
+- Cross-page transitions currently use `scripts/page-transition.js` plus CSS
+  classes on `<html>`. They deliberately reveal destination pages immediately
+  (`revealMode: "immediate"`) and keep `OUT_DURATION_MS` at 16ms, so the core
+  page-to-page path is not intentionally blocking on async content.
+- Cross-page transition coverage currently asserts no stuck hidden state, no
+  delayed destination reveal, reduced-motion shell visibility, back navigation,
+  and source geometry preservation. It does not yet record frames, screenshots,
+  traces, mobile timing, slow-network timing, or search-result-to-highlight
+  arrival.
+- Reader section navigation is a separate in-page path in `scripts/section.js`.
+  It queues feedback immediately, but waits for `loadSection()` before the
+  visible turn starts. On a cold section load this can feel like lag even though
+  the click was accepted.
+- Reader section turns currently use a 130ms outgoing phase and 260ms incoming
+  phase. The new content is inserted between phases, starts at opacity 0 for an
+  entering frame, then animates back through the default article transition.
+  This is likely the first transition hardening target.
+- Section prefetch happens on hover/focus only. Touch/pointerdown does not
+  currently prefetch before activation, so mobile next/previous section taps can
+  miss the warm-cache path.
+- Search is currently runtime/client-side and section-text based. It scans essay
+  title, section title, section label, and body fields; occurrence numbers are
+  assigned in field-scan order per section. Body highlight resolution later
+  searches rendered section text again. That can become ambiguous when title or
+  label hits share the same occurrence counter as body hits.
+- The AST parser already preserves source positions and the content loader
+  already has `contentAst`, but rendering strips AST identity into legacy DOM
+  nodes. The sprint should carry passage IDs/signatures from AST into rendered
+  DOM and generated search records instead of bolting anchors on after render.
+- The reader already supports `p`, `r`, copied highlight payload, `q/occ`, and
+  query-only anchor strategies, with precedence in that order. New search and
+  Spotlight links should prefer structural/range anchors and keep `q/occ` only
+  as fallback/recovery.
+- Existing slow-network coverage only proves archive and essay page rendering
+  under Slow-3G. It does not exercise section next/previous, search index warmup,
+  Spotlight open, or search-result arrival under network throttling.
+- Existing device coverage checks archive, essay, section, and search rendering
+  across several descriptors. It does not verify Spotlight, transition frame
+  continuity, or destination highlight geometry on mobile.
 
 ## Run Log
 
@@ -1657,11 +1703,11 @@ Run: 27505347555
 Suite: Manual Checks / check
 Branch/ref: sprint/transition-spotlight-oracle
 Commit: b187651
-Result: in progress at Phase 0 start
+Result: passed
 Artifacts: none expected
-Reviewed: pending run completion
+Reviewed: run summary and job step conclusions via gh CLI
 Notes: branch publication and lightweight remote validation for docs contract
-Next: inspect result after baseline mapping begins
+Next: add diagnostic/evidence tests and trigger targeted browser/device suites
 ```
 
 ## Artifact Review Log
@@ -1683,6 +1729,33 @@ Follow-up:
 ## Decision Log
 
 Use this for decisions that affect implementation direction.
+
+```text
+Date: 2026-06-15
+Decision: Continue without subagents in this sprint session.
+Context: Attempted exploratory subagents failed due account/usage limits before
+doing useful work.
+Chosen path: main Codex agent keeps the sprint moving locally, with GitHub
+Actions providing remote compute, artifact capture, and independent reruns.
+Rejected alternatives: wait for subagent quota; narrow sprint scope.
+Tradeoffs: less parallel code review, but no blocker to implementation.
+Follow-up: use Actions artifacts and run logs as the main external evidence.
+```
+
+```text
+Date: 2026-06-15
+Decision: First implementation checkpoint should be evidence harnesses, not
+motion polish.
+Context: Current tests prove pages are not hidden, but do not capture frame
+continuity, slow-network section transitions, or search result arrival quality.
+Chosen path: add targeted transition/search/anchor diagnostics before tuning
+CSS/JS timings.
+Rejected alternatives: edit transition durations by feel first.
+Tradeoffs: slightly slower start, much better feedback loop for the user's
+"200ms lag kills the magic" bar.
+Follow-up: add remote artifact upload for screenshots/videos/traces once the
+harness exists.
+```
 
 ```text
 Date:
