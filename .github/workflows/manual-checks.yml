@@ -12,6 +12,7 @@ on:
           - check
           - html
           - standalone
+          - transition-evidence
           - browser
           - pwa
           - a11y
@@ -50,6 +51,7 @@ jobs:
       - name: Install Playwright Chromium
         if: >-
           ${{ inputs.suite == 'browser' ||
+              inputs.suite == 'transition-evidence' ||
               inputs.suite == 'pwa' ||
               inputs.suite == 'a11y' ||
               inputs.suite == 'devices' ||
@@ -70,6 +72,9 @@ jobs:
               ;;
             standalone)
               npm run ci:standalone
+              ;;
+            transition-evidence)
+              npm run ci:transition-evidence
               ;;
             browser)
               npm run ci:regression
@@ -98,6 +103,7 @@ jobs:
               ;;
             full-chromium)
               npm run ci:standalone
+              npm run ci:transition-evidence
               npm run ci:regression
               npm run ci:page-transitions
               npm run ci:subpath
@@ -129,6 +135,14 @@ jobs:
             qa/visual/diff/**
             qa/visual/report.json
             qa/visual/report.md
+
+      - name: Upload Transition Evidence Artifacts
+        if: ${{ always() && (inputs.suite == 'transition-evidence' || inputs.suite == 'full-chromium') }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: manual-transition-evidence-${{ inputs.suite }}
+          if-no-files-found: warn
+          path: qa/transition-evidence/**
 
       - name: Upload Lighthouse Artifacts
         if: ${{ always() && (inputs.suite == 'lighthouse' || inputs.suite == 'full-chromium') }}
