@@ -327,6 +327,15 @@
   }
 
   function resultFromOracle(result, query) {
+    if (result.kind === "essay") {
+      return {
+        title: normalizeSpaces(result.essayTitle),
+        detail: normalizeSpaces((result.snippet && result.snippet.text) || "Essay"),
+        href: router.build("essay", { essaySlug: result.essaySlug }),
+        kind: "essay",
+        score: result.score
+      };
+    }
     const href = router.build("section", {
       essaySlug: result.essaySlug,
       sectionNumber: result.sectionNumber,

@@ -181,6 +181,30 @@
     return section.passages[0] ? section.passages[0].passageId : "";
   }
 
+  // Lexicon aliases: a colloquial name for an essay ("etching", "the sand
+  // essay") jumps straight to it, like the archive recognising what you call it.
+  function matchAlias(lexicon, queryText, essays) {
+    const aliases = (lexicon && Array.isArray(lexicon.aliases)) ? lexicon.aliases : [];
+    for (const alias of aliases) {
+      if (normalize(alias.match) === queryText) {
+        const essay = essays.find((entry) => entry.slug === alias.essay);
+        if (essay) {
+          return makeResult({
+            kind: "essay",
+            essaySlug: essay.slug,
+            essayTitle: essay.title,
+            sectionNumber: essay.sections[0] ? essay.sections[0].sectionNumber : 1,
+            sectionTitle: essay.title,
+            passageId: "",
+            blockType: "essay",
+            snippet: plainSnippet(essay.summary || essay.title),
+          }, [reason("known as “" + alias.match + "”", 900)]);
+        }
+      }
+    }
+    return null;
+  }
+
   // Lexicon seam: map each query token to related terms from a curated synonym
   // group. Today the oracle uses these only to BOOST passages that already
   // match (deferred build: creating matches from synonyms, essay aliases, and
@@ -220,6 +244,13 @@
     const expansions = buildExpansions(ctx.lexicon, query.tokens);
     const essays = (index && Array.isArray(index.essays)) ? index.essays : [];
     const results = [];
+
+    if (query.kind === "term" || query.kind === "phrase") {
+      const aliasHit = matchAlias(ctx.lexicon, query.text, essays);
+      if (aliasHit) {
+        results.push(aliasHit);
+      }
+    }
 
     for (const essay of essays) {
       const essayContext = essay.slug === currentEssay;

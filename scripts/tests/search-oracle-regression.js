@@ -92,6 +92,14 @@ check("current-essay context boosts matching passages", () => {
   assert.ok(top.score > (withoutContext.results[0].score), "context should raise the score");
 });
 
+check("lexicon aliases jump straight to the essay", () => {
+  const out = rank("etching", { lexicon });
+  assert.equal(out.results[0].kind, "essay", "alias should produce an essay jump at the top");
+  assert.equal(out.results[0].essaySlug, "etching-god-into-sand");
+  // No alias, no essay jump.
+  assert.ok(!rank("etching").results.some((r) => r.kind === "essay"), "essay jump must require the lexicon alias");
+});
+
 check("passage results carry a highlightable range", () => {
   const out = rank("verdun");
   const passage = out.results.find((result) => result.kind === "passage");

@@ -5,5 +5,9 @@
     ["glass", "lens", "lenses", "telescope", "microscope"],
     ["silicon", "chip", "wafer", "transistor", "microchip"]
   ],
-  "aliases": []
+  "aliases": [
+    { "match": "etching", "essay": "etching-god-into-sand" },
+    { "match": "sand essay", "essay": "etching-god-into-sand" },
+    { "match": "the sand essay", "essay": "etching-god-into-sand" }
+  ]
 }
