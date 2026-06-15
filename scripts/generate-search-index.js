@@ -87,15 +87,18 @@ function passageRecord(passage) {
 function sectionRecord(essay, sectionNumber, sectionOrder) {
   const meta = sectionMeta(essay, sectionNumber);
   const rawText = readSectionSource(essay, sectionNumber);
-  const searchText = ast.toSearchableText(rawText);
   const passages = ast.passagesFromDocument(rawText).map(passageRecord);
+  // Section search text is the join of passage texts, so we do not store it
+  // separately (it would duplicate ~half the artifact). wordCount is the only
+  // derived field worth precomputing; consumers reconstruct full-section text
+  // from passages when they need it.
+  const wordCount = passages.reduce((count, passage) => count + ast.wordCount(passage.text), 0);
   return {
     sectionNumber,
     order: sectionOrder,
     title: String(meta.title || "Section " + String(sectionNumber)),
     subtitle: meta.subtitle ? String(meta.subtitle) : "",
-    wordCount: ast.wordCount(searchText),
-    searchText,
+    wordCount,
     passages,
   };
 }
