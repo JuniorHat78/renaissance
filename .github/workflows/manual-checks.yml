@@ -1,6 +1,7 @@
 name: Manual Checks
 
 on:
+  pull_request:
   workflow_dispatch:
     inputs:
       suite:
@@ -51,7 +52,8 @@ jobs:
 
       - name: Install Playwright Chromium
         if: >-
-          ${{ inputs.suite == 'browser' ||
+          ${{ github.event_name == 'pull_request' ||
+              inputs.suite == 'browser' ||
               inputs.suite == 'transition-evidence' ||
               inputs.suite == 'spotlight' ||
               inputs.suite == 'pwa' ||
@@ -65,7 +67,7 @@ jobs:
       - name: Run Selected Suite
         shell: bash
         run: |
-          case "${{ inputs.suite }}" in
+          case "${{ inputs.suite || 'full-chromium' }}" in
             check)
               npm run check
               ;;
@@ -131,7 +133,7 @@ jobs:
           esac
 
       - name: Upload Visual QA Artifacts
-        if: ${{ always() && (inputs.suite == 'visual' || inputs.suite == 'full-chromium') }}
+        if: ${{ always() && (github.event_name == 'pull_request' || inputs.suite == 'visual' || inputs.suite == 'full-chromium') }}
         uses: actions/upload-artifact@v7
         with:
           name: manual-visual-qa-${{ inputs.suite }}
@@ -143,7 +145,7 @@ jobs:
             qa/visual/report.md
 
       - name: Upload Transition Evidence Artifacts
-        if: ${{ always() && (inputs.suite == 'transition-evidence' || inputs.suite == 'full-chromium') }}
+        if: ${{ always() && (github.event_name == 'pull_request' || inputs.suite == 'transition-evidence' || inputs.suite == 'full-chromium') }}
         uses: actions/upload-artifact@v7
         with:
           name: manual-transition-evidence-${{ inputs.suite }}
@@ -151,7 +153,7 @@ jobs:
           path: qa/transition-evidence/**
 
       - name: Upload Spotlight Artifacts
-        if: ${{ always() && (inputs.suite == 'spotlight' || inputs.suite == 'full-chromium') }}
+        if: ${{ always() && (github.event_name == 'pull_request' || inputs.suite == 'spotlight' || inputs.suite == 'full-chromium') }}
         uses: actions/upload-artifact@v7
         with:
           name: manual-spotlight-${{ inputs.suite }}
@@ -159,7 +161,7 @@ jobs:
           path: qa/spotlight/**
 
       - name: Upload Lighthouse Artifacts
-        if: ${{ always() && (inputs.suite == 'lighthouse' || inputs.suite == 'full-chromium') }}
+        if: ${{ always() && (github.event_name == 'pull_request' || inputs.suite == 'lighthouse' || inputs.suite == 'full-chromium') }}
         uses: actions/upload-artifact@v7
         with:
           name: manual-lighthouse-${{ inputs.suite }}
