@@ -3,6 +3,7 @@
   const Search = window.RenaissanceSearch;
   const router = window.RenaissanceRouter;
   const readingState = window.RenaissanceReadingState;
+  const oracle = window.RenaissanceOracle;
 
   if (!content || !Search || !router) {
     return;
@@ -26,6 +27,8 @@
   };
 
   let engine = null;
+  let oracleIndexPromise = null;
+  let lexicon = null;
   let essaysPromise = null;
   let publishedEssays = [];
   let root = null;
@@ -303,7 +306,83 @@
     };
   }
 
+  // The oracle (generated index) is the primary search truth; the in-browser
+  // engine stays as a fallback for offline-before-precache or fetch failure.
+  function loadOracleIndex() {
+    if (!oracle) {
+      return Promise.resolve(null);
+    }
+    if (!oracleIndexPromise) {
+      oracleIndexPromise = Promise.all([
+        fetch("data/search-index.json").then((response) => (response.ok ? response.json() : null)),
+        fetch("data/search-lexicon.json").then((response) => (response.ok ? response.json() : null)).catch(() => null)
+      ])
+        .then(([index, lex]) => {
+          lexicon = lex;
+          return index;
+        })
+        .catch(() => null);
+    }
+    return oracleIndexPromise;
+  }
+
+  function resultFromOracle(result, query) {
+    const href = router.build("section", {
+      essaySlug: result.essaySlug,
+      sectionNumber: result.sectionNumber,
+      passageId: result.passageId,
+      query
+    });
+    const detail = normalizeSpaces([
+      result.essayTitle,
+      result.snippet && result.snippet.text
+    ].filter(Boolean).join(" / "));
+    const kind = result.kind === "passage"
+      ? "passage"
+      : result.kind === "section-jump"
+        ? "section"
+        : "match";
+    return {
+      title: normalizeSpaces(result.sectionTitle || result.essayTitle),
+      detail,
+      href,
+      kind,
+      score: result.score
+    };
+  }
+
   async function searchResults(query) {
+    await loadPublishedEssays();
+    const index = await loadOracleIndex();
+    if (!index || !oracle) {
+      return legacySearchResults(query);
+    }
+
+    const route = currentRoute();
+    const essay = currentEssay();
+    const ranked = oracle.rank(index, query, {
+      essaySlug: essay && essay.slug,
+      lexicon,
+      limit: MAX_RESULTS - 1
+    });
+
+    const results = [];
+    const seen = new Set();
+    ranked.results.forEach((result) => {
+      pushUnique(results, resultFromOracle(result, query), seen);
+    });
+
+    pushUnique(results, actionResult(
+      'Search "' + query + '"',
+      routeLabel(route) + " / full results",
+      router.build("search", { query, sort: "relevance" }),
+      "search"
+    ), seen);
+
+    return results.slice(0, MAX_RESULTS);
+  }
+
+  async function legacySearchResults(query) {
     await loadPublishedEssays();
     const route = currentRoute();
     const intentSection = sectionIntent(query);
