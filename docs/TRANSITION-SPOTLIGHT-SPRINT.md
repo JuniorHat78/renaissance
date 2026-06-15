@@ -64,17 +64,40 @@ Useful evidence records include:
 
 ### Current Sprint State
 
-- Status: Phase 0 baseline/evidence in progress; first architecture pass
-  complete.
-- Current branch: `sprint/transition-spotlight-oracle`.
-- Implementation started: evidence/diagnostics only; no product behavior changes
-  yet.
-- Docs committed: yes; see git log for the latest docs checkpoint.
+- Status: implementation underway and non-linear. Phase 1 evidence harness
+  landed; Phase 3, 6, and 8 each have a first production checkpoint. Phases 2,
+  4, 5, and 7 have not been worked as discrete phases yet.
+- Current branch: `sprint/transition-spotlight-oracle` (8 commits ahead of
+  `main`, pushed and in sync).
+- Implementation started: yes. Product behavior has changed (Spotlight launcher,
+  AST passage anchor routing, section transition warmup) — this is past
+  evidence-only.
+- Landed since the docs contract (commits after `b187651`):
+  - `a2878f6` — transition evidence suite (`test:transition-evidence`,
+    `ci:transition-evidence`, Manual Checks wiring). Phase 1.
+  - `524a9ab` — section transition warmup hardening in `scripts/section.js`.
+    Phase 3 (partial).
+  - `2a62156` — search hits routed through AST passage anchors
+    (`scripts/ast/index.js`, `search-engine.js`, `router.js`, reader
+    resolution, `anchor-regression.js`). Phase 6 (partial).
+  - `781bd7b` — Spotlight launcher (`scripts/spotlight.js`, 603 lines;
+    `spotlight-regression.js`; wired into all four runtime pages). Phase 8
+    (partial).
+  - `7302522` — stabilize Spotlight regression waits. Phase 8.
+- Not yet done: Phase 2 transition prototypes (no recorded variants), Phase 4
+  critique/beta pass, Phase 5 generated oracle search index (search is still
+  runtime/client-side; only AST anchor routing landed, not a generated index),
+  Phase 7 Spotlight design spec capture.
+- Docs committed: yes. This document had drifted behind the code and was
+  reconciled on 2026-06-15 — see the dated Live Findings note.
 - Branch pushed: yes, tracking `origin/sprint/transition-spotlight-oracle`.
-- Latest remote run: Manual Checks `check`, run `27505347555`, passed on
-  commit `b187651`.
-- Next recommended action: add evidence-producing transition/search/anchor
-  gauntlets before product behavior changes.
+- Latest remote runs: Manual Checks suites passed on the sprint branch on
+  2026-06-15 (runs `27506490802`–`27506555991`); earlier docs-contract run
+  `27505347555` passed on `b187651`.
+- Next recommended action: pick the thread back up deliberately — either close
+  out Phase 3 transition hardening and record Phase 2/4 evidence for the motifs
+  already shipped, or open Phase 5 (generated oracle index) so Spotlight stops
+  riding on runtime search.
 
 ### Active Phase Journal
 
@@ -82,16 +105,20 @@ Use this section during implementation. Move completed phase notes into
 `Live Findings` when the phase closes.
 
 ```text
-Phase: 0 - Baseline And Evidence
+Phase: 3/6/8 - Production hardening in progress (non-linear)
 Started: 2026-06-15
-Goal: understand current transition/search/reader behavior before changes.
-Current focus: convert baseline findings into targeted diagnostic tests and
-artifact-producing Actions suites.
-Latest run/artifact: Manual Checks check run 27505347555 passed on sprint
-branch.
-Blockers: none.
-Next action: implement transition evidence harness, then begin hardening
-section-turn perceived latency and search-result arrival correctness.
+Goal: ship hardened transitions, route reader/search through AST passage
+anchors, and stand up the Spotlight launcher on top.
+Current focus: the evidence harness (Phase 1) and three production
+checkpoints have landed; the next session should reconcile which audited
+navigation paths the shipped warmup/anchor/Spotlight work actually covers and
+decide between closing Phase 3 or opening Phase 5 (generated oracle index).
+Latest run/artifact: Manual Checks suites passed on the sprint branch on
+2026-06-15 (runs 27506490802-27506555991).
+Blockers: none. Subagents unavailable this session (account/usage limits).
+Next action: record Phase 2/4 motif evidence for the transition language that
+already shipped, then start the generated oracle search index (Phase 5) so
+Spotlight is not riding on runtime search.
 ```
 
 ### Run Log Template
@@ -435,17 +462,19 @@ front door to a new oracle-grade search system. Replacing the current search API
 is allowed if that produces better ranking, anchors, snippets, tests, and
 reader activation.
 
-Initial expectations:
+Initial expectations (status as of 2026-06-15 launcher checkpoint `781bd7b`;
+verified by reading `scripts/spotlight.js` + `spotlight-regression.js`, not yet
+by manual beta review):
 
-- [ ] `Cmd/Ctrl+K` opens Spotlight.
+- [x] `Cmd/Ctrl+K` opens Spotlight (`metaKey || ctrlKey` + `k`).
 - [ ] Trigger is discoverable without noisy in-app instruction.
-- [ ] Escape closes and restores focus.
-- [ ] Enter activates selected item.
-- [ ] Arrow keys move selection.
-- [ ] Search updates instantly while typing.
-- [ ] Continue Reading appears first when relevant.
+- [x] Escape closes and restores focus.
+- [x] Enter activates selected item.
+- [x] Arrow keys move selection (`ArrowDown`/`ArrowUp` + `aria-activedescendant`).
+- [x] Search updates instantly while typing.
+- [x] Continue Reading appears first when relevant (Continue/Next-section rows).
 - [ ] Current essay actions appear before global actions when context exists.
-- [ ] Section jumps are available.
+- [x] Section jumps are available.
 - [ ] Full search handoff is available.
 - [ ] Mobile presentation is full-screen or otherwise touch-natural.
 - [ ] Reduced-motion path is clean.
@@ -453,6 +482,10 @@ Initial expectations:
 - [ ] Offline/cached state does not break.
 - [ ] Result activation uses the same transition language as the rest of the
       site.
+
+Carries `role="dialog" aria-modal="true"`, a `combobox`/`listbox` results
+model, and an `aria-live` status region — so dialog/active-result a11y
+semantics exist, but the unticked rows above still need verification or work.
 
 Out of initial scope unless the sprint discovers a strong reason:
 
@@ -1319,14 +1352,25 @@ Phase 0 exit criteria:
 Goal: build enough test coverage that animation changes cannot reintroduce
 blanking, stuck states, or unreadable transitions.
 
-- [ ] Add or strengthen blank-free navigation assertions.
-- [ ] Add source-feedback timing assertions where deterministic.
+Status (2026-06-15): `scripts/tests/transition-evidence-regression.js` landed in
+`a2878f6` and covers several of these; ticks below reflect what that suite
+verifiably asserts. Items left unticked have partial scaffolding (a
+reduced-motion context option and a slow-network throttle hook exist) but no
+confirmed assertion yet.
+
+- [x] Add or strengthen blank-free navigation assertions (asserts body/main
+      opacity > 0.9 and no stuck `aria-busy`).
+- [ ] Add source-feedback timing assertions where deterministic (captures
+      `clickToReadyMs`, but not yet a strict source-feedback gate).
 - [ ] Add section prev/next readability assertions.
 - [ ] Add back/forward assertions.
-- [ ] Add search-result-to-highlight assertions.
-- [ ] Add reduced-motion assertions.
-- [ ] Add slow-network cached/uncached expectations where useful.
-- [ ] Decide which visual artifacts should upload in Actions.
+- [x] Add search-result-to-highlight assertions (search-result arrival scenario
+      detects `mark[data-auto-highlight="1"]`).
+- [ ] Add reduced-motion assertions (context option exists; assertion pending).
+- [ ] Add slow-network cached/uncached expectations where useful (throttle hook
+      exists; expectations pending).
+- [x] Decide which visual artifacts should upload in Actions (suite captures
+      trace.zip, video, and failure screenshots under `qa/`).
 
 Phase 1 evidence to capture:
 
@@ -1627,6 +1671,29 @@ Use this before declaring Spotlight done.
 
 Add dated notes here as the sprint proceeds.
 
+### 2026-06-15 (doc reconciliation)
+
+- This document had drifted behind the code. `Current Sprint State` still read
+  "Phase 0 baseline/evidence in progress; no product behavior changes yet"
+  while the branch already carried five post-contract commits shipping real
+  product behavior. The state, journal, and Spotlight scope have been corrected
+  to match the commits below; no code changed during this reconciliation.
+- Actual landed work (commits after the docs contract `b187651`):
+  - `a2878f6` transition evidence suite — Phase 1.
+  - `524a9ab` section transition warmup — Phase 3 (partial).
+  - `2a62156` AST passage anchor routing for search/reader — Phase 6 (partial).
+  - `781bd7b` Spotlight launcher — Phase 8 (partial).
+  - `7302522` Spotlight regression wait stabilization — Phase 8.
+- Work proceeded non-linearly: a first Spotlight launcher and anchor routing
+  landed before Phase 2 prototypes, Phase 4 critique, Phase 5 generated oracle
+  index, and Phase 7 Spotlight design were done as discrete phases. Search is
+  still runtime/client-side; only AST anchor routing landed, not a generated
+  index. Treat the shipped motifs and Spotlight as a working spike that still
+  owes its Phase 2/4/5/7 evidence and design records.
+- Process note for future sessions: per this doc's own rules, update
+  `Current Sprint State` whenever a phase item ships. The drift here is exactly
+  the failure mode the Resume Protocol is meant to prevent.
+
 ### 2026-06-14
 
 - Manual `Manual Checks` workflow exists on `main` and the `html` suite passed
@@ -1708,6 +1775,21 @@ Artifacts: none expected
 Reviewed: run summary and job step conclusions via gh CLI
 Notes: branch publication and lightweight remote validation for docs contract
 Next: add diagnostic/evidence tests and trigger targeted browser/device suites
+```
+
+```text
+Date: 2026-06-15
+Run: 27506490802-27506555991 (six Manual Checks dispatches)
+Suite: Manual Checks (various)
+Branch/ref: sprint/transition-spotlight-oracle
+Commit: spotlight launcher / anchor / transition-warmup checkpoints
+Result: passed (all green)
+Artifacts: transition-evidence/spotlight suites produce traces, video, and
+screenshots under qa/ when run; not yet reviewed for this log
+Reviewed: run conclusions via gh run list
+Notes: validated the post-contract feature checkpoints remotely. Artifact
+review (Phase 2/4 motion critique) is still outstanding.
+Next: review captured transition/Spotlight artifacts and record motif decisions.
 ```
 
 ## Artifact Review Log
