@@ -84,15 +84,21 @@ Useful evidence records include:
     `spotlight-regression.js`; wired into all four runtime pages). Phase 8
     (partial).
   - `7302522` — stabilize Spotlight regression waits. Phase 8.
-- Phase 5 started (2026-06-15): `data/search-index.json` is now generated from
-  the AST (`scripts/generate-search-index.js`), freshness-gated in
-  `npm run check`, and covered by `test:search-index`. It is not yet consumed by
-  any surface — full/inline search and Spotlight still run the in-browser index.
-  Next Phase 5 steps: schema/validator + ranking fixtures, then migrate a
-  consumer onto the artifact.
+- Phase 5 substantially done (2026-06-15): `data/search-index.json` is generated
+  from the AST with per-term passage-frequency stats; `scripts/search-oracle.js`
+  ranks it via composable idf-weighted signals (intent parsing, importance gate,
+  section-title affinity, blockType/context boosts) where a result's score is
+  the sum of its reasons. A curated `data/search-lexicon.json` seam adds synonym
+  boosting. Guarded by `test:search-index`, `test:search-oracle`,
+  `test:search-lexicon` (all in the standalone gate) and a 512KB size budget.
+- Phase 6/8 progress: Spotlight now searches via the oracle + generated index
+  (runtime engine retained as offline/fetch-fail fallback), with passage-range
+  deep links for precise reader highlighting. Validated green on Actions:
+  `spotlight`, `browser`, `pwa`, `a11y`.
 - Not yet done: Phase 2 transition prototypes (no recorded variants), Phase 4
-  critique/beta pass, the rest of Phase 5 (consumer migration, ranking engine),
-  Phase 7 Spotlight design spec capture.
+  critique/beta pass, full-search/inline-search migration onto the oracle (only
+  Spotlight migrated so far), the deferred lexicon build (match-creation,
+  aliases, motif easter eggs), Phase 7 Spotlight design spec capture.
 - Docs committed: yes. This document had drifted behind the code and was
   reconciled on 2026-06-15 — see the dated Live Findings note.
 - Branch pushed: yes, tracking `origin/sprint/transition-spotlight-oracle`.
@@ -1675,6 +1681,27 @@ Use this before declaring Spotlight done.
 ## Live Findings
 
 Add dated notes here as the sprint proceeds.
+
+### 2026-06-15 (oracle built + wired into Spotlight)
+
+- Built the oracle end-to-end: term stats in the index, idf-weighted signal
+  ranking, snippet word-boundary clipping, lexicon synonym seam, fixtures, and
+  Spotlight migrated onto it. On the corpus, "omega point" went from 17 rows
+  (8 just "point") to 4 clean hits; '"grain of sand"' lifts the Blake epigraph
+  in §8 to the top via section-title affinity.
+- IMPORTANT GOTCHA for anyone touching the index or anchors: the reader renders
+  `withoutLeadingHeadings(ast)` and numbers passages (`data-passage-id`) from
+  that content projection, NOT the raw AST. The generated index MUST use the
+  same projection (`withoutLeadingHeadings`) or passage IDs/offsets shift by each
+  section's leading heading(s) and reader highlight anchors land on the wrong
+  text. The `spotlight` browser suite caught this; node fixtures did not, because
+  the misalignment only shows up against the rendered DOM.
+- Also: any change to `data/search-index.json` (or any precached asset) must be
+  followed by `node scripts/generate-cache-version.js`, or the service worker
+  serves a stale index offline. `npm run check` gates this.
+- Workflow win: dispatching the `standalone` suite remotely surfaced three latent
+  Spotlight-launcher failures (dom-sink, precache, asset-budget) that local runs
+  and the branch's prior partial suites had never exercised.
 
 ### 2026-06-15 (Phase 5 start + latent gate fixes)
 
