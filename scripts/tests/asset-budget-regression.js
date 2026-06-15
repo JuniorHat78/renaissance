@@ -14,7 +14,10 @@ const root = path.join(__dirname, "..", "..");
 const SHELL_PAGES = ["index.html", "essay.html", "section.html", "search.html"];
 const DEFAULT_BUDGET_BYTES = Number.parseInt(process.env.RENAISSANCE_ASSET_BUDGET_BYTES || "", 10) || 256 * 1024;
 const PAGE_BUDGET_BYTES = {
-  "section.html": 264 * 1024
+  // section.html is the heaviest shell: the 86KB section.js reader plus the
+  // cross-page Spotlight launcher. Raised from 264KB when Spotlight shipped on
+  // every page; section.js remains the primary split candidate if this climbs.
+  "section.html": 304 * 1024
 };
 
 function localAssets(html) {

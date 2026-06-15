@@ -39,7 +39,11 @@ const allowedSinks = [
   ["scripts/search-page.js", "searchResults.innerHTML = '<p", "static index-error markup"],
 
   ["scripts/section.js", "button.innerHTML =", "static icon markup for injected copy controls"],
-  ["scripts/section.js", "sectionMeta.innerHTML = joinMetaParts([", "metadata parts are escaped in joinMetaParts"]
+  ["scripts/section.js", "sectionMeta.innerHTML = joinMetaParts([", "metadata parts are escaped in joinMetaParts"],
+
+  ["scripts/spotlight.js", "root.innerHTML =", "static dialog shell markup, no interpolation"],
+  ["scripts/spotlight.js", "list.innerHTML = '<p", "static empty-state markup"],
+  ["scripts/spotlight.js", "list.innerHTML = results", "result cards escape href/title/detail/kind before joining"]
 ];
 
 function trackedRuntimeFiles() {
