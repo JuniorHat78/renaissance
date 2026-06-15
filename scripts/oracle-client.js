@@ -22,13 +22,21 @@
   }
 
   // Returns an oracle ranking, or null when the index is unavailable (e.g.
-  // offline before precache, or file://) so callers can fall back.
+  // offline before precache, or file://) so callers can fall back. A `scope`
+  // of an essay slug restricts results to that essay (used by essay/home
+  // inline search); "all" or absent searches everything.
   async function search(query, context) {
+    const ctx = context || {};
     const { index, lexicon } = await loadData();
     if (!index || !oracle) {
       return null;
     }
-    return oracle.rank(index, query, Object.assign({ lexicon }, context || {}));
+    const ranked = oracle.rank(index, query, Object.assign({ lexicon }, ctx));
+    if (ctx.scope && ctx.scope !== "all") {
+      const results = ranked.results.filter((result) => result.essaySlug === ctx.scope);
+      return { query: ranked.query, results, totalMatched: results.length };
+    }
+    return ranked;
   }
 
   function buildHref(result, query) {

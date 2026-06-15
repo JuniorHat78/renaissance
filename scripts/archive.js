@@ -328,9 +328,35 @@
     }
 
     searchPanel.hidden = false;
-    searchHint.textContent = "Searching...";
-
     const runId = ++searchRunId;
+
+    const client = window.RenaissanceOracleClient;
+    if (client && client.available()) {
+      let ranked;
+      try {
+        ranked = await client.search(state.query, { scope: state.scope, limit: 8 });
+      } catch (_error) {
+        ranked = null;
+      }
+      if (runId !== searchRunId) {
+        return;
+      }
+      if (ranked) {
+        const count = ranked.totalMatched || 0;
+        client.renderResults(searchResults, ranked, {
+          query: state.query,
+          limit: 8,
+          emptyText: "Nothing matches “" + state.query + "”."
+        });
+        searchHint.textContent = count === 0 ? "" : count + (count === 1 ? " passage" : " passages");
+        searchViewFull.href = router.build("search", { query: state.query, scope: state.scope });
+        updateUrlState();
+        return;
+      }
+    }
+
+    // Fallback: legacy engine (oracle index unavailable, e.g. file:///offline).
+    searchHint.textContent = "Searching...";
     let result;
     try {
       result = await searchEngine.search({
@@ -401,6 +427,12 @@
     advancedToggle.addEventListener("click", () => {
       setAdvancedOpen(advancedPanel.hidden);
     });
+
+    // Oracle search has no modes; hide the advanced controls unless we fall back
+    // to the legacy engine (file:// / offline before precache).
+    if (window.RenaissanceOracleClient && window.RenaissanceOracleClient.available()) {
+      advancedToggle.hidden = true;
+    }
   }
 
   async function init() {

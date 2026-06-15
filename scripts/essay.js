@@ -559,7 +559,7 @@
     if (client && client.available()) {
       let ranked;
       try {
-        ranked = await client.search(state.query, { essaySlug: currentEssay.slug, limit: 8 });
+        ranked = await client.search(state.query, { essaySlug: currentEssay.slug, scope: currentEssay.slug, limit: 8 });
       } catch (_error) {
         ranked = null;
       }
