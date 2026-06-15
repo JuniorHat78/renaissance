@@ -399,8 +399,153 @@
     });
   }
 
+  // Motif card: when you search a recurring, distinctive word on an essay page,
+  // a quiet card surfaces how the essay uses it — the archive noticing its own
+  // obsessions. Gated to single, non-stopword, recurring terms so it stays an
+  // earned discovery, not noise on every search.
+  let motifDataPromise = null;
+  let motifCardEl = null;
+  let motifRunId = 0;
+
+  function loadMotifIndex() {
+    if (!motifDataPromise) {
+      motifDataPromise = fetch("data/search-index.json")
+        .then((response) => (response.ok ? response.json() : null))
+        .catch(() => null);
+    }
+    return motifDataPromise;
+  }
+
+  function escapeRegExpLiteral(text) {
+    return String(text).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
+  function essayMotifStats(index, slug, term) {
+    if (!index || !Array.isArray(index.essays)) {
+      return null;
+    }
+    const essay = index.essays.find((entry) => entry.slug === slug);
+    if (!essay) {
+      return null;
+    }
+    const totalPassages = (index.stats && index.stats.passages) || 1;
+    const df = (index.terms && index.terms[term]) || 1;
+    if (Math.log(1 + totalPassages / df) < 1.5) {
+      return null; // stopword-ish; not a motif worth remarking on
+    }
+
+    const pattern = new RegExp("\\b" + escapeRegExpLiteral(term) + "\\b", "gi");
+    let uses = 0;
+    let sectionsWithTerm = 0;
+    let firstSection = null;
+    let lastSection = null;
+
+    for (const section of essay.sections) {
+      let sectionUses = 0;
+      for (const passage of section.passages) {
+        const matches = passage.text.match(pattern);
+        if (matches) {
+          sectionUses += matches.length;
+        }
+      }
+      if (sectionUses > 0) {
+        uses += sectionUses;
+        sectionsWithTerm += 1;
+        if (!firstSection) {
+          firstSection = section;
+        }
+        lastSection = section;
+      }
+    }
+
+    if (uses < 6) {
+      return null;
+    }
+
+    return {
+      term,
+      uses,
+      sections: sectionsWithTerm,
+      firstTitle: firstSection ? firstSection.title : "",
+      lastTitle: lastSection ? lastSection.title : ""
+    };
+  }
+
+  function ensureMotifCard() {
+    if (!motifCardEl && searchPanel && searchResults) {
+      motifCardEl = document.createElement("aside");
+      motifCardEl.className = "motif-card";
+      motifCardEl.hidden = true;
+      searchPanel.insertBefore(motifCardEl, searchResults);
+    }
+    return motifCardEl;
+  }
+
+  function motifNumber(value) {
+    const strong = document.createElement("strong");
+    strong.className = "motif-card-num";
+    strong.textContent = String(value);
+    return strong;
+  }
+
+  function renderMotifCard(stats) {
+    const card = ensureMotifCard();
+    if (!card) {
+      return;
+    }
+    while (card.firstChild) {
+      card.removeChild(card.firstChild);
+    }
+    if (!stats) {
+      card.hidden = true;
+      return;
+    }
+
+    const eyebrow = document.createElement("p");
+    eyebrow.className = "motif-card-eyebrow";
+    eyebrow.textContent = "In this essay";
+    card.appendChild(eyebrow);
+
+    const term = document.createElement("p");
+    term.className = "motif-card-term";
+    term.textContent = "“" + stats.term + "”";
+    card.appendChild(term);
+
+    const stat = document.createElement("p");
+    stat.className = "motif-card-stat";
+    stat.append(
+      "appears ", motifNumber(stats.uses), " times across ",
+      motifNumber(stats.sections), stats.sections === 1 ? " section" : " sections"
+    );
+    card.appendChild(stat);
+
+    if (stats.firstTitle && stats.lastTitle && stats.firstTitle !== stats.lastTitle) {
+      const range = document.createElement("p");
+      range.className = "motif-card-range";
+      range.textContent = "from “" + stats.firstTitle + "” to “" + stats.lastTitle + "”";
+      card.appendChild(range);
+    }
+
+    card.hidden = false;
+  }
+
+  async function updateMotifCard(rawQuery) {
+    const tokens = String(rawQuery || "").trim().toLowerCase().match(/[a-z0-9]+/g) || [];
+    const runId = ++motifRunId;
+    if (!currentEssay || tokens.length !== 1) {
+      renderMotifCard(null);
+      return;
+    }
+    const index = await loadMotifIndex();
+    if (runId !== motifRunId) {
+      return;
+    }
+    renderMotifCard(essayMotifStats(index, currentEssay.slug, tokens[0]));
+  }
+
   async function executeSearch() {
     syncStateFromControls();
+    updateMotifCard(state.query);
     if (!state.query || !currentEssay) {
       clearSearchView();
       updateUrlState();

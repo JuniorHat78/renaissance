@@ -2425,3 +2425,50 @@ main[tabindex="-1"]:focus {
     display: none !important;
   }
 }
+
+/* Motif card: a quiet note about how an essay uses a recurring word. */
+.motif-card {
+  margin: 0 0 1.5rem;
+  padding: 0.85rem 1.1rem;
+  border-left: 2px solid var(--accent-soft);
+  background: var(--accent-wash);
+  border-radius: 0 4px 4px 0;
+  font-family: var(--font-body);
+}
+
+.motif-card[hidden] {
+  display: none;
+}
+
+.motif-card-eyebrow {
+  margin: 0 0 0.4rem;
+  font-family: var(--font-ui);
+  font-size: 0.68rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.motif-card-term {
+  margin: 0 0 0.2rem;
+  font-family: var(--font-title);
+  font-size: 1.15rem;
+  color: var(--accent);
+}
+
+.motif-card-num {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.motif-card-stat {
+  margin: 0;
+  color: var(--text);
+}
+
+.motif-card-range {
+  margin: 0.3rem 0 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-style: italic;
+}
