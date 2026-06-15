@@ -87,7 +87,11 @@ function passageRecord(passage) {
 function sectionRecord(essay, sectionNumber, sectionOrder) {
   const meta = sectionMeta(essay, sectionNumber);
   const rawText = readSectionSource(essay, sectionNumber);
-  const passages = ast.passagesFromDocument(rawText).map(passageRecord);
+  // Match content.js exactly: the reader renders withoutLeadingHeadings(ast) and
+  // numbers passages from that projection, so passage IDs and offsets must come
+  // from the same content AST or reader highlight anchors land on the wrong text.
+  const contentAst = ast.withoutLeadingHeadings(ast.parseDocument(rawText));
+  const passages = ast.passagesFromDocument(contentAst).map(passageRecord);
   // Section search text is the join of passage texts, so we do not store it
   // separately (it would duplicate ~half the artifact). wordCount is the only
   // derived field worth precomputing; consumers reconstruct full-section text
