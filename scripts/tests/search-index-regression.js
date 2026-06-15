@@ -92,6 +92,17 @@ check("source offsets are sane when present", () => {
   }
 });
 
+check("artifact stays within its size budget", () => {
+  // Deterministic guard against bloat (e.g. accidentally re-storing body text)
+  // and against the artifact growing into precache/offline payloads unnoticed.
+  // Raise this intentionally as more essays publish, the same way the per-page
+  // asset budget is managed.
+  const BUDGET_BYTES = 512 * 1024;
+  const bytes = Buffer.byteLength(committedText, "utf8");
+  console.log("  search index size: " + (bytes / 1024).toFixed(1) + "KB of " + (BUDGET_BYTES / 1024).toFixed(0) + "KB budget (" + index.stats.passages + " passages)");
+  assert.ok(bytes <= BUDGET_BYTES, "search index is " + (bytes / 1024).toFixed(1) + "KB, over the " + (BUDGET_BYTES / 1024).toFixed(0) + "KB budget");
+});
+
 check("unpublished essays do not leak into the index", () => {
   const serialized = JSON.stringify(index);
   for (const essay of unpublished) {
