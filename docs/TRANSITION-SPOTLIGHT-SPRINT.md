@@ -84,9 +84,14 @@ Useful evidence records include:
     `spotlight-regression.js`; wired into all four runtime pages). Phase 8
     (partial).
   - `7302522` — stabilize Spotlight regression waits. Phase 8.
+- Phase 5 started (2026-06-15): `data/search-index.json` is now generated from
+  the AST (`scripts/generate-search-index.js`), freshness-gated in
+  `npm run check`, and covered by `test:search-index`. It is not yet consumed by
+  any surface — full/inline search and Spotlight still run the in-browser index.
+  Next Phase 5 steps: schema/validator + ranking fixtures, then migrate a
+  consumer onto the artifact.
 - Not yet done: Phase 2 transition prototypes (no recorded variants), Phase 4
-  critique/beta pass, Phase 5 generated oracle search index (search is still
-  runtime/client-side; only AST anchor routing landed, not a generated index),
+  critique/beta pass, the rest of Phase 5 (consumer migration, ranking engine),
   Phase 7 Spotlight design spec capture.
 - Docs committed: yes. This document had drifted behind the code and was
   reconciled on 2026-06-15 — see the dated Live Findings note.
@@ -1670,6 +1675,28 @@ Use this before declaring Spotlight done.
 ## Live Findings
 
 Add dated notes here as the sprint proceeds.
+
+### 2026-06-15 (Phase 5 start + latent gate fixes)
+
+- Landed the first Phase 5 checkpoint: `scripts/generate-search-index.js`
+  generates `data/search-index.json` (1 essay, 10 sections, 518 passages) from
+  the AST, stamped with the grammar version, unpublished essays excluded.
+  Wired `validate:search-index:check` into `npm run check` and
+  `test:search-index` into the standalone gate.
+- Key de-risking finding: the runtime search engine already consumes AST
+  `passages` (passageId/index/blockType/source offsets) via `preparePassage` and
+  emits anchored hits, so the generated index is a precompute of an existing
+  shape, not a new model. Migration is the work; the data model already exists.
+- Dispatching the `standalone` suite remotely surfaced three latent failures
+  from the Spotlight launcher commit (`781bd7b`) that no prior branch run had
+  exercised: an unreviewed `innerHTML` sink set in `spotlight.js`, a missing
+  `scripts/spotlight.js` service-worker precache entry, and `section.html`
+  exceeding its asset-weight budget. All three fixed in `be0d8a1`. Lesson: run
+  `standalone` after any commit that adds a runtime script, not just the browser
+  suites.
+- Open decision for the user: `section.html` asset budget was raised 264KB ->
+  304KB to absorb the cross-page Spotlight weight. If that is too loose, the
+  alternative is splitting the 86KB `section.js` rather than growing the budget.
 
 ### 2026-06-15 (doc reconciliation)
 
