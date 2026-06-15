@@ -118,16 +118,49 @@ function essayRecord(essay, essayOrder) {
   };
 }
 
+function tokenize(text) {
+  const matches = String(text || "").toLowerCase().match(/[a-z0-9]+/g);
+  return matches ? matches : [];
+}
+
+// Passage-frequency per term, so the oracle can weight rare words (omega) above
+// common ones (point). Only terms appearing in >= 2 passages are stored; the
+// oracle treats an absent term as df=1 (maximally rare), which keeps the
+// artifact lean without losing the signal that matters.
+function buildTermStats(essayRecords) {
+  const df = new Map();
+  for (const essay of essayRecords) {
+    for (const section of essay.sections) {
+      for (const passage of section.passages) {
+        for (const term of new Set(tokenize(passage.text))) {
+          df.set(term, (df.get(term) || 0) + 1);
+        }
+      }
+    }
+  }
+  const terms = {};
+  for (const term of Array.from(df.keys()).sort()) {
+    if (df.get(term) >= 2) {
+      terms[term] = df.get(term);
+    }
+  }
+  return { terms, vocabulary: df.size };
+}
+
 function buildSearchIndex(essays) {
   const essayRecords = publishedEssays(essays).map(essayRecord);
+  const termStats = buildTermStats(essayRecords);
   return {
     version: INDEX_VERSION,
     astVersion: String(ast.VERSION),
     essays: essayRecords,
+    terms: termStats.terms,
     stats: {
       essays: essayRecords.length,
       sections: essayRecords.reduce((count, essay) => count + essay.sectionCount, 0),
       passages: essayRecords.reduce((count, essay) => count + essay.passageCount, 0),
+      vocabulary: termStats.vocabulary,
+      indexedTerms: Object.keys(termStats.terms).length,
     },
   };
 }

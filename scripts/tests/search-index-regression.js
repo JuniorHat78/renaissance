@@ -92,6 +92,20 @@ check("source offsets are sane when present", () => {
   }
 });
 
+check("term stats are present, pruned, and sane", () => {
+  assert.ok(index.terms && typeof index.terms === "object", "terms table is required");
+  assert.equal(Object.keys(index.terms).length, index.stats.indexedTerms, "indexedTerms count mismatch");
+  assert.ok(index.stats.vocabulary >= index.stats.indexedTerms, "vocabulary must be >= stored terms");
+  // Determinism is guaranteed by the regeneration check above plus the ES key
+  // ordering spec (integer-like keys ascend, then string keys in insertion
+  // order); we don't assert lexicographic order because numeric terms hoist.
+  for (const [term, df] of Object.entries(index.terms)) {
+    assert.match(term, /^[a-z0-9]+$/, "term must be normalized: " + term);
+    assert.ok(Number.isInteger(df) && df >= 2, "stored term must have df >= 2 (singletons pruned): " + term);
+    assert.ok(df <= index.stats.passages, "df cannot exceed passage count: " + term);
+  }
+});
+
 check("artifact stays within its size budget", () => {
   // Deterministic guard against bloat (e.g. accidentally re-storing body text)
   // and against the artifact growing into precache/offline payloads unnoticed.
