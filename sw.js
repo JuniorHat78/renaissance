@@ -12,7 +12,7 @@
  *  - A versioned cache; bump VERSION to force a clean re-precache.
  */
 
-const VERSION = "asset-f07e5dd3d087";
+const VERSION = "asset-d69e529a1ee6";
 const CACHE = "renaissance-" + VERSION;
 const OFFLINE_ASSET_MANIFEST = "data/offline-assets.json";
 const NAVIGATION_NETWORK_TIMEOUT_MS = 4500;
@@ -45,6 +45,7 @@ const PRECACHE = [
   "scripts/search-page.js",
   "scripts/section.js",
   "scripts/search-oracle.js",
+  "scripts/oracle-client.js",
   "scripts/spotlight.js",
   "scripts/theme.js",
   "scripts/pwa.js",

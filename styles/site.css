@@ -2426,6 +2426,63 @@ main[tabindex="-1"]:focus {
   }
 }
 
+/* Oracle results: one clean, relevance-ranked list shared by every search
+   surface. No chrome — a quiet section label, then the matching line. */
+.oracle-results {
+  display: flex;
+  flex-direction: column;
+}
+
+.oracle-result {
+  display: block;
+  padding: 0.9rem 0.25rem;
+  border-bottom: 1px solid var(--line);
+  color: inherit;
+  text-decoration: none;
+  transition: background var(--motion-fast) var(--motion-ease);
+}
+
+.oracle-result:first-child {
+  padding-top: 0.4rem;
+}
+
+.oracle-result:hover,
+.oracle-result:focus-visible {
+  background: var(--accent-wash);
+  outline: none;
+}
+
+.oracle-result-where {
+  display: block;
+  margin-bottom: 0.3rem;
+  font-family: var(--font-ui);
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.oracle-result-snippet {
+  display: block;
+  font-family: var(--font-body);
+  font-size: 1.02rem;
+  line-height: 1.55;
+  color: var(--text);
+}
+
+.oracle-result-snippet mark {
+  background: var(--mark);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 0.1em;
+}
+
+.oracle-empty {
+  margin: 0.5rem 0;
+  color: var(--muted);
+  font-style: italic;
+}
+
 /* Motif card: a quiet note about how an essay uses a recurring word. */
 .motif-card {
   margin: 0 0 1.5rem;

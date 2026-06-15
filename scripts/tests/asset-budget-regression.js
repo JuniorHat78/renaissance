@@ -18,7 +18,10 @@ const PAGE_BUDGET_BYTES = {
   // cross-page Spotlight launcher and oracle. Raised 264 -> 304 (Spotlight) ->
   // 320 (oracle). This page has now absorbed two cross-page features; if it
   // climbs again, split section.js rather than growing this budget further.
-  "section.html": 320 * 1024
+  "section.html": 320 * 1024,
+  // essay.html carries the motif card + oracle client/engine on top of the
+  // essay view. Raised 256 -> 272 with the oracle-native search migration.
+  "essay.html": 272 * 1024
 };
 
 function localAssets(html) {
