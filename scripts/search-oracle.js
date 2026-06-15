@@ -27,6 +27,7 @@
   const HEADING_BOOST = 60;
   const PULL_QUOTE_BOOST = 30;
   const CONTEXT_BOOST = 50;       // passage is in the essay you're reading
+  const MOTIF_SCALE = 25;         // lexicon synonym present in a matched passage
   const SECTION_JUMP_SCORE = 1000;
   const IMPORTANCE_FLOOR = 0.5;   // matched idf / total query idf for multi-term
 
@@ -180,6 +181,34 @@
     return section.passages[0] ? section.passages[0].passageId : "";
   }
 
+  // Lexicon seam: map each query token to related terms from a curated synonym
+  // group. Today the oracle uses these only to BOOST passages that already
+  // match (deferred build: creating matches from synonyms, essay aliases, and
+  // motif easter eggs). Returns Map<token, relatedTerms[]>.
+  function buildExpansions(lexicon, tokens) {
+    const expansions = new Map();
+    const groups = (lexicon && Array.isArray(lexicon.synonyms)) ? lexicon.synonyms : [];
+    if (!groups.length || !tokens.length) {
+      return expansions;
+    }
+    for (const token of tokens) {
+      const related = [];
+      for (const group of groups) {
+        if (group.includes(token)) {
+          for (const term of group) {
+            if (term !== token && !related.includes(term)) {
+              related.push(term);
+            }
+          }
+        }
+      }
+      if (related.length) {
+        expansions.set(token, related);
+      }
+    }
+    return expansions;
+  }
+
   function rank(index, raw, context) {
     const query = parseQuery(raw);
     const ctx = context || {};
@@ -188,6 +217,7 @@
     const perSection = ctx.perSection || 2;
     const idf = makeIdf(index);
     const totalIdf = query.tokens.reduce((sum, token) => sum + idf(token), 0) || 1;
+    const expansions = buildExpansions(ctx.lexicon, query.tokens);
     const essays = (index && Array.isArray(index.essays)) ? index.essays : [];
     const results = [];
 
@@ -266,6 +296,15 @@
           }
           for (const term of sharedTitleTerms) {
             reasons.push(reason("section is about “" + term + "”", Math.round(idf(term) * AFFINITY_SCALE)));
+          }
+          if (expansions.size) {
+            const haystack = normalize(passage.text);
+            for (const [token, related] of expansions) {
+              const found = related.find((term) => haystack.indexOf(term) !== -1);
+              if (found) {
+                reasons.push(reason("related: " + found + " (≈ " + token + ")", Math.round(idf(found) * MOTIF_SCALE)));
+              }
+            }
           }
           if (passage.blockType === "heading") {
             reasons.push(reason("heading", HEADING_BOOST));

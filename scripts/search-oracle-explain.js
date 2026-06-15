@@ -13,6 +13,8 @@ const oracle = require("./search-oracle.js");
 
 const root = path.join(__dirname, "..");
 const index = JSON.parse(fs.readFileSync(path.join(root, "data", "search-index.json"), "utf8"));
+const lexiconPath = path.join(root, "data", "search-lexicon.json");
+const lexicon = fs.existsSync(lexiconPath) ? JSON.parse(fs.readFileSync(lexiconPath, "utf8")) : null;
 
 const args = process.argv.slice(2);
 let essaySlug = null;
@@ -27,7 +29,7 @@ for (let i = 0; i < args.length; i += 1) {
 }
 const rawQuery = queryParts.join(" ");
 
-const { query, results, totalMatched } = oracle.rank(index, rawQuery, { essaySlug });
+const { query, results, totalMatched } = oracle.rank(index, rawQuery, { essaySlug, lexicon });
 
 console.log("");
 console.log('query:   "' + rawQuery + '"  ->  intent: ' + query.kind + (query.sectionNumber ? " (section " + query.sectionNumber + ")" : ""));

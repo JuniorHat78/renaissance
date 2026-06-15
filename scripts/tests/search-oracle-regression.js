@@ -9,6 +9,7 @@ const oracle = require("../search-oracle.js");
 
 const root = path.join(__dirname, "..", "..");
 const index = JSON.parse(fs.readFileSync(path.join(root, "data", "search-index.json"), "utf8"));
+const lexicon = JSON.parse(fs.readFileSync(path.join(root, "data", "search-lexicon.json"), "utf8"));
 
 const failures = [];
 function check(name, fn) {
@@ -89,6 +90,23 @@ check("current-essay context boosts matching passages", () => {
   const top = withContext.results[0];
   assert.ok(top.reasons.some((r) => r.label === "current essay"), "context boost should appear in reasons");
   assert.ok(top.score > (withoutContext.results[0].score), "context should raise the score");
+});
+
+check("lexicon synonyms boost conceptually related passages", () => {
+  // "silicon" passages that also mention chip/wafer/transistor should carry a
+  // related-term boost (the lexicon seam), and that boost should not appear
+  // when no lexicon is supplied.
+  const withLexicon = rank("silicon", { lexicon });
+  const boosted = withLexicon.results.find((result) =>
+    result.reasons.some((item) => /^related: /.test(item.label))
+  );
+  assert.ok(boosted, "expected at least one synonym-boosted result");
+
+  const withoutLexicon = rank("silicon");
+  const leaked = withoutLexicon.results.some((result) =>
+    result.reasons.some((item) => /^related: /.test(item.label))
+  );
+  assert.ok(!leaked, "synonym boost must not appear without a lexicon");
 });
 
 check("every result's score equals the sum of its reasons", () => {
