@@ -315,7 +315,14 @@
             reasons.push(reason("current essay", CONTEXT_BOOST));
           }
           passageHits.push(makeResult(
-            Object.assign({ kind: "passage", passageId: passage.passageId, blockType: passage.blockType, snippet: makeSnippet(passage.text, match.firstIndex, match.firstLength) }, base),
+            Object.assign({
+              kind: "passage",
+              passageId: passage.passageId,
+              blockType: passage.blockType,
+              rangeStart: match.firstIndex,
+              rangeEnd: match.firstIndex + match.firstLength,
+              snippet: makeSnippet(passage.text, match.firstIndex, match.firstLength),
+            }, base),
             reasons
           ));
         }

@@ -92,6 +92,14 @@ check("current-essay context boosts matching passages", () => {
   assert.ok(top.score > (withoutContext.results[0].score), "context should raise the score");
 });
 
+check("passage results carry a highlightable range", () => {
+  const out = rank("verdun");
+  const passage = out.results.find((result) => result.kind === "passage");
+  assert.ok(passage, "expected a passage result for 'verdun'");
+  assert.ok(Number.isInteger(passage.rangeStart) && passage.rangeStart >= 0, "rangeStart must be a non-negative integer");
+  assert.ok(passage.rangeEnd > passage.rangeStart, "rangeEnd must exceed rangeStart for a deep-link highlight");
+});
+
 check("lexicon synonyms boost conceptually related passages", () => {
   // "silicon" passages that also mention chip/wafer/transistor should carry a
   // related-term boost (the lexicon seam), and that boost should not appear

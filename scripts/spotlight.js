@@ -331,6 +331,8 @@
       essaySlug: result.essaySlug,
       sectionNumber: result.sectionNumber,
       passageId: result.passageId,
+      rangeStart: result.rangeStart,
+      rangeEnd: result.rangeEnd,
       query
     });
     const detail = normalizeSpaces([
