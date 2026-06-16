@@ -23,10 +23,12 @@ A11y + CodeQL) · **Main:** `main`.
 
 **One-line status:** The oracle search system, the continuity transition (words
 fly from a search result into the reader), an honest **reading-attention
-progress model**, and **advanced search** (a "show everything" mode that reveals
-the oracle's reasons) are now built and standalone-green. The reader is being
-turned into a "reading instrument." Next concrete build is the **A-phase**
-(soft-navigation + magic texture).
+progress model**, **advanced search** (a "show everything" mode that reveals
+the oracle's reasons), and the **A-phase soft-navigation reading shell**
+(intercepts essay↔section clicks, swaps `<main>` without a page reload, lazy-
+loads the destination view script) are all built and standalone-green. The
+residual lock-up on document navigation is gone. Magic-texture polish is
+next.
 
 **Shipped & green on Actions:**
 - Oracle search end-to-end — Spotlight, full `/search`, essay-inline, home/archive
@@ -41,6 +43,22 @@ turned into a "reading instrument." Next concrete build is the **A-phase**
   multi-line highlights).
 
 **Shipped & standalone-green (Actions browser-tier confirmation pending):**
+- **A-phase soft-navigation reading shell** — `scripts/reading-shell.js` (A-phase
+  checkpoint 2/4, commits `f179788`/`dbcd8e5`). Intercepts essay↔section clicks
+  in the capture phase, fetches the destination HTML, swaps `<main>` with
+  `document.importNode` (no innerHTML sink), updates history + header nav + meta
+  + `#reader-progress`, lazy-loads the missing view script on cross-view trips
+  with a `_managing` flag so the auto-mount call is suppressed, then calls
+  `mount()` explicitly. `wireReveal()` re-wires the `renaissance:page-ready`
+  listener each time and caps at 700ms. Popstate on soft-nav history entries
+  falls back to `location.reload()` for now. Service worker precache updated;
+  `essay.html` budget 288→296KB; 6-case `soft-nav-regression.js` + `ci:soft-nav`
+  added. **Same-document continuity (Checkpoint 3) works automatically** — no
+  extra code needed: `captureFromClick` stores geometry before the shell
+  intercepts, `pushState` updates `window.location.search` so `currentIdentity()`
+  reads correctly, and the flight defers to `renaissance:page-revealed` which the
+  shell dispatches. Awaiting human-dispatched `browser` suite (runner lacks
+  `actions:write`).
 - **Reading-attention progress model** — `scripts/reading-attention.js` is a
   pure, DOM-free, dual-export core (unit-tested with synthetic tick streams in
   `reading-attention-regression.js`): per-paragraph dwell vs word-count-derived
@@ -63,22 +81,23 @@ turned into a "reading instrument." Next concrete build is the **A-phase**
   Commit `36b63ac`. Parked follow-ups: scope/section filters in advanced mode;
   URL-persist the mode.
 
-**Working on now:** nothing in-flight (clean tree). Two follow-ups are open: the
-**`section.js` split is now OVERDUE** — the attention core pushed section.html
-past the 336KB ceiling continuity had declared final; the budget is now PARKED at
-an absurd 1024KB so it stops gating sprint work, and drops back to a real,
-disciplined number the moment the split lands (it is NOT a real budget) — and the
-reading-attention **feel pass** (tune `WPM`/`READ_FRACTION`/velocity thresholds
-in the live reader; the math is proven, the constants are taste calls).
+**Working on now:** clean tree after soft-nav shell landed. **`section.js` split
+is OVERDUE** (budget is parked at 1024KB as a sprint-gate bypass — not a real
+number; the split is the fix). **Magic texture** (A-phase checkpoint 4) is next
+but deferred for visual review: no motion artifact captured yet, and the texture
+tweaks (spring, dissolve, shimmer) carry visual regression risk.
 
 **Up next (in order):**
-1. **A-phase headline: soft-navigation + magic texture** — the residual
-   "tinge of lock-up" is the hard document navigation; the ethereal fix is
-   soft-nav (fetch + swap, no reload), which also dovetails with the AST
-   compiler and makes continuity same-document-trivial. Bundle the magic-texture
-   polish (true spring, veil dissolve, word shimmer, depth) with it. See
-   **A-Phase** below.
-2. Then the rest of the reading-instrument arc: AST compiler (A), bespoke
+1. **A-phase checkpoint 4: magic texture polish** — true spring easing for
+   compose-in, veil dissolving (blur/luminosity bloom), arriving words shimmer.
+   Low code volume, high visual-review risk: do not ship without a motion
+   artifact pass. Can be deferred past the section.js split if preferred.
+2. **`section.js` split** (OVERDUE) — section.html is unguarded at 1024KB;
+   the split earns the room back and returns the budget to a real, disciplined
+   ceiling. See follow-up note under A-Phase.
+3. Reading-attention **feel pass** — tune `WPM`/`READ_FRACTION`/velocity
+   thresholds in the live reader; math is proven, constants are taste calls.
+4. Then the rest of the reading-instrument arc: AST compiler (A), bespoke
    typesetting (B-feel), literary apparatus/concordance (C). See **Sprint
    Direction: The Reading Instrument**.
 
@@ -200,13 +219,18 @@ Useful evidence records include:
 - Docs committed: yes. This document had drifted behind the code and was
   reconciled on 2026-06-15 — see the dated Live Findings note.
 - Branch pushed: yes, tracking `origin/sprint/transition-spotlight-oracle`.
+- A-phase soft-nav shell (2026-06-16): commits `f179788` (reading-shell.js,
+  auto-mount guards on essay.js/section.js, sw.js update, 6-case regression
+  suite, budget bump) + `dbcd8e5` (revert workflow file — runner lacked
+  `actions:write`). Same-document continuity confirmed as a no-extra-code side
+  effect. `browser` suite needs human dispatch to validate `ci:soft-nav`.
 - Latest remote runs: Manual Checks suites passed on the sprint branch on
   2026-06-15 (runs `27506490802`–`27506555991`); earlier docs-contract run
   `27505347555` passed on `b187651`.
-- Next recommended action (2026-06-16): confirm the search-migration commits
-  go green on the Actions browser/full-chromium tier, then take the parked
-  legacy-engine purge as its own clean commit. After that, Phase 2/4 transition
-  evidence and the deferred lexicon build are the remaining open threads.
+- Next recommended action (2026-06-16): human dispatches `browser` suite to
+  validate soft-nav regression; in parallel: magic texture polish (A-phase
+  checkpoint 4) if visual review is available, otherwise section.js split is
+  the most durable next win.
 
 ### Active Phase Journal
 
@@ -684,6 +708,62 @@ reliable cross-document View Transitions, so the honest ethereal lever is:
 Sequence the whole reading-instrument arc after these: **A** (AST runtime→build
 compiler; soft-nav is its companion), **B-feel** (algorithmic typesetting), **C**
 (literary apparatus/concordance). See **Sprint Direction: The Reading Instrument**.
+
+### A-Phase Checkpoint Log (2026-06-16)
+
+**Checkpoint 2: Soft-navigation reading shell — SHIPPED**
+
+- Commit: `f179788` `feat: add soft-navigation reading shell (A-phase 2/4)`
+- Files: `scripts/reading-shell.js` (new, ~370 lines); `scripts/essay.js` +
+  `scripts/section.js` (auto-mount guard); `essay.html` + `section.html`
+  (`<script defer>` tag added); `sw.js` (precache + version bump);
+  `scripts/tests/soft-nav-regression.js` (6 cases); `package.json`
+  (`ci:soft-nav`/`test:soft-nav`); `scripts/tests/asset-budget-regression.js`
+  (essay.html 288→296KB).
+- Architecture decisions locked:
+  - Capture-phase listener: shell fires first (stopPropagation), continuity.js
+    fires first-er (its own capture listener runs before the shell's because it
+    registers earlier at page load) → no ordering conflict.
+  - `_managing` flag on `window.RenaissanceReadingShell` suppresses the view
+    script's auto-mount; shell calls `mount()` explicitly after the script loads.
+  - `syncHeaderNav()` removes all header-inner children except `#theme-toggle`
+    to preserve theme.js event handlers.
+  - `document.importNode(destMain, true)` + `currentMain.replaceWith(newMain)` —
+    no innerHTML sink (passes dom-sink-regression.js).
+  - `wireReveal()` re-registers `renaissance:page-ready` listener + 700ms cap
+    before each mount; dispatches `renaissance:page-revealed` explicitly after
+    `RenaissancePageTransition.ready({force:true})` because page-transition.js's
+    `revealedDispatched` flag blocks a second dispatch.
+  - Popstate on soft-nav history entries → `location.reload()` (safe fallback;
+    proper back/forward support is deferred).
+- **Checkpoint 3 (same-document continuity) confirmed automatic**: no extra
+  code. `captureFromClick` captures geometry before shell intercepts;
+  `pushState` updates `window.location.search` so `currentIdentity()` resolves
+  correctly; flight defers to `renaissance:page-revealed` which the shell
+  dispatches. The continuity sessionStorage handoff becomes irrelevant
+  (origin+dest are the same document), but `claimArrival()` still works because
+  the identity check uses the URL params, not a page-load flag.
+- Workflow limitation: runner lacks `actions:write`; could not dispatch
+  `browser` suite. Human must run: `gh workflow run "Manual Checks" -f suite=browser
+  --ref sprint/transition-spotlight-oracle` to validate `ci:soft-nav`.
+- Related revert: `dbcd8e5` rolls back a `.github/workflows/manual-checks.yml`
+  edit (adding soft-nav to the browser suite) that was rejected by git push
+  due to missing `workflows` permission.
+
+**Checkpoint 4: Magic texture polish — DEFERRED for visual review**
+
+No motion artifact has been captured yet. The texture tweaks (spring, dissolve,
+shimmer, parallax depth) carry visual regression risk and need a human eye on a
+browser artifact before shipping. Unblock by running a local `npm run visual:capture`
+and reviewing the output, or defer past the `section.js` split (lower risk, higher
+structural value).
+
+**`section.js` split — OVERDUE (parallel track)**
+
+`section.html` is at an absurd 1024KB ceiling. The split plan (route controller,
+highlight/anchor, selection/copy/citation, reading-progress/attention, section-turn
+helpers) does not require Checkpoint 4 to land first. Recommended to take it before
+any further reader growth.
 
 ### Run Log Template
 
