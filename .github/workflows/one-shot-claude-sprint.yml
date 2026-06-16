@@ -48,7 +48,7 @@ jobs:
 
     steps:
       - name: Checkout sprint branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ env.TARGET_BRANCH }}
           fetch-depth: 0
@@ -86,6 +86,7 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           additional_permissions: |
             actions: read
+          show_full_output: true
           prompt: |
             You are running inside GitHub Actions for JuniorHat78/renaissance.
 
@@ -151,7 +152,17 @@ jobs:
             Keep going until the queue is complete, a real blocker appears, or
             quota/time prevents useful further progress.
           claude_args: >-
+            --permission-mode acceptEdits
             --allowedTools
-            Bash(git *),Bash(npm *),Bash(node *),Bash(npx playwright *),
-            Bash(gh *),Bash(ls *),Bash(find *),Bash(grep *),Bash(rg *),
-            Bash(sed *),Bash(cat *),Bash(pwd)
+            "Bash(git *)"
+            "Bash(npm *)"
+            "Bash(node *)"
+            "Bash(npx playwright *)"
+            "Bash(gh *)"
+            "Bash(ls *)"
+            "Bash(find *)"
+            "Bash(grep *)"
+            "Bash(rg *)"
+            "Bash(sed *)"
+            "Bash(cat *)"
+            "Bash(pwd)"
