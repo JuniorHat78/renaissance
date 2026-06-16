@@ -9,6 +9,68 @@ The document should change as the sprint teaches us more. It is a compass, not a
 contract. Prefer updating notes and checklists over silently carrying new
 assumptions in an agent thread.
 
+---
+
+## State Of The Project (LIVE — update every session)
+
+> This block is the dashboard. Read it first; keep it current. When you finish a
+> thread, move it from **Up next** to **Shipped** and re-point **Working on now**.
+> Detail lives in the dated sections below — this is just the at-a-glance state.
+
+**Last updated:** 2026-06-16 · **Branch:** `sprint/transition-spotlight-oracle`
+(open as draft PR #12; pushes auto-run CI + Manual Checks full-chromium +
+A11y + CodeQL) · **Main:** `main`.
+
+**One-line status:** The oracle search system and the continuity transition
+(words fly from a search result into the reader) are shipped and green. The
+reader is being turned into a "reading instrument." Next concrete build is an
+honest **reading-attention progress model**.
+
+**Shipped & green on Actions:**
+- Oracle search end-to-end — Spotlight, full `/search`, essay-inline, home/archive
+  inline all route through one ranking truth (`search-oracle.js` +
+  `oracle-client.js`).
+- **Continuity transition** (`continuity.js`) — clicked `<mark>` words FLIP into
+  the reader's highlight; fallbacks airtight; reduced-motion safe.
+- **Composed arrival** — graceful out + paper veil + content-gated reveal, so the
+  flight is wrapped in a seamless navigation (no lock-up flash). `revealMode`
+  is `"composed"`; reveal fires `renaissance:page-revealed`.
+- Selection copy-chip anchors to the selection's end (was pinning above
+  multi-line highlights).
+
+**Working on now:** nothing in-flight (clean tree). Next session starts fresh.
+
+**Up next (in order):**
+1. **Reading-attention progress model** — replace scroll-depth `progress` with an
+   attention model (per-paragraph dwell vs word-count-derived expected time,
+   velocity/zone/presence gates). Fixes "Continue reading 1%". Full spec below:
+   see **Reading-Attention Progress Model**. Pure testable core + thin wiring.
+2. **Advanced search** — keep the curated default (a couple per section); add an
+   exhaustive "show everything" mode (uncapped `perSection`/limit, per-section
+   counts, the oracle's self-explaining ranking reasons). Reuse the hidden
+   `advancedToggle`. See **Advanced Search Plan** below.
+3. **A-phase headline: soft-navigation + magic texture** — the residual
+   "tinge of lock-up" is the hard document navigation; the ethereal fix is
+   soft-nav (fetch + swap, no reload), which also dovetails with the AST
+   compiler and makes continuity same-document-trivial. Bundle the magic-texture
+   polish (true spring, veil dissolve, word shimmer, depth) with it. See
+   **A-Phase** below.
+4. Then the rest of the reading-instrument arc: AST compiler (A), bespoke
+   typesetting (B-feel), literary apparatus/concordance (C). See **Sprint
+   Direction: The Reading Instrument**.
+
+**Known cuts / decisions:** editorial apparatus (footnotes/sidenotes) is OUT
+(essays are continuous prose); never fabricate apparatus; per-passage search
+results (not per-occurrence); custom FLIP not native View Transitions (Firefox).
+
+**Process (also in agent memory):** validate on Actions, not the laptop — push
+and read the run rather than running local browser suites. Conventional commits,
+no Claude attribution. Talk before executing big calls. Site deploys under
+`/renaissance/` (relative links). Run `node scripts/generate-cache-version.js`
+after changing any precached asset.
+
+---
+
 ## Live Document Rules
 
 This file is a working control room for the sprint. Keep it current enough that
@@ -427,6 +489,106 @@ wrapped in a seamless transition, applied to **all click-navigations**:
 - **Scale fidelity**: flight scale is height-ratio uniform; if the snippet vs
   reader type contrast ever feels off mid-flight, switch to a width-aware or
   font-size-explicit tween.
+
+## Next Build Specs (handoff)
+
+These are the three specced-but-unbuilt threads the dashboard points at, in
+order. Written to be picked up cold.
+
+### Reading-Attention Progress Model (NEXT)
+
+**Problem.** "Continue reading" shows ~1% after real reading. Root cause: it
+measures the *scrollbar*, not *reading*. `archive.js renderContinueReading`
+reads `target.progress` (current scroll position). `progress` under-reports
+(scroll up to re-read → ~0); the obvious "fix", `maxProgress` (furthest
+scrolled), over-reports (scrub down to check length → reads as 100%). The user
+explicitly rejected both. We want **attention**: how far they actually *read*.
+
+**The model (over-engineered on purpose, but principled + testable):**
+- **Unit = paragraph.** Reader paragraphs already carry `data-passage-id` and the
+  AST/index already has per-passage **word counts** — use them.
+- **Expected read time** per paragraph = `words / WPM` (default **WPM 240**).
+- **Dwell accounting.** Accumulate *active reading time* per paragraph; a
+  paragraph flips to **read** when dwell ≥ **READ_FRACTION (default 0.5)** of its
+  expected time. So a fat paragraph needs real seconds; a heading clears trivially.
+- **Three gates decide if a tick counts (the intelligence):**
+  1. **Velocity gate** — credit ramps to ~0 as scroll speed rises (a fast scrub
+     earns nothing; reading pace earns full). Kills the "scrubbed to check
+     length" inflation.
+  2. **Reading-zone weighting** — only content near the sightline (the existing
+     `READING_LINE_RATIO = 0.36` band) accrues, weighted by overlap with the zone.
+     Credit what the eyes were on, not what flew past edges.
+  3. **Presence gate** — `document.hidden` (Page Visibility) → pause the clock.
+     Don't count time spent in another tab.
+- **Outputs (one model, three uses):** `progress` = read words ÷ total words
+  (length-weighted); `furthestRead` = honest high-water mark; `frontier` =
+  read/unread boundary = the **resume point** (where to land them).
+
+**Architecture (matches the codebase + CI-first testing idiom):**
+- **Pure, dual-export core** `scripts/reading-attention.js` — no DOM. API like
+  `create(paragraphs)` → `{ tick({ now, zoneParagraphs:[{index,weight}], velocity,
+  visible }), summary() → { progress, furthestRead, frontier }, serialize()/
+  hydrate() }`. Deterministic → unit-test with synthetic tick streams (assert a
+  simulated scrub earns ~0, simulated reading flips paragraphs read). Add
+  `scripts/tests/reading-attention-regression.js` to the standalone gate.
+- **Thin wiring in `section.js`** — a ~250–300ms heartbeat while visible:
+  snapshot zone occupancy + scroll velocity, call `tick()`, persist the compact
+  read-set into `reading-state` (extend the per-section record). On load,
+  `hydrate()` and resume at `frontier`.
+- **`archive.js`** then reads the attention-derived `progress` (replaces the
+  reverted `maxProgress` stopgap — do NOT just swap to maxProgress).
+- Per-paragraph dwell **capped** (e.g. 2× expected) so leaving the tab open on
+  one paragraph can't inflate; "read" is monotonic.
+- Reduced motion / no-JS: fall back to the current scroll `progress` (never worse
+  than today).
+- Knobs to tune by feel: `WPM` (240), `READ_FRACTION` (0.5), velocity threshold,
+  zone band, heartbeat interval. All reversible constants.
+
+**Why it's the right kind of over-engineered:** it's sophisticated *and*
+provable in CI (pure core), reuses real signal (word counts, sightline), and is
+not a hand-waved probability distribution. It knows reading from scanning and
+pauses when you leave.
+
+### Advanced Search Plan
+
+Default `/search` stays curated: a couple per section, relevance-first (the
+oracle's `perSection` cap, currently 2). Add a **sexy advanced/exhaustive mode**:
+- Uncap: pass a high/`Infinity` `perSection` + `limit` so e.g. "sand" returns all
+  ~98 matching passages (index stores `"sand": 98`), ranked then reading-order.
+- Per-passage, not per-occurrence (a passage with 3 "sand"s shows once).
+- Group by section with **live counts** ("§10 · 37 mentions").
+- Reveal the oracle's **self-explaining ranking reasons** (it already attaches
+  `{label, points}` per result — "term: sand", "section is about sand", "pull
+  quote"). The machinery, shown beautifully.
+- Scope/section filters; jump-to-section.
+- **Reuse the hidden `advancedToggle`** (it was hidden when the oracle took over
+  inline) as the "show me everything" switch. Curated by default, one click to
+  exhaustive.
+
+### A-Phase: Soft-Navigation + Magic Texture (the ethereal headline)
+
+The continuity flight is wrapped in a now-composed navigation, but a **residual
+"tinge of lock-up" remains — it is the hard document navigation itself** (the
+browser tears down one page and builds the next; prefetch warms it, the veil
+masks it, but a real beat of work can't be animated across). Firefox has no
+reliable cross-document View Transitions, so the honest ethereal lever is:
+
+- **Soft navigation** — intercept the click, `fetch` the destination, swap the
+  content into the *current* document (no reload, no teardown). The lock-up
+  *disappears*. This is a real architecture shift but it **dovetails with the AST
+  compiler (sub-project A)** — once content is prebuilt/hydratable, swapping is
+  natural — and it makes continuity **same-document-trivial** (the mark can morph
+  in place; no cross-page sessionStorage handoff).
+- **Magic texture (bundled with the above, per the user):** a true spring easing
+  instead of the cubic-bezier; the veil **dissolving** (soft blur/luminosity
+  bloom) not a flat fade; the arriving words **shimmering/glowing** as they
+  settle; a touch of depth/parallax so the reader *surfaces* rather than appears.
+  None of this removes the lock-up — soft-nav does — but it makes what is there
+  feel enchanted, not mechanical.
+
+Sequence the whole reading-instrument arc after these: **A** (AST runtime→build
+compiler; soft-nav is its companion), **B-feel** (algorithmic typesetting), **C**
+(literary apparatus/concordance). See **Sprint Direction: The Reading Instrument**.
 
 ### Run Log Template
 
