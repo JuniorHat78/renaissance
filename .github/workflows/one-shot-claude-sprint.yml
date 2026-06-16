@@ -1,0 +1,157 @@
+# One-shot unattended Claude sprint runner.
+#
+# IMPORTANT:
+# - Scheduled workflows only run from the repository default branch.
+# - This file must exist on `main` before the scheduled instant.
+# - The scheduled time below is 2026-06-17 04:00 UTC+8, which is
+#   2026-06-16 20:00 UTC.
+# - If that instant has already passed by the time this file lands on `main`,
+#   use workflow_dispatch manually; GitHub will otherwise wait until 2027.
+# - Delete this workflow after the intended run.
+
+name: One-Shot Claude Sprint
+
+on:
+  schedule:
+    - cron: "0 20 16 6 *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Use smoke to prove wiring; use sprint for the real unattended run."
+        required: true
+        default: smoke
+        type: choice
+        options:
+          - smoke
+          - sprint
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  actions: write
+  id-token: write
+
+concurrency:
+  group: one-shot-claude-sprint
+  cancel-in-progress: false
+
+jobs:
+  claude:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+
+    env:
+      TARGET_BRANCH: sprint/transition-spotlight-oracle
+      RUN_MODE: ${{ github.event_name == 'schedule' && 'sprint' || inputs.mode }}
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Checkout sprint branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_BRANCH }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22.17.0
+          cache: npm
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Preflight repository state
+        run: |
+          echo "Run mode: ${RUN_MODE}"
+          git status --short
+          git log --oneline -5
+          npm --version
+          node --version
+
+      - name: Run Claude Code
+        id: claude
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          additional_permissions: |
+            actions: write
+          prompt: |
+            You are running inside GitHub Actions for JuniorHat78/renaissance.
+
+            Current run mode: ${{ env.RUN_MODE }}
+            Target branch: ${{ env.TARGET_BRANCH }}
+
+            If run mode is `smoke`, do not edit files and do not commit.
+            Only do the smoke contract from docs/CLAUDE-AUTONOMOUS-SPRINT.md:
+            confirm you can start, show the current branch, show the latest
+            commit, list the repo root briefly, confirm whether the target
+            branch exists, and stop. If quota blocks you, report that clearly.
+
+            If run mode is `sprint`, continue the sprint from the target branch.
+            First read docs/CLAUDE-AUTONOMOUS-SPRINT.md completely. Then read
+            docs/TRANSITION-SPOTLIGHT-SPRINT.md and inspect the actual code.
+            The target branch backs draft PR #12. Pushed commits update the PR
+            automatically, but you should also keep PR #12 useful with `gh pr
+            view`, `gh pr edit`, or `gh pr comment` for phase-level checkpoint
+            summaries, remote validation results, blockers, and final resume
+            notes. Do not spam the PR for every tiny commit.
+
+            Your mission is to use the available Claude quota productively and
+            safely. Work through the queue in docs/CLAUDE-AUTONOMOUS-SPRINT.md:
+            A-phase soft-navigation reading shell, same-document continuity,
+            magic texture only after correctness, evidence/doc updates, then
+            the listed backlog. If all work is complete, perform the codebase
+            review fallback and write docs/AUTONOMOUS-CODEBASE-REVIEW.md.
+
+            Mandatory rules:
+            - Commit and push frequently. Do not hoard a large unpushed diff.
+            - Treat 30-45 minutes of coherent work as the maximum uncommitted
+              window unless an edit is truly indivisible.
+            - Use conventional commits.
+            - Do not include Claude attribution or AI provenance text.
+            - Do not change the reader visual progress bar to attention-based.
+            - Do not fabricate editorial apparatus.
+            - Do not reset or discard user/repo work.
+            - Run focused tests before commits.
+            - Run node scripts/generate-cache-version.js after precached asset
+              changes.
+            - Update docs/TRANSITION-SPOTLIGHT-SPRINT.md when phase state,
+              evidence, decisions, or known risks change.
+            - Use GitHub Actions aggressively for evidence when browser,
+              transition, route, service-worker, accessibility, or device
+              behavior changes. Dispatch Manual Checks suites with `gh workflow
+              run` when useful, watch/read failures, and fix real regressions.
+            - Keep draft PR #12 updated at meaningful checkpoints so the human
+              can see what landed, what ran, what failed, and where to resume.
+            - If quota or time is running out, stop starting risky work, commit
+              and push the coherent state, and write exact resume notes.
+
+            Prefer these validation commands as relevant:
+            npm run check
+            npm run ci:standalone
+            npm run ci:page-transitions
+            npm run ci:continuity
+            npm run ci:passage-alignment
+            npm run ci:regression
+            npm run ci:a11y
+            npm run ci:devices
+            npm run ci:slow-network
+
+            Keep going until the queue is complete, a real blocker appears, or
+            quota/time prevents useful further progress.
+          claude_args: >-
+            --allowed-tools
+            Bash(git *),Bash(npm *),Bash(node *),Bash(npx playwright *),
+            Bash(gh *),Bash(ls *),Bash(find *),Bash(grep *),Bash(rg *),
+            Bash(sed *),Bash(cat *),Bash(pwd)
