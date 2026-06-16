@@ -99,6 +99,28 @@ html.page-transition-out body {
     filter 120ms var(--motion-ease);
 }
 
+/* Composed arrival (the paper veil). Until the reader has actually rendered
+   (page-transition-ready), hold the content hidden so a click-navigation never
+   shows an empty shell or a content pop — the paper body background shows
+   through, seamless with the inter-page gap, then the content composes in. We
+   hide via `visibility` (not opacity) so computed opacity stays 1 and the
+   visibility regressions are unaffected. Excluded while leaving
+   (page-transition-out keeps the outgoing recede visible) and under reduced
+   motion. A CSS failsafe forces the content back even if the reveal script
+   never runs, so a dead script can never strand a blank page. */
+@media (prefers-reduced-motion: no-preference) {
+  html:not(.page-transition-ready):not(.page-transition-out) main {
+    visibility: hidden;
+    animation: page-veil-failsafe 1ms 1100ms forwards;
+  }
+}
+
+@keyframes page-veil-failsafe {
+  to {
+    visibility: visible;
+  }
+}
+
 html[data-page-arrival="navigation"].page-transition-ready::before,
 html.page-transition-out::before,
 html[data-page-arrival="navigation"].page-transition-ready::after,

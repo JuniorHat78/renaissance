@@ -251,8 +251,8 @@ async function searchResultArrival(page, scenarioDir, base) {
 
   assert.equal(clickState.out, true, "search result click should mark page outgoing immediately");
   assert.equal(clickState.source, true, "search result click should mark source immediately");
-  assert.ok(clickState.delay <= 75, "outgoing delay should remain below tap-latency threshold");
-  assert.equal(clickState.revealMode, "immediate", "destination reveal should remain immediate");
+  assert.ok(clickState.delay <= 200, "outgoing delay should stay responsive (graceful out, ~120ms)");
+  assert.equal(clickState.revealMode, "composed", "destination reveal composes on content-ready under the paper veil");
 
   const started = Date.now();
   await page.waitForURL(/section\.html/, { waitUntil: "domcontentloaded", timeout: 30000 });

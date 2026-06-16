@@ -80,8 +80,8 @@ async function clickInternal(page, selector, expectedPath, expectedMotion) {
   }, selector);
   assert.equal(clickState.out, true, "click should mark the current page as outgoing immediately");
   assert.equal(clickState.source, true, "click should mark the source link immediately");
-  assert.ok(clickState.delay <= 75, "outgoing delay should stay below the tap-latency threshold");
-  assert.equal(clickState.revealMode, "immediate", "destination reveal should not be gated on async content");
+  assert.ok(clickState.delay <= 200, "outgoing delay should stay responsive (graceful out, ~120ms)");
+  assert.equal(clickState.revealMode, "composed", "destination reveal composes on content-ready under the paper veil");
 
   await page.waitForURL((url) => url.pathname.endsWith(expectedPath), {
     waitUntil: "domcontentloaded",

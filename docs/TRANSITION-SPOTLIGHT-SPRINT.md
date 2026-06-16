@@ -385,6 +385,38 @@ browser-tier confirmation.
 - [ ] Validate on Actions (browser/full-chromium), not the laptop. (pushed
       2026-06-16; awaiting run.)
 
+### Transition hardening — composed arrival (2026-06-16)
+
+The flight was landing inside a rough navigation (the page "locked up" on click,
+then a flash to an empty reader, *then* the flight). Hardened so the flight is
+wrapped in a seamless transition, applied to **all click-navigations**:
+
+- [x] **Graceful out**: `OUT_DURATION_MS` 16 -> 120 so the existing exit
+      animation (recede + rule sweep) actually plays instead of being guillotined
+      — the click now reads as a departure, not a freeze. Tap-latency test caps
+      raised 75 -> 200 in page-transition + transition-evidence to match the
+      intentional out.
+- [x] **Paper veil**: a CSS veil (`main` `visibility:hidden` until
+      `page-transition-ready`; excluded during the out-phase and under reduced
+      motion; CSS failsafe forces it visible after 1.1s if the script dies) holds
+      the content hidden so an arrival never shows an empty shell or a pop. Uses
+      `visibility` (not opacity) so computed opacity stays 1 and the existing
+      visibility regressions pass.
+- [x] **Composed reveal**: `page-transition.js` reveals on
+      `renaissance:page-ready` (capped at `REVEAL_CAP_MS = 700`) instead of
+      immediately, so the content + the existing transform-based compose-in
+      animations land together. `revealMode` is now `"composed"`
+      (`"immediate"` under reduced motion).
+- [x] **Flight coordinated with the reveal**: `revealPage()` fires
+      `renaissance:page-revealed`; continuity defers its INVERT+flight to that
+      event so the words are seen flying as the content composes in, never
+      animating under the veil. Claiming is still always safe — the deferred
+      `start()` always scrolls the highlight into place even if the flight bails.
+- [x] Local browser suites green: page-transitions (composed reveal + reduced-
+      motion shell), continuity (flight + fallbacks), transition-evidence
+      (composed revealMode + graceful-out timing across arrival scenarios).
+- [x] essay.html budget 272 -> 280 (shared veil CSS weight). Awaiting Actions.
+
 ### Continuity follow-ons (parked)
 
 - **Spotlight polish**: capture already fires for mark-bearing Spotlight result
@@ -2054,10 +2086,15 @@ Add dated notes here as the sprint proceeds.
   commit `b187651`.
 - Subagents are unavailable in this session due account/usage limits. Continue
   the sprint locally with remote Actions for independent compute signal.
-- Cross-page transitions currently use `scripts/page-transition.js` plus CSS
-  classes on `<html>`. They deliberately reveal destination pages immediately
-  (`revealMode: "immediate"`) and keep `OUT_DURATION_MS` at 16ms, so the core
-  page-to-page path is not intentionally blocking on async content.
+- Cross-page transitions use `scripts/page-transition.js` plus CSS classes on
+  `<html>`. SUPERSEDED 2026-06-16 (continuity hardening): the destination reveal
+  is now **composed**, not immediate — a CSS paper veil (`main` visibility:hidden
+  until `page-transition-ready`, non-reduced-motion only) holds the content until
+  it has rendered (`renaissance:page-ready`), capped at `REVEAL_CAP_MS` so a slow
+  load reveals anyway. `OUT_DURATION_MS` raised 16 -> 120 for a perceptible
+  graceful out. Reduced motion keeps the immediate, unveiled path. The reveal
+  fires `renaissance:page-revealed`, which continuity uses to begin its flight as
+  the content composes in.
 - Cross-page transition coverage currently asserts no stuck hidden state, no
   delayed destination reveal, reduced-motion shell visibility, back navigation,
   and source geometry preservation. It does not yet record frames, screenshots,

@@ -1,7 +1,13 @@
 (function () {
   const STORAGE_KEY = "renaissance:page-transition";
-  const OUT_DURATION_MS = 16;
+  // A real, brief out: long enough to perceive the page depart (the recede +
+  // rule sweep), short enough to stay responsive. The old 16ms guillotined the
+  // exit animation, which read as a freeze on click.
+  const OUT_DURATION_MS = 120;
   const CONTENT_READY_FALLBACK_MS = 1200;
+  // Cap on how long the composed arrival holds the paper veil waiting for
+  // content. A slow load reveals anyway rather than stranding the veil.
+  const REVEAL_CAP_MS = 700;
   const STORED_MOTION_MAX_AGE_MS = 8000;
   const SECTION_READER_NAV = "#prev-link, #next-link, #next-cta";
 
@@ -10,6 +16,7 @@
   let leaving = false;
   let ready = false;
   let hasIncomingMotion = false;
+  let revealedDispatched = false;
   let sourceAnchor = null;
   let primeClearTimer = null;
 
@@ -124,6 +131,13 @@
     root.classList.remove("page-transition-prep", "page-transition-out");
     root.classList.add("page-transition-ready");
     root.removeAttribute("aria-busy");
+    // Lift the paper veil and signal the composed arrival. Continuity listens
+    // for this so its flight begins as the content is revealed — seen flying,
+    // not animating under the veil.
+    if (!revealedDispatched) {
+      revealedDispatched = true;
+      window.dispatchEvent(new CustomEvent("renaissance:page-revealed"));
+    }
   }
 
   function markContentReady() {
@@ -312,12 +326,20 @@
   }
 
   if (reducedMotion) {
+    // No veil under reduced motion: reveal the shell immediately.
     revealPage();
     markContentReady();
   } else {
-    revealPage();
-    window.addEventListener("renaissance:page-ready", markContentReady);
-    window.setTimeout(markContentReady, CONTENT_READY_FALLBACK_MS);
+    // Composed arrival: the CSS paper veil holds the content hidden; reveal +
+    // compose only once the page has actually rendered (renaissance:page-ready),
+    // so there is no empty shell and no content pop. Capped so a slow load
+    // reveals anyway rather than stranding the veil.
+    const revealComposed = () => {
+      revealPage();
+      markContentReady();
+    };
+    window.addEventListener("renaissance:page-ready", revealComposed, { once: true });
+    window.setTimeout(revealComposed, REVEAL_CAP_MS);
   }
 
   window.addEventListener("pageshow", (event) => {
@@ -335,7 +357,9 @@
 
   window.RenaissancePageTransition = {
     outDelayMs: OUT_DURATION_MS,
-    revealMode: "immediate",
+    // Composed arrival: the reveal is gated on content-ready (capped) under the
+    // paper veil, not painted immediately on an empty shell.
+    revealMode: reducedMotion ? "immediate" : "composed",
     ready: revealPage
   };
 })();

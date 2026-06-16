@@ -162,25 +162,34 @@
       return false;
     }
 
-    // Scroll-then-measure: settle the destination to its final resting place
-    // first, so LAST is the rect the words must actually land on.
-    if (typeof scrollToSightline === "function") {
-      scrollToSightline(mark, { behavior: "auto" });
-    }
+    // The reader is held under the paper veil until it composes in, so defer the
+    // flight to the reveal — the words are then seen flying, not animating under
+    // the veil. start() always scrolls the highlight into place first (scroll-
+    // then-measure), so even if the flight measurement is degenerate the landing
+    // is still correct; claiming the arrival is therefore always safe.
+    var start = function () {
+      if (typeof scrollToSightline === "function") {
+        scrollToSightline(mark, { behavior: "auto" });
+      }
+      var last = mark.getBoundingClientRect();
+      if (!last.width || !last.height) {
+        return;
+      }
+      var source = payload.rect;
+      var dx = source.left - last.left;
+      var dy = source.top - last.top;
+      var scale = source.height / last.height;
+      if (!Number.isFinite(dx) || !Number.isFinite(dy) || !Number.isFinite(scale) || scale <= 0) {
+        return;
+      }
+      fly(mark, dx, dy, scale, payload);
+    };
 
-    var last = mark.getBoundingClientRect();
-    if (!last.width || !last.height) {
-      return false;
+    if (root.classList.contains("page-transition-ready")) {
+      start();
+    } else {
+      window.addEventListener("renaissance:page-revealed", start, { once: true });
     }
-    var source = payload.rect;
-    var dx = source.left - last.left;
-    var dy = source.top - last.top;
-    var scale = source.height / last.height;
-    if (!Number.isFinite(dx) || !Number.isFinite(dy) || !Number.isFinite(scale) || scale <= 0) {
-      return false;
-    }
-
-    fly(mark, dx, dy, scale, payload);
     return true;
   }
 

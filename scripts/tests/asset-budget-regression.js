@@ -22,8 +22,9 @@ const PAGE_BUDGET_BYTES = {
   // continuity work, NOT another budget bump.
   "section.html": 336 * 1024,
   // essay.html carries the motif card + oracle client/engine on top of the
-  // essay view. Raised 256 -> 272 with the oracle-native search migration.
-  "essay.html": 272 * 1024,
+  // essay view. Raised 256 -> 272 (oracle-native search) -> 280 (the composed-
+  // arrival veil CSS, which is shared site.css weight across every page).
+  "essay.html": 280 * 1024,
   // index.html crossed the default ceiling when the continuity transition
   // (capture side) joined the home archive. Raised 256 -> 272.
   "index.html": 272 * 1024
