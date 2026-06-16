@@ -2125,14 +2125,22 @@
   }
 
   function rangeRect(range) {
+    // Anchor to the END of the selection (its last line), not the bounding box
+    // of the whole thing. A multi-line highlight's bounding box starts at the
+    // first line, so anchoring there pins the chip far above — while the pointer
+    // finished down at the last line. The last client rect is the end line for a
+    // multi-line selection and the only rect for a single-line one.
+    const rects = range.getClientRects();
+    if (rects.length > 0) {
+      const last = rects[rects.length - 1];
+      if (last && (last.width > 0 || last.height > 0)) {
+        return last;
+      }
+    }
+
     const direct = range.getBoundingClientRect();
     if (direct && (direct.width > 0 || direct.height > 0)) {
       return direct;
-    }
-
-    const rects = range.getClientRects();
-    if (rects.length > 0) {
-      return rects[0];
     }
     return null;
   }
