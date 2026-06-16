@@ -15,6 +15,13 @@ control room. This file is the overnight execution contract.
 Continue the `sprint/transition-spotlight-oracle` branch from the current HEAD
 and push useful work in small, recoverable checkpoints.
 
+Use the available session deeply. The goal is not to stop after the first
+obvious task. If the immediate A-phase work is already done, blocked, or unsafe
+to continue, move down the queued work in this file. If implementation work
+becomes unsafe, switch to codebase review, test-gap review, documentation, and
+precise follow-up planning. Keep producing durable, pushed value until quota,
+timeout, or a real blocker stops the run.
+
 The target branch is:
 
 ```text
@@ -159,6 +166,18 @@ commit boundaries include:
 
 As a rough rule, do not carry more than 30-45 minutes of useful work uncommitted
 unless you are in the middle of an indivisible edit. If in doubt, checkpoint.
+
+For long autonomous sessions, use this rhythm:
+
+1. Read enough context for the next slice.
+2. Make the smallest coherent implementation or documentation change.
+3. Run the narrowest useful validation.
+4. Commit and push.
+5. Record state if the result changes the sprint map.
+6. Start the next independent slice.
+
+Do not wait until a whole phase is perfect before committing. The overnight run
+should leave a chain of useful commits, not one fragile mega-commit.
 
 Use conventional commits. Examples:
 
@@ -325,6 +344,10 @@ done safely: fetch or otherwise obtain the target document, swap the relevant
 reader shell DOM, update history, remount the correct view controller, and keep
 the continuity transition in one document.
 
+If A-phase appears already complete when the run starts, verify it rather than
+redoing it. Read the commits after this file, run the relevant tests, update the
+sprint doc if needed, then proceed to the next queued work.
+
 ## A-Phase Checkpoint 1 Already Done
 
 Checkpoint 1 is already complete at the expected starting HEAD:
@@ -369,6 +392,18 @@ window.RenaissanceReadingShell
 Do not make this a broad SPA framework. It should be a narrow reading-shell
 adapter for the existing static pages.
 
+Design principles:
+
+- Enhancement, not dependency. Hard navigation remains the fallback.
+- Same static HTML source of truth. The fetched document is parsed; scripts are
+  not re-executed.
+- View modules own behavior. The shell swaps DOM and calls mount/unmount; it
+  does not duplicate essay/section business logic.
+- Router remains the route grammar source of truth.
+- Soft navigation should be invisible when it cannot prove safety.
+- History must feel native: back/forward should not trap, double-render, or lose
+  the reader.
+
 Likely shell responsibilities:
 
 1. Detect eligible links.
@@ -386,6 +421,21 @@ Likely shell responsibilities:
 10. Dispatch `renaissance:page-ready` at the right time for composed arrival.
 11. Preserve back/forward using `popstate`.
 12. On failure, assign `window.location.href` to the destination URL.
+
+Suggested implementation slices:
+
+1. Add the shell module with pure URL eligibility helpers and unit-ish tests if
+   a good no-browser seam exists.
+2. Wire the script into `essay.html` and `section.html`.
+3. Intercept only essay/section links and fall back for everything else.
+4. Implement fetch + parse + target extraction.
+5. Implement unmount/swap/mount for essay -> section and section -> essay.
+6. Add `popstate` support.
+7. Add focus/title/meta/canonical handling.
+8. Add failure fallback.
+9. Add regression coverage.
+
+Commit after any slice that is coherent and tested.
 
 Be conservative about what gets swapped. The existing page scripts are loaded
 by the original document. Do not rely on re-executing script tags from fetched
@@ -417,6 +467,10 @@ Add or extend a focused regression if current coverage cannot prove:
 
 Commit and push after this checkpoint.
 
+If Checkpoint 2 becomes too risky, stop before destabilizing the branch. Commit
+any useful tests/helpers/docs, record the blocker in the sprint doc, and move to
+the section split or review queue.
+
 ## A-Phase Checkpoint 3: Same-Document Continuity
 
 Once soft-navigation keeps the journey in one document, continuity can become
@@ -445,6 +499,18 @@ Existing constraints:
   event that continuity can consume.
 
 Do not break current hard-load behavior. Soft-nav is an enhancement.
+
+Suggested implementation slices:
+
+1. Document current hard-navigation continuity events and state.
+2. Add a soft-nav arrival event if the current event contract is insufficient.
+3. Preserve source geometry before DOM swap.
+4. Resolve destination highlight after mount.
+5. Trigger the flight only after destination content is ready.
+6. Keep hard-navigation/sessionStorage path as fallback.
+7. Extend continuity tests.
+
+Commit and push after each meaningful slice.
 
 Validation for Checkpoint 3:
 
@@ -501,6 +567,10 @@ ship it unattended. Record it as a follow-up in the sprint doc.
 
 Commit and push after this checkpoint.
 
+If texture work is blocked by lack of human visual review, do not burn the whole
+session there. Land only low-risk mechanical improvements and move to structural
+work or review.
+
 ## A-Phase Checkpoint 5: Evidence And Sprint Doc Update
 
 Update:
@@ -548,6 +618,19 @@ Likely split candidates:
 - reading progress/attention wiring;
 - section turn animation/prefetch helpers.
 
+Suggested split order:
+
+1. Extract pure route/prefetch helpers if they can move without DOM churn.
+2. Extract selection/copy/citation helpers, keeping DOM bindings thin.
+3. Extract highlight/anchor resolution only after reading the tests carefully.
+4. Extract reading attention/progress wiring once persistence behavior is
+   covered.
+5. Extract section-turn animation helpers last if they are intertwined with
+   load/swap state.
+
+Each extracted module should have one obvious browser global or CommonJS export
+pattern consistent with nearby files. Do not introduce bundling.
+
 Validation:
 
 ```bash
@@ -559,6 +642,10 @@ npm run ci:passage-alignment
 ```
 
 Commit and push per slice. Do not attempt a giant split in one commit.
+
+If the split becomes too tangled, stop after documenting the dependency map and
+write `docs/SECTION-SPLIT-PLAN.md` with safe extraction order, hazards, and
+tests. Commit and push that plan.
 
 ### 2. Legacy Runtime Search Engine Purge
 
@@ -582,6 +669,13 @@ npm run test:search-lexicon
 npm run ci:spotlight
 npm run ci:regression
 ```
+
+Fallback if purge is risky:
+
+- write a removal map first;
+- identify which tests depend on the legacy path;
+- add one test that locks oracle-only behavior;
+- defer deletion with a clear sprint-doc note.
 
 ### 3. Reading-Attention Feel Pass
 
@@ -681,6 +775,31 @@ Suggested slices:
    If a legacy representation remains, name it and explain why. Do not leave
    invisible dual truths.
 
+Additional AST promotion work if the first slices go well:
+
+7. **Anchor compatibility table.**
+   Create a doc/table mapping current URL params (`p`, `r`, `q`, `occ`, mode
+   flags) to AST-backed resolution paths. Mark which are canonical, fallback, or
+   legacy.
+
+8. **Generated artifact audit.**
+   Compare `scripts/chapters-data.js`, `data/search-index.json`, any embedded
+   data, and runtime `loadSection()` payload shape. Identify duplicate or
+   divergent content facts.
+
+9. **AST-to-search proof.**
+   Strengthen tests proving search result passage IDs and reader DOM passage IDs
+   share one source of truth.
+
+10. **AST-to-copy proof.**
+   Add or extend tests proving copied selection/range URLs survive reload and
+   resolve to the same text.
+
+11. **Compiler dry-run report.**
+   If a full compiler migration is too much, write a deterministic report script
+   that summarizes AST node counts, passage IDs, generated anchors, and search
+   range coverage across the corpus.
+
 Validation:
 
 ```bash
@@ -694,6 +813,10 @@ npm run ci:regression
 ```
 
 Commit and push each slice.
+
+If AST work becomes too large for the session, leave behind an implementation
+map, not vague ambition. Write the exact modules to change, data contracts,
+tests to add, and safest first commit.
 
 ### 6. Algorithmic Typesetting
 
@@ -767,6 +890,15 @@ search.html
 essay.html
 styles/main.css
 ```
+
+Suggested slices:
+
+1. Build a pure concordance data helper from existing search/oracle artifacts.
+2. Add tests for term normalization, stopword filtering, and motif thresholds.
+3. Surface a quiet essay-level motif summary only if it improves navigation.
+4. Add "where this returns" affordance for selected/search terms only after the
+   data is trustworthy.
+5. Keep UI small and opt-in.
 
 Validation:
 
@@ -856,6 +988,118 @@ Bad polish:
 - motion for its own sake;
 - new systems without tests;
 - changes that make the site feel less like a reader.
+
+## Comprehensive Review Mode
+
+Enter review mode when:
+
+- the implementation queue is complete;
+- a major phase is blocked by uncertainty;
+- tests are failing in a way that needs diagnosis before edits;
+- quota is too low for a risky implementation but enough for useful analysis;
+- the branch has accumulated several commits and needs a quality pass.
+
+Review mode still produces durable output. Prefer writing specific findings to
+docs over loose chat-style notes.
+
+Primary review artifact:
+
+```text
+docs/AUTONOMOUS-CODEBASE-REVIEW.md
+```
+
+If that file already exists, append a dated section rather than overwriting
+useful prior findings.
+
+Review structure:
+
+```text
+# Autonomous Codebase Review
+
+Date:
+Branch:
+HEAD:
+Scope:
+
+## Executive Summary
+
+## High-Risk Findings
+
+## Medium-Risk Findings
+
+## Test Gaps
+
+## Dead Code / Simplification Opportunities
+
+## Architecture Follow-Ups
+
+## Recommended Next Commits
+
+## Commands / Evidence Reviewed
+```
+
+Finding format:
+
+```text
+Severity:
+File:
+Behavior:
+Why it matters:
+Suggested fix:
+Suggested validation:
+```
+
+Areas to inspect:
+
+- route parsing and subpath behavior;
+- soft-nav/hard-nav fallback boundaries;
+- service worker precache and cache-version discipline;
+- reading-state schema migration and localStorage safety;
+- attention-progress monotonicity and completion thresholds;
+- highlight/range URL compatibility;
+- search/oracle fallback paths;
+- large modules and ownership boundaries;
+- a11y focus management after dynamic swaps;
+- reduced-motion behavior;
+- generated artifact determinism;
+- test reliability and artifact upload behavior;
+- GitHub Actions workflow permissions and triggers;
+- docs drift.
+
+Commit and push the review artifact.
+
+## Test Gap Fill Mode
+
+If implementation is risky but test gaps are obvious, add tests first.
+
+Good test-gap targets:
+
+- soft navigation no-hard-reload path;
+- back/forward after soft swaps;
+- focus after essay/section transitions;
+- continuity landing after soft navigation;
+- reading attention does not complete on scroll scrub;
+- generated cache version changes when precached assets change;
+- offline route availability under `/renaissance/`;
+- passage alignment between search result and reader DOM;
+- advanced search URL/state persistence if implemented;
+- AST fixture edge cases.
+
+Commit and push test-only changes separately from implementation changes when
+possible.
+
+## Documentation Fill Mode
+
+If code work is unsafe, write useful docs:
+
+- `docs/SECTION-SPLIT-PLAN.md`
+- `docs/AST-PROMOTION-PLAN.md`
+- `docs/SOFT-NAV-DESIGN-NOTES.md`
+- updates to `docs/TRANSITION-SPOTLIGHT-SPRINT.md`
+- review findings in `docs/AUTONOMOUS-CODEBASE-REVIEW.md`
+
+Docs should include file references, ordering, risks, and validation commands.
+Avoid generic prose that does not help the next engineer act.
 
 ## If Everything Above Is Done
 

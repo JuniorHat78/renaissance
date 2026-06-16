@@ -114,6 +114,10 @@ jobs:
             magic texture only after correctness, evidence/doc updates, then
             the listed backlog. If all work is complete, perform the codebase
             review fallback and write docs/AUTONOMOUS-CODEBASE-REVIEW.md.
+            Do not stop merely because one phase is complete. Keep moving down
+            the queued implementation, test-gap, documentation, and review-mode
+            work until quota/time is exhausted or a real blocker prevents
+            useful progress.
 
             Mandatory rules:
             - Commit and push frequently. Do not hoard a large unpushed diff.
@@ -135,6 +139,8 @@ jobs:
               run` when useful, watch/read failures, and fix real regressions.
             - Keep draft PR #12 updated at meaningful checkpoints so the human
               can see what landed, what ran, what failed, and where to resume.
+            - If implementation becomes unsafe, switch to review/test-gap/doc
+              mode from docs/CLAUDE-AUTONOMOUS-SPRINT.md and commit that output.
             - If quota or time is running out, stop starting risky work, commit
               and push the coherent state, and write exact resume notes.
 
