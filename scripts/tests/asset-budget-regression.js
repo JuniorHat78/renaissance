@@ -25,9 +25,9 @@ const PAGE_BUDGET_BYTES = {
   "section.html": 1024 * 1024,
   // essay.html carries the motif card + oracle client/engine on top of the
   // essay view. Raised 256 -> 272 (oracle-native search) -> 280 (the composed-
-  // arrival veil CSS) -> 288 (advanced-search: the shared oracle-client grew the
-  // grouped/reasons renderer + shared site.css for it, which every page pays).
-  "essay.html": 288 * 1024,
+  // arrival veil CSS) -> 288 (advanced-search) -> 296 (reading-shell.js adds
+  // soft-navigation support to both essay and section pages).
+  "essay.html": 296 * 1024,
   // index.html crossed the default ceiling when the continuity transition
   // (capture side) joined the home archive. Raised 256 -> 272.
   "index.html": 272 * 1024

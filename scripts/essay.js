@@ -777,7 +777,10 @@
 
   window.RenaissanceEssayView = { mount, unmount };
 
-  // Phase 1: each shell still hard-loads and mounts its own view once. The
-  // soft-nav reading shell (Phase 2) will drive mount/unmount instead.
-  mount();
+  // Auto-mount on static page load. The soft-nav reading shell suppresses this
+  // by setting _managing=true before lazy-loading this script, then calls
+  // mount() itself after DOM surgery is complete.
+  if (!window.RenaissanceReadingShell || !window.RenaissanceReadingShell._managing) {
+    mount();
+  }
 })();
