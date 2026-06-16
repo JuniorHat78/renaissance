@@ -95,20 +95,33 @@ Useful evidence records include:
   (runtime engine retained as offline/fetch-fail fallback), with passage-range
   deep links for precise reader highlighting. Validated green on Actions:
   `spotlight`, `browser`, `pwa`, `a11y`.
+- Phase 6 search-surface migration COMPLETE (2026-06-16): every search surface
+  (Spotlight, full `/search` page, essay inline, home/archive inline) routes
+  through the shared `oracle-client.js` -> `search-oracle.js`. Full search went
+  oracle-simple: modes/sort/page-size/counts/pagination dropped, one flat ranked
+  list. Browser suites that asserted the old `.result-card` DOM updated to
+  `.oracle-result` (a11y, device-matrix, cross-browser, transition-evidence).
+  Local standalone green; needs Actions confirmation for the browser tier.
+- PARKED for next session: drop the legacy runtime search engine + the
+  file://-offline fallback branches entirely (oracle-only). The fallback only
+  protects file:// usage, which production (GitHub Pages https) never hits and
+  local dev covers with `npm run dev`. Own dedicated commit so the regression
+  suites show exactly what the removal breaks. Keep the dual-export
+  (Node+browser) pattern — that buys no-build testing, not baggage.
 - Not yet done: Phase 2 transition prototypes (no recorded variants), Phase 4
-  critique/beta pass, full-search/inline-search migration onto the oracle (only
-  Spotlight migrated so far), the deferred lexicon build (match-creation,
-  aliases, motif easter eggs), Phase 7 Spotlight design spec capture.
+  critique/beta pass, the deferred lexicon build (match-creation + more motif
+  easter eggs beyond the shipped "sand" card + essay aliases), Phase 7 Spotlight
+  design spec capture, legacy-engine purge (above).
 - Docs committed: yes. This document had drifted behind the code and was
   reconciled on 2026-06-15 — see the dated Live Findings note.
 - Branch pushed: yes, tracking `origin/sprint/transition-spotlight-oracle`.
 - Latest remote runs: Manual Checks suites passed on the sprint branch on
   2026-06-15 (runs `27506490802`–`27506555991`); earlier docs-contract run
   `27505347555` passed on `b187651`.
-- Next recommended action: pick the thread back up deliberately — either close
-  out Phase 3 transition hardening and record Phase 2/4 evidence for the motifs
-  already shipped, or open Phase 5 (generated oracle index) so Spotlight stops
-  riding on runtime search.
+- Next recommended action (2026-06-16): confirm the search-migration commits
+  go green on the Actions browser/full-chromium tier, then take the parked
+  legacy-engine purge as its own clean commit. After that, Phase 2/4 transition
+  evidence and the deferred lexicon build are the remaining open threads.
 
 ### Active Phase Journal
 
@@ -560,13 +573,18 @@ Bad top results:
 - [ ] Context/action result generator.
 - [ ] Ranking engine with score explanations.
 - [ ] Snippet/highlight span generator.
-- [ ] Full search page migration.
-- [ ] Archive inline search migration.
-- [ ] Essay inline search migration.
-- [ ] Reader deep-link/highlight migration.
-- [ ] Spotlight UI integration.
-- [ ] Offline/PWA integration.
-- [ ] Fixture suite for oracle behavior.
+- [x] Full search page migration. (2026-06-16) Oracle-native/oracle-simple:
+      modes/sort/page-size/counts/pagination dropped, one flat ranked list;
+      legacy engine kept only as file://-offline fallback.
+- [x] Archive inline search migration. (2026-06-16) Shared oracle client.
+- [x] Essay inline search migration. (2026-06-16) Shared oracle client,
+      current-essay scoped, advanced toggle hidden when oracle available.
+- [x] Reader deep-link/highlight migration. Oracle emits passageId +
+      rangeStart/rangeEnd; reader anchor resolution unchanged.
+- [x] Spotlight UI integration. Oracle index primary, legacy engine fallback.
+- [x] Offline/PWA integration. index/lexicon/oracle/client precached in sw.js.
+- [x] Fixture suite for oracle behavior. index/oracle/lexicon/passage-alignment
+      regressions wired into standalone + browser gates.
 
 ### No Compatibility Theater
 
@@ -858,9 +876,11 @@ A downstream surface is "perfect enough for this sprint" when:
 
 ### Downstream Audit Checklist
 
-- [ ] Full search uses the same oracle truth as Spotlight.
-- [ ] Inline search previews use the same ranking semantics as full search or
-      document an intentional simplification.
+- [x] Full search uses the same oracle truth as Spotlight. (2026-06-16) All
+      surfaces route through the shared oracle-client/search-oracle.
+- [x] Inline search previews use the same ranking semantics as full search or
+      document an intentional simplification. (2026-06-16) Identical ranking;
+      inline surfaces differ only in scope + result cap.
 - [ ] Result activation uses stable anchors where available.
 - [ ] Reader highlight arrival feels intentional and does not fight scroll
       restore.
@@ -1521,9 +1541,9 @@ Spotlight becomes the main entry point.
 - [ ] Teach reader routes to resolve passage anchors.
 - [ ] Add range/offset highlight support where needed.
 - [ ] Preserve fallback for old query/occurrence links where feasible.
-- [ ] Upgrade full search to oracle results.
-- [ ] Upgrade archive inline search.
-- [ ] Upgrade essay inline search.
+- [x] Upgrade full search to oracle results. (2026-06-16)
+- [x] Upgrade archive inline search. (2026-06-16)
+- [x] Upgrade essay inline search. (2026-06-16)
 - [ ] Update copy/citation links if stable anchors are ready.
 - [ ] Update service-worker/offline assets if generated search data is cached.
 - [ ] Run remote suites for search, browser, PWA, a11y, and subpath behavior.
