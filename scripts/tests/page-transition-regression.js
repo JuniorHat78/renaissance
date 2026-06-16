@@ -25,24 +25,39 @@ async function waitForReady(page) {
   }, null, { timeout: 30000 });
 }
 
+function readPageState() {
+  const root = document.documentElement;
+  const body = window.getComputedStyle(document.body);
+  const main = document.querySelector("main");
+  const mainStyle = main ? window.getComputedStyle(main) : null;
+  return {
+    prep: root.classList.contains("page-transition-prep"),
+    out: root.classList.contains("page-transition-out"),
+    ready: root.classList.contains("page-transition-ready"),
+    busy: root.getAttribute("aria-busy"),
+    opacity: Number.parseFloat(body.opacity || "0"),
+    mainOpacity: mainStyle ? Number.parseFloat(mainStyle.opacity || "0") : 1,
+    motion: root.getAttribute("data-page-motion") || "",
+    arrival: root.getAttribute("data-page-arrival") || "",
+    sourceX: window.getComputedStyle(root).getPropertyValue("--page-source-x").trim()
+  };
+}
+
 async function assertPageVisible(page, label) {
-  const state = await page.evaluate(() => {
-    const root = document.documentElement;
-    const body = window.getComputedStyle(document.body);
-    const main = document.querySelector("main");
-    const mainStyle = main ? window.getComputedStyle(main) : null;
-    return {
-      prep: root.classList.contains("page-transition-prep"),
-      out: root.classList.contains("page-transition-out"),
-      ready: root.classList.contains("page-transition-ready"),
-      busy: root.getAttribute("aria-busy"),
-      opacity: Number.parseFloat(body.opacity || "0"),
-      mainOpacity: mainStyle ? Number.parseFloat(mainStyle.opacity || "0") : 1,
-      motion: root.getAttribute("data-page-motion") || "",
-      arrival: root.getAttribute("data-page-arrival") || "",
-      sourceX: window.getComputedStyle(root).getPropertyValue("--page-source-x").trim()
-    };
-  });
+  // A history restore (notably webkit's bfcache) can fire a follow-up
+  // navigation just after waitForReady resolves, destroying the execution
+  // context mid-evaluate. That is a not-yet-settled signal, not a regression:
+  // re-settle and read once more before trusting the throw.
+  let state;
+  try {
+    state = await page.evaluate(readPageState);
+  } catch (error) {
+    if (!/Execution context was destroyed/.test(String(error && error.message))) {
+      throw error;
+    }
+    await waitForReady(page);
+    state = await page.evaluate(readPageState);
+  }
   assert.equal(state.prep, false, label + " should not keep prep class");
   assert.equal(state.out, false, label + " should not keep outgoing class");
   assert.equal(state.ready, true, label + " should be marked ready");
