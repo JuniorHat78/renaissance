@@ -21,10 +21,10 @@ assumptions in an agent thread.
 (open as draft PR #12; pushes auto-run CI + Manual Checks full-chromium +
 A11y + CodeQL) · **Main:** `main`.
 
-**One-line status:** The oracle search system and the continuity transition
-(words fly from a search result into the reader) are shipped and green. The
-reader is being turned into a "reading instrument." Next concrete build is an
-honest **reading-attention progress model**.
+**One-line status:** The oracle search system, the continuity transition (words
+fly from a search result into the reader), and an honest **reading-attention
+progress model** are now built and standalone-green. The reader is being turned
+into a "reading instrument." Next concrete build is **advanced search**.
 
 **Shipped & green on Actions:**
 - Oracle search end-to-end — Spotlight, full `/search`, essay-inline, home/archive
@@ -38,24 +38,39 @@ honest **reading-attention progress model**.
 - Selection copy-chip anchors to the selection's end (was pinning above
   multi-line highlights).
 
-**Working on now:** nothing in-flight (clean tree). Next session starts fresh.
+**Shipped & standalone-green (Actions browser-tier confirmation pending):**
+- **Reading-attention progress model** — `scripts/reading-attention.js` is a
+  pure, DOM-free, dual-export core (unit-tested with synthetic tick streams in
+  `reading-attention-regression.js`): per-paragraph dwell vs word-count-derived
+  expected time, gated by velocity / reading-zone overlap / presence; outputs
+  `progress` (read words / total), `furthestRead`, `frontier`. `reading-state.js`
+  persists `attentionProgress` + a compact read-set (+ partial dwell), with
+  monotonicity and attention-based completion (scroll-to-end no longer completes
+  a section); covered server-free by the new `reading-state-unit-regression.js`.
+  A ~250ms heartbeat in `section.js` samples zone/velocity/presence and feeds
+  ticks; `archive.js`/`essay.js` show the attention number, falling back to
+  scroll progress for legacy records. Visual bar stays scroll-position by design.
+  Commits `85b4e46`, `b35a1f3`, `7d6c758`.
+
+**Working on now:** nothing in-flight (clean tree). Two follow-ups are open: the
+**`section.js` split is now OVERDUE** — the attention core pushed section.html
+past the 336KB ceiling continuity had declared final, so the budget was raised
+to 352KB and must not grow again before the split — and the reading-attention
+**feel pass** (tune `WPM`/`READ_FRACTION`/velocity thresholds in the live reader;
+the math is proven, the constants are taste calls).
 
 **Up next (in order):**
-1. **Reading-attention progress model** — replace scroll-depth `progress` with an
-   attention model (per-paragraph dwell vs word-count-derived expected time,
-   velocity/zone/presence gates). Fixes "Continue reading 1%". Full spec below:
-   see **Reading-Attention Progress Model**. Pure testable core + thin wiring.
-2. **Advanced search** — keep the curated default (a couple per section); add an
+1. **Advanced search** — keep the curated default (a couple per section); add an
    exhaustive "show everything" mode (uncapped `perSection`/limit, per-section
    counts, the oracle's self-explaining ranking reasons). Reuse the hidden
    `advancedToggle`. See **Advanced Search Plan** below.
-3. **A-phase headline: soft-navigation + magic texture** — the residual
+2. **A-phase headline: soft-navigation + magic texture** — the residual
    "tinge of lock-up" is the hard document navigation; the ethereal fix is
    soft-nav (fetch + swap, no reload), which also dovetails with the AST
    compiler and makes continuity same-document-trivial. Bundle the magic-texture
    polish (true spring, veil dissolve, word shimmer, depth) with it. See
    **A-Phase** below.
-4. Then the rest of the reading-instrument arc: AST compiler (A), bespoke
+3. Then the rest of the reading-instrument arc: AST compiler (A), bespoke
    typesetting (B-feel), literary apparatus/concordance (C). See **Sprint
    Direction: The Reading Instrument**.
 
@@ -495,7 +510,21 @@ wrapped in a seamless transition, applied to **all click-navigations**:
 These are the three specced-but-unbuilt threads the dashboard points at, in
 order. Written to be picked up cold.
 
-### Reading-Attention Progress Model (NEXT)
+### Reading-Attention Progress Model (SHIPPED 2026-06-16 — standalone-green)
+
+**Status.** Built as specced below, in three checkpoints (`85b4e46` pure core +
+test, `b35a1f3` persistence contract + node unit test, `7d6c758` heartbeat
+wiring + consumers). Full `ci:standalone` green locally; browser-tier
+confirmation deferred to the end-of-sprint Actions pass. Deviations from the
+spec, all deliberate: the **scroll-based resume pointer is kept** (proven +
+tested) rather than resuming off the attention `frontier` — `frontier` is
+exposed but informational for now; the **visual progress bar stays
+scroll-position** (a progress bar that isn't where you are is wrong); word
+counts are **derived from the DOM** (no index change); completion switched to
+attention with a maxProgress fallback for legacy records. Open follow-ups: the
+**`section.js` split** (now overdue — see the budget note) and a **feel pass**
+on the constants (`WPM` 240, `READ_FRACTION` 0.5, velocity thresholds) in the
+live reader.
 
 **Problem.** "Continue reading" shows ~1% after real reading. Root cause: it
 measures the *scrollbar*, not *reading*. `archive.js renderContinueReading`
