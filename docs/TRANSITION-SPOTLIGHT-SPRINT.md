@@ -544,6 +544,56 @@ explicitly rejected both. We want **attention**: how far they actually *read*.
 - Knobs to tune by feel: `WPM` (240), `READ_FRACTION` (0.5), velocity threshold,
   zone band, heartbeat interval. All reversible constants.
 
+**Integration map (existing plumbing — reverse-engineered this session, do NOT
+re-discover):**
+- `scripts/section.js`:
+  - `computeReadingProgress()` (~L1032) — the current scroll-fraction measure:
+    `(scrollY - start)/(end - start)` against `sectionContent` rect, where
+    `start = contentTop - 0.18*vh`, `end = contentBottom - 0.62*vh`. This is what
+    the attention model supersedes for persistence (keep it as the fallback).
+  - `scheduleReadingProgressSync()` (~L1211) — rAF tick + 180ms debounce that
+    calls `saveReadingProgress`. The attention heartbeat sits here / alongside.
+  - `saveReadingProgress(progress)` (~L1179) — **gated by `suppressProgressSave`**
+    (flag at ~L77; raised by `startRestoreSaveSuppression` ~L1353 and lowered by
+    `releaseRestoreSaveSuppressionSoon` ~L1361 during a restore-scroll). Persists
+    via `readingState.saveSectionProgress({...})`.
+  - Sightline: `READING_LINE_RATIO = 0.36` (~L49), `readingLineY()` (~L1047),
+    `scrollToReadingSightline(el, {behavior})` (~L1707).
+  - Scroll/resize listeners (~L1247). Resume pointer: `currentResumePointer()`.
+  - Paragraph DOM carries `data-passage-id` and `data-paragraph-index`. **Word
+    count** per paragraph: derive at wire-time from each `[data-passage-id]`
+    element's `textContent` (whitespace split), or extend
+    `generate-search-index.js` to emit per-passage `wordCount` (it already has
+    the AST `wordCount` helper). Prefer deriving from the DOM to avoid an index
+    change.
+- `scripts/reading-state.js`:
+  - Record fields (`normalizeRecord` ~L69, `saveSectionProgress` ~L182):
+    `progress`, `maxProgress`, `scrollY`, `resumeParagraphIndex/Ratio/Signature`,
+    `completed`. **Extend the record** with the compact attention read-set (e.g.
+    `readParagraphs` + a `frontier` {index, dwellMs}); bump any version/normalize.
+  - `continueTarget()` (~L255) returns `{progress, maxProgress, ...}`; **add an
+    attention-derived progress** field here and have the home read it.
+- `scripts/archive.js`:
+  - `renderContinueReading()` (~L64) reads `target.progress` (the reverted
+    stopgap was `target.maxProgress` — use the new attention field instead),
+    `progressPercent()` (~L60) floors at 1 / caps at 99.
+
+**Advanced-search wiring (for that task):** `scripts/search-page.js`
+`executeSearch()` calls `client.search(query, { scope, limit: 60 })` — it does
+NOT pass `perSection`, so the oracle default of **2** (`search-oracle.js`
+`rank()` ~L241, applied at ~L361 `passageHits.slice(0, perSection)`) caps it.
+Advanced mode = pass `perSection: Infinity` + a high `limit`. The
+`advancedToggle` is force-hidden in `bindEvents()` (`advancedToggle.hidden =
+true`) — repurpose it. Oracle results already carry their `reasons`
+(`{label, points}[]`); `oracle-client.js renderResults()` ignores them today —
+advanced mode renders them.
+
+**Soft-nav anchor (for the A-phase):** `scripts/page-transition.js` already
+intercepts link clicks (`handleLinkClick` ~L217) and owns the out/reveal
+choreography; soft-nav extends that path to `fetch` + swap `<main>` + update
+history + re-run the page controller, replacing `location.assign`. Continuity
+then becomes same-document (no sessionStorage handoff).
+
 **Why it's the right kind of over-engineered:** it's sophisticated *and*
 provable in CI (pure core), reuses real signal (word counts, sightline), and is
 not a hand-waved probability distribution. It knows reading from scanning and
