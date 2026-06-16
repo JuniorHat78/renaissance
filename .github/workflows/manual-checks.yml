@@ -15,7 +15,6 @@ on:
           - standalone
           - transition-evidence
           - spotlight
-          - soft-nav
           - browser
           - pwa
           - a11y
@@ -57,7 +56,6 @@ jobs:
               inputs.suite == 'browser' ||
               inputs.suite == 'transition-evidence' ||
               inputs.suite == 'spotlight' ||
-              inputs.suite == 'soft-nav' ||
               inputs.suite == 'pwa' ||
               inputs.suite == 'a11y' ||
               inputs.suite == 'devices' ||
@@ -85,9 +83,6 @@ jobs:
             spotlight)
               npm run ci:spotlight
               ;;
-            soft-nav)
-              npm run ci:soft-nav
-              ;;
             browser)
               npm run ci:regression
               npm run ci:page-transitions
@@ -95,7 +90,6 @@ jobs:
               npm run ci:notfound
               npm run ci:passage-alignment
               npm run ci:continuity
-              npm run ci:soft-nav
               ;;
             pwa)
               npm run ci:offline
@@ -126,7 +120,6 @@ jobs:
               npm run ci:notfound
               npm run ci:passage-alignment
               npm run ci:continuity
-              npm run ci:soft-nav
               npm run ci:a11y
               npm run ci:offline
               npm run ci:focus
