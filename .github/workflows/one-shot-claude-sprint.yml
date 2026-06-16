@@ -111,9 +111,10 @@ jobs:
             Your mission is to use the available Claude quota productively and
             safely. Work through the queue in docs/CLAUDE-AUTONOMOUS-SPRINT.md:
             A-phase soft-navigation reading shell, same-document continuity,
-            magic texture only after correctness, evidence/doc updates, then
-            the listed backlog. If all work is complete, perform the codebase
-            review fallback and write docs/AUTONOMOUS-CODEBASE-REVIEW.md.
+            magic texture only after correctness, CI/CD and test hardening,
+            evidence/doc updates, optional TODO experiments, then the listed
+            backlog. If all work is complete, perform the codebase review
+            fallback and write docs/AUTONOMOUS-CODEBASE-REVIEW.md.
             Do not stop merely because one phase is complete. Keep moving down
             the queued implementation, test-gap, documentation, and review-mode
             work until quota/time is exhausted or a real blocker prevents
@@ -139,6 +140,11 @@ jobs:
               run` when useful, watch/read failures, and fix real regressions.
             - Keep draft PR #12 updated at meaningful checkpoints so the human
               can see what landed, what ran, what failed, and where to resume.
+            - Create focused side branches and draft PRs when work is large,
+              experimental, or should not be mixed directly into PR #12.
+            - CI/CD and test hardening are first-class work. Add or improve
+              focused tests, workflow dispatches, artifacts, summaries, and
+              cache/offline guards when useful.
             - If implementation becomes unsafe, switch to review/test-gap/doc
               mode from docs/CLAUDE-AUTONOMOUS-SPRINT.md and commit that output.
             - If quota or time is running out, stop starting risky work, commit

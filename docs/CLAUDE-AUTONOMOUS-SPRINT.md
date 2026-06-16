@@ -179,6 +179,26 @@ For long autonomous sessions, use this rhythm:
 Do not wait until a whole phase is perfect before committing. The overnight run
 should leave a chain of useful commits, not one fragile mega-commit.
 
+The default target branch is `sprint/transition-spotlight-oracle`. Use it for
+normal sprint continuation work. If a piece of work is large, speculative, or
+could distract from the main sprint, create a focused branch from the current
+sprint branch and open a draft PR instead of mixing it into PR #12.
+
+Branch/PR rules for side work:
+
+- Use a clear branch name, for example
+  `sprint/ci-hardening-matrix`, `sprint/ast-promotion-plan`, or
+  `experiment/sand-drift-idle`.
+- Keep the branch based on `sprint/transition-spotlight-oracle` unless there is
+  a specific reason to base from `main`.
+- Open a draft PR with `gh pr create --draft`.
+- In the PR body, explain why the work is split out, what it changes, what ran,
+  and how it relates back to draft PR #12.
+- Do not create side branches for tiny fixes; commit those directly to the
+  sprint branch.
+- Do not abandon unpushed side-branch work. Push it, open a draft PR, or record
+  exactly why it was discarded.
+
 Use conventional commits. Examples:
 
 ```text
@@ -967,7 +987,158 @@ npm run ci:subpath
 
 Run `node scripts/generate-cache-version.js` after precached changes.
 
-### 10. Final Polish Pass
+### 10. CI/CD And Test Infrastructure Hardening
+
+This work is explicitly in scope. The repository already has useful Actions
+coverage, but a long autonomous session should improve the harness if feature
+work gets blocked or if new behavior needs better evidence.
+
+Goals:
+
+- make the CI signal faster to interpret;
+- add missing focused suites before risky implementation;
+- improve artifact capture for visual/transition/debug work;
+- reduce flake where known;
+- make manual dispatch more useful;
+- keep GitHub Pages/subpath/offline risks covered;
+- preserve the ability to validate through Actions instead of the local laptop.
+
+Potential CI/CD improvements:
+
+1. **Manual Checks usability.**
+   Review `.github/workflows/manual-checks.yml`. Consider adding suite choices
+   for any new focused tests, better artifact names, or clearer summary output.
+
+2. **Soft-nav suite.**
+   Add a dedicated soft-navigation regression once the shell exists. It should
+   prove no hard reload, history behavior, focus behavior, title/meta updates,
+   fallback behavior, and reduced-motion safety.
+
+3. **Continuity artifact capture.**
+   Improve transition/continuity evidence artifacts if current videos/screenshots
+   are insufficient to diagnose failures from Actions.
+
+4. **CI summary artifacts.**
+   Add or improve scripts that summarize which suites ran, which routes were
+   exercised, and where artifacts were written.
+
+5. **Service-worker / cache-version guardrails.**
+   Strengthen checks that precached asset changes are paired with cache-version
+   updates.
+
+6. **Generated artifact determinism.**
+   Add tests or checks for generated data stability where missing.
+
+7. **Flake triage.**
+   If a suite flakes, do not blindly loosen assertions. Capture why it flakes,
+   add waits/assertions around stable user-visible state, and document the
+   failure mode.
+
+8. **Workflow permissions audit.**
+   Review workflow permissions for least privilege. The one-shot Claude runner
+   intentionally has write permissions; ordinary validation workflows should
+   stay read-only unless they must write artifacts/status.
+
+9. **PR/draft PR hygiene.**
+   If a side branch is created, ensure its draft PR has clear validation notes
+   and does not enable surprise recurring automation.
+
+10. **Action version drift.**
+   Keep obvious action-version warnings clean when low-risk, but do not churn
+   every workflow just to update versions.
+
+Good test additions:
+
+- no-hard-reload soft navigation;
+- popstate after essay/section swaps;
+- reader focus after dynamic remount;
+- continuity source-to-destination alignment in soft-nav;
+- copy/citation behavior on mobile/touch;
+- cache-version validation after script/style changes;
+- offline behavior under `/renaissance/`;
+- generated AST/search alignment;
+- advanced search state persistence;
+- reduced-motion transition behavior;
+- keyboard-only journey through Spotlight/search/reader;
+- slow-network route transitions.
+
+Validation for CI/CD changes:
+
+```bash
+npm run check
+npm run ci:standalone
+npm run ci:page-transitions
+npm run ci:regression
+npm run ci:a11y
+```
+
+For workflow-only changes, also dispatch the relevant workflow manually and
+record the run ID:
+
+```bash
+gh workflow run "Manual Checks" --ref sprint/transition-spotlight-oracle -f suite=standalone
+gh workflow run "Manual Checks" --ref sprint/transition-spotlight-oracle -f suite=browser
+```
+
+Commit CI/test changes separately from product behavior whenever practical.
+
+If a CI/CD improvement is broad or could disrupt PR #12, create a side branch
+and draft PR. Link it from PR #12 or comment on PR #12 with the branch/PR.
+
+### 11. TODO / Experimental Ideas Lane
+
+There is an old idea file at:
+
+```text
+.tmp/TODO.txt
+```
+
+Treat it as an optional idea source, not a binding task list. Some items are
+small and concrete; some are taste-risky. Only implement an item if it fits the
+current architecture, can be validated, and does not undermine the reader.
+
+Current notable TODO ideas:
+
+- disable copy augmentation on mobile/touch;
+- sand drift idle moment;
+- hidden marginalia toggle;
+- ten taps ritual;
+- query ritual card;
+- end-page hush;
+- archive key;
+- constellation links;
+- completion state.
+
+Preference order:
+
+1. Prefer practical/testable items first, especially mobile copy behavior.
+2. Treat visual easter eggs as experiments. Use side branches/draft PRs if they
+   are not obviously safe.
+3. Do not add hidden behavior that harms accessibility, keyboard use, or reader
+   trust.
+4. Do not fabricate marginalia or scholarly notes. If "marginalia" is explored,
+   it must be derived from real text/data or clearly be a tiny optional motif,
+   not fake apparatus.
+5. Keep rituals quiet and reversible. No nagging, no persistent surprise UI.
+
+Suggested first TODO candidate:
+
+```text
+Disable copy augmentation on mobile
+```
+
+Why: it is concrete, user-facing, testable, and aligned with ergonomics. Add or
+update regression coverage for touch/mobile copy behavior if practical.
+
+For easter eggs:
+
+- prefer draft PRs named `experiment/<idea>`;
+- keep implementation small;
+- add a kill switch or clear containment;
+- record why it is tasteful enough to keep;
+- if it feels gimmicky, document and stop.
+
+### 12. Final Polish Pass
 
 Only after the structural queue is exhausted, spend time on small polish.
 
