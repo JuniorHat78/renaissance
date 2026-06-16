@@ -46,8 +46,15 @@
     scope: "all",
     caseSensitive: false,
     page: 1,
-    pageSize: DEFAULT_PAGE_SIZE
+    pageSize: DEFAULT_PAGE_SIZE,
+    // Advanced "show everything" mode: uncap the oracle's per-section limit and
+    // render the full, grouped, self-explaining result set. Curated by default.
+    exhaustive: false
   };
+
+  function oracleMode() {
+    return Boolean(window.RenaissanceOracleClient && window.RenaissanceOracleClient.available());
+  }
 
   function announcePageReady() {
     window.dispatchEvent(new CustomEvent("renaissance:page-ready"));
@@ -239,7 +246,10 @@
     if (client && client.available()) {
       let ranked;
       try {
-        ranked = await client.search(state.query, { scope: state.scope, limit: 60 });
+        const searchOptions = state.exhaustive
+          ? { scope: state.scope, perSection: Infinity, limit: 5000 }
+          : { scope: state.scope, limit: 60 };
+        ranked = await client.search(state.query, searchOptions);
       } catch (_error) {
         ranked = null;
       }
@@ -247,24 +257,27 @@
         return;
       }
       if (ranked) {
-        // Oracle-native: one flat, relevance-ranked list. No mode/sort/page-size
-        // knobs, no per-section counts rail, no pagination — the oracle ranks so
-        // well that density became noise (see the sprint doc rationale).
+        // Oracle-native: one relevance-ranked list. Curated by default (the
+        // oracle's per-section cap keeps it tight); advanced mode uncaps it into
+        // the full, section-grouped, self-explaining "show everything" view.
         //
         // SEAM: with a single essay, the cross-essay "map" is unnecessary. When
         // index.stats.essays > 1 and triage-across-essays earns its rent, the
-        // re-entry point is the scope selector (already wired, auto-populated) —
-        // not a counts rail. Grow that spoke; don't resurrect the old density.
+        // re-entry point is the scope selector (already wired, auto-populated).
         const count = ranked.totalMatched || 0;
         searchCounts.textContent = "";
         searchPagination.hidden = true;
         client.renderResults(searchResults, ranked, {
           query: state.query,
+          advanced: state.exhaustive,
           emptyText: "Nothing matches “" + state.query + "”."
         });
+        const passages = count + (count === 1 ? " passage" : " passages");
         const hint = count === 0
           ? "No matches."
-          : count + (count === 1 ? " passage" : " passages") + " for “" + state.query + "”";
+          : state.exhaustive
+            ? "Everything: " + passages + " for “" + state.query + "”"
+            : passages + " for “" + state.query + "”";
         searchHint.textContent = hint;
         searchStatus.textContent = hint;
         updateUrlState();
@@ -377,13 +390,34 @@
     });
 
     advancedToggle.addEventListener("click", () => {
+      if (oracleMode()) {
+        setExhaustive(!state.exhaustive);
+        return;
+      }
       setAdvancedOpen(advancedPanel.hidden);
     });
 
-    // Oracle search is mode/sort/page-size-free; hide the advanced controls
-    // unless we fall back to the legacy engine (file:// / offline).
-    if (window.RenaissanceOracleClient && window.RenaissanceOracleClient.available()) {
-      advancedToggle.hidden = true;
+    // In oracle mode the legacy mode/sort/page-size knobs are meaningless, so
+    // the advanced toggle is repurposed into the "show everything" switch: one
+    // click expands the curated list into every matching passage, grouped by
+    // section with the oracle's ranking reasons shown. The legacy panel stays
+    // closed; the toggle is a pressed-state button, not a disclosure.
+    if (oracleMode()) {
+      advancedPanel.hidden = true;
+      advancedToggle.removeAttribute("aria-controls");
+      advancedToggle.removeAttribute("aria-expanded");
+      setExhaustive(state.exhaustive, { silent: true });
+    }
+  }
+
+  function setExhaustive(on, options) {
+    const settings = options || {};
+    state.exhaustive = Boolean(on);
+    advancedToggle.setAttribute("aria-pressed", state.exhaustive ? "true" : "false");
+    advancedToggle.textContent = state.exhaustive ? "Show top matches" : "Show everything";
+    if (!settings.silent && state.query) {
+      state.page = 1;
+      executeSearch();
     }
   }
 
@@ -399,7 +433,11 @@
 
       applyState(parseInitialState());
       syncControlsFromState();
-      setAdvancedOpen(hasAdvancedState());
+      // In oracle mode the legacy options panel is unused; the advanced toggle
+      // is the "show everything" switch instead (set up in bindEvents).
+      if (!oracleMode()) {
+        setAdvancedOpen(hasAdvancedState());
+      }
 
       if (state.query) {
         await executeSearch();

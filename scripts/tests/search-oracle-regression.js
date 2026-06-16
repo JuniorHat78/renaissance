@@ -136,6 +136,44 @@ check("every result's score equals the sum of its reasons", () => {
   }
 });
 
+check("exhaustive mode uncaps the curated per-section limit", () => {
+  // The curated default shows a couple passages per section; advanced "show
+  // everything" passes perSection: Infinity + a high limit to surface every
+  // matching passage. This is the lever the advanced search UI pulls.
+  function maxPassagesPerSection(results) {
+    const counts = {};
+    results
+      .filter((result) => result.kind === "passage")
+      .forEach((result) => {
+        const key = result.essaySlug + "#" + result.sectionNumber;
+        counts[key] = (counts[key] || 0) + 1;
+      });
+    return Object.values(counts).reduce((max, value) => Math.max(max, value), 0);
+  }
+
+  const curated = rank("sand", { limit: 60 });
+  const exhaustive = rank("sand", { perSection: Infinity, limit: 5000 });
+
+  assert.ok(maxPassagesPerSection(curated.results) <= 2, "the curated default caps a section at 2 passages");
+  assert.ok(
+    maxPassagesPerSection(exhaustive.results) > 2,
+    "exhaustive mode surfaces more than 2 passages in a dense section"
+  );
+  assert.ok(
+    exhaustive.results.length > curated.results.length,
+    "exhaustive returns more passages than the curated default"
+  );
+  assert.equal(
+    exhaustive.results.length,
+    exhaustive.totalMatched,
+    "a high limit returns every matched passage (nothing dropped by the limit)"
+  );
+  for (const result of exhaustive.results) {
+    assert.ok(Array.isArray(result.reasons) && result.reasons.length > 0,
+      "every exhaustive result still carries its self-explaining reasons");
+  }
+});
+
 if (failures.length > 0) {
   console.error("\nSearch oracle regression FAILED:");
   failures.forEach((failure) => console.error("  - " + failure));

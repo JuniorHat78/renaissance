@@ -2505,6 +2505,66 @@ main[tabindex="-1"]:focus {
   font-style: italic;
 }
 
+/* Advanced "show everything" view: results grouped by section, each with a
+   count and the oracle's self-explaining ranking reasons. */
+.oracle-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 1.6rem;
+}
+
+.oracle-group {
+  display: block;
+}
+
+.oracle-group-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 2px solid var(--line);
+  color: inherit;
+  text-decoration: none;
+}
+
+.oracle-group-header:hover .oracle-group-where,
+.oracle-group-header:focus-visible .oracle-group-where {
+  color: var(--accent);
+  outline: none;
+}
+
+.oracle-group-where {
+  font-family: var(--font-ui);
+  font-size: 0.78rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text);
+}
+
+.oracle-group-count {
+  flex: none;
+  font-family: var(--font-ui);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.oracle-result-reasons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.1rem;
+  margin-top: 0.4rem;
+  font-family: var(--font-ui);
+  font-size: 0.68rem;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+}
+
+.oracle-reason {
+  white-space: nowrap;
+}
+
 /* Motif card: a quiet note about how an essay uses a recurring word. */
 .motif-card {
   margin: 0 0 1.5rem;

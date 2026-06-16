@@ -76,16 +76,49 @@
     }
   }
 
-  function resultRow(result, query) {
+  function sectionHref(result, query) {
+    return router.build("section", {
+      essaySlug: result.essaySlug,
+      sectionNumber: result.sectionNumber,
+      query
+    });
+  }
+
+  // The oracle attaches the reasons a result scored ({label, points}); advanced
+  // mode shows them so the ranking explains itself ("term: sand +18 · pull
+  // quote +6"). Built as text nodes — no HTML strings.
+  function appendReasons(row, result) {
+    if (!Array.isArray(result.reasons) || !result.reasons.length) {
+      return;
+    }
+    const reasons = document.createElement("span");
+    reasons.className = "oracle-result-reasons";
+    result.reasons.forEach((item, position) => {
+      const chip = document.createElement("span");
+      chip.className = "oracle-reason";
+      const points = Number(item.points);
+      chip.textContent = item.label + (Number.isFinite(points) ? " +" + points : "");
+      reasons.appendChild(chip);
+      if (position < result.reasons.length - 1) {
+        reasons.appendChild(document.createTextNode(" · "));
+      }
+    });
+    row.appendChild(reasons);
+  }
+
+  function resultRow(result, query, rowOptions) {
+    const opts = rowOptions || {};
     const row = document.createElement("a");
     row.className = "oracle-result";
     row.href = buildHref(result, query);
     row.dataset.kind = result.kind;
 
-    const where = document.createElement("span");
-    where.className = "oracle-result-where";
-    where.textContent = whereLabel(result);
-    row.appendChild(where);
+    if (!opts.hideWhere) {
+      const where = document.createElement("span");
+      where.className = "oracle-result-where";
+      where.textContent = whereLabel(result);
+      row.appendChild(where);
+    }
 
     if (result.snippet && result.snippet.text) {
       const snippet = document.createElement("span");
@@ -93,7 +126,69 @@
       appendSnippet(snippet, result.snippet);
       row.appendChild(snippet);
     }
+
+    if (opts.showReasons) {
+      appendReasons(row, result);
+    }
     return row;
+  }
+
+  function passageCountLabel(count) {
+    return String(count) + (count === 1 ? " passage" : " passages");
+  }
+
+  // Advanced "show everything" view: group the (uncapped) results by section in
+  // ranked order, with a per-section count and the self-explaining reasons on
+  // each row. Within a group rows stay in ranked order; groups appear in the
+  // order their best result ranked.
+  function renderGrouped(container, results, query) {
+    const groups = [];
+    const byKey = new Map();
+    for (const result of results) {
+      const key = result.essaySlug + "#" + result.sectionNumber;
+      let group = byKey.get(key);
+      if (!group) {
+        group = { key, lead: result, items: [] };
+        byKey.set(key, group);
+        groups.push(group);
+      }
+      group.items.push(result);
+    }
+
+    const wrap = document.createElement("div");
+    wrap.className = "oracle-groups";
+
+    for (const group of groups) {
+      const section = document.createElement("section");
+      section.className = "oracle-group";
+
+      const header = document.createElement("a");
+      header.className = "oracle-group-header";
+      header.href = sectionHref(group.lead, query);
+
+      const where = document.createElement("span");
+      where.className = "oracle-group-where";
+      where.textContent = group.lead.essayTitle + " · " + whereLabel(group.lead);
+      header.appendChild(where);
+
+      const count = document.createElement("span");
+      count.className = "oracle-group-count";
+      count.textContent = passageCountLabel(group.items.length);
+      header.appendChild(count);
+
+      section.appendChild(header);
+
+      const list = document.createElement("div");
+      list.className = "oracle-results";
+      for (const result of group.items) {
+        list.appendChild(resultRow(result, query, { showReasons: true, hideWhere: true }));
+      }
+      section.appendChild(list);
+      wrap.appendChild(section);
+    }
+
+    container.appendChild(wrap);
+    return results.length;
   }
 
   // Render a relevance-ranked list into container. options: { query, limit,
@@ -114,6 +209,10 @@
         container.appendChild(empty);
       }
       return 0;
+    }
+
+    if (settings.advanced) {
+      return renderGrouped(container, shown, settings.query);
     }
 
     const list = document.createElement("div");
