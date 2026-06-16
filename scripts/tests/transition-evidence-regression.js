@@ -233,11 +233,11 @@ async function searchResultArrival(page, scenarioDir, base) {
 
   await page.goto(base + "/search.html?q=verdun", { waitUntil: "domcontentloaded", timeout: 30000 });
   await waitForPageReady(page);
-  await page.waitForSelector("#search-page-results .result-card a[href*='section.html']", { timeout: 30000 });
+  await page.waitForSelector("#search-page-results .oracle-result[href*='section.html']", { timeout: 30000 });
   await page.screenshot({ path: beforePath, fullPage: true });
 
   const clickState = await page.evaluate(() => {
-    const link = document.querySelector("#search-page-results .result-card a[href*='section.html']");
+    const link = document.querySelector("#search-page-results .oracle-result[href*='section.html']");
     const started = performance.now();
     link.click();
     return {

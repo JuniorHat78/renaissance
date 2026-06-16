@@ -233,9 +233,47 @@
       return;
     }
 
-    searchHint.textContent = "Searching...";
-
     const runId = ++searchRunId;
+
+    const client = window.RenaissanceOracleClient;
+    if (client && client.available()) {
+      let ranked;
+      try {
+        ranked = await client.search(state.query, { scope: state.scope, limit: 60 });
+      } catch (_error) {
+        ranked = null;
+      }
+      if (runId !== searchRunId) {
+        return;
+      }
+      if (ranked) {
+        // Oracle-native: one flat, relevance-ranked list. No mode/sort/page-size
+        // knobs, no per-section counts rail, no pagination — the oracle ranks so
+        // well that density became noise (see the sprint doc rationale).
+        //
+        // SEAM: with a single essay, the cross-essay "map" is unnecessary. When
+        // index.stats.essays > 1 and triage-across-essays earns its rent, the
+        // re-entry point is the scope selector (already wired, auto-populated) —
+        // not a counts rail. Grow that spoke; don't resurrect the old density.
+        const count = ranked.totalMatched || 0;
+        searchCounts.textContent = "";
+        searchPagination.hidden = true;
+        client.renderResults(searchResults, ranked, {
+          query: state.query,
+          emptyText: "Nothing matches “" + state.query + "”."
+        });
+        const hint = count === 0
+          ? "No matches."
+          : count + (count === 1 ? " passage" : " passages") + " for “" + state.query + "”";
+        searchHint.textContent = hint;
+        searchStatus.textContent = hint;
+        updateUrlState();
+        return;
+      }
+    }
+
+    // Fallback: legacy engine (oracle index unavailable, e.g. file:///offline).
+    searchHint.textContent = "Searching...";
     let result;
     try {
       result = await searchEngine.search({
@@ -341,6 +379,12 @@
     advancedToggle.addEventListener("click", () => {
       setAdvancedOpen(advancedPanel.hidden);
     });
+
+    // Oracle search is mode/sort/page-size-free; hide the advanced controls
+    // unless we fall back to the legacy engine (file:// / offline).
+    if (window.RenaissanceOracleClient && window.RenaissanceOracleClient.available()) {
+      advancedToggle.hidden = true;
+    }
   }
 
   async function init() {

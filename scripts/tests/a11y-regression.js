@@ -126,7 +126,7 @@ async function sweepTheme(browser, options, theme, conds) {
     await page.goto(options.base + "/search.html", { waitUntil: "networkidle", timeout: 30000 });
     await page.waitForSelector("#search-page-input", { timeout: 30000 });
     await page.fill("#search-page-input", "sand");
-    await page.waitForSelector("#search-page-results .result-card", { timeout: 30000 });
+    await page.waitForSelector("#search-page-results .oracle-result", { timeout: 30000 });
   });
   await surface("not-found", async () => {
     await page.goto(options.base + "/this-page-does-not-exist", { waitUntil: "domcontentloaded", timeout: 30000 });
