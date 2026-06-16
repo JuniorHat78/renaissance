@@ -145,6 +145,219 @@ already shipped, then start the generated oracle search index (Phase 5) so
 Spotlight is not riding on runtime search.
 ```
 
+## Sprint Direction: The Reading Instrument (2026-06-16)
+
+### Thesis
+
+The remaining sprint is no longer "finish a search box." It is to finish a
+**hand-built reading instrument**. The search system is done and oracle-native
+end to end (Spotlight, full `/search`, essay inline, home/archive inline — one
+ranking truth, one look, green on Actions). What's left is the layer that makes
+*reading itself* feel inevitable: a continuity motion that carries the reader
+from a search result into the prose, a compiler that makes the reader instant
+and authoritative, book-grade typesetting to rest the eye in, and a literary
+apparatus that orbits the essay. Guiding ethos (from the author, verbatim in
+spirit): **always do the harder thing when it is more beautiful, never when it
+is merely noisy; not afraid of more code or custom systems as long as they
+serve a beautiful purpose and aren't hackneyed in themselves; 200% or nothing.**
+
+A unifying property disciplines everything below: **nothing inline ever
+interrupts the reading.** Each piece either *smooths* the reading (continuity,
+the compiler) or *surrounds* it (typesetting beautifies the page; the apparatus
+lives in a separate contemplative surface). This is why **editorial apparatus
+(footnotes/sidenotes) is explicitly rejected** — an essay is continuous argued
+prose; margin-notes fracture attention and belong to reference works, not
+essays. We will also **never fabricate apparatus** (invented footnotes,
+manufactured "scholarly" notes): everything is either *computed from the text*
+or *authored by a human*, never invented to look richer.
+
+### Centerpiece: the continuity transition (search result -> reader)
+
+**The soul.** The shared element is **the words, not the card.** The clicked
+result shows a `<mark>`ed phrase; the identical substring exists in the reader.
+On click, *that phrase physically travels and lands on itself in the paragraph.*
+Card-grows-into-detail is the hackneyed framework-demo version (the card is a
+generic container); words-travel is specific to a site about text, which is why
+it clears the "not hackneyed in itself" bar. The illusion holds because the
+matched string is literally identical in both places.
+
+**What's already paved (~70%).** `scripts/page-transition.js` already solves the
+hard multi-page (non-SPA) problem of carrying state across a hard document
+navigation:
+
+- Source capture: `markSourceAnchor` reads the clicked anchor's
+  `getBoundingClientRect`, computes a center point, stashes
+  `{motion, sourceX, sourceY, createdAt}` in `sessionStorage` (`STORAGE_KEY`).
+- Cross-document handoff with freshness: `readIncomingMotion` reads it on
+  arrival, age-gates via `STORED_MOTION_MAX_AGE_MS`, sets `--page-source-x/y`,
+  flags `data-page-arrival="navigation"`.
+- Reveal choreography (`page-transition-prep/out/ready`), reduced-motion path,
+  bfcache `pageshow` handling.
+- **Prefetch-on-intent already exists** (`maybePrefetch` on `pointerdown` +
+  `focusin`) — the destination is usually warm before the click, which is what
+  makes a flight viable instead of janky.
+
+Today that payload carries a *point* and runs a generic directional flourish.
+Continuity = **enrich the payload from a point to the mark's rect + text +
+type-style + passage identity, and replace the generic flourish with a real
+FLIP flight.** It is an evolution of this system, not a parallel one.
+
+**Decisive constraint — custom FLIP, not the View Transitions API.** The author
+uses Firefox, where cross-document (MPA) View Transitions are not reliably
+available (as of 2026-06). Leaning on native VT would silently break the effect
+for the one person judging it, and native VT also gives less art-direction over
+the font tween + cross-fade. So the implementation is a **hand-built FLIP**,
+identical across browsers. Native VT is, at most, an optional later turbocharger
+— and we will *not* mix mechanisms, because two mechanisms = two subtly
+different feels = the least-Apple outcome.
+
+**Locked taste calls** (resolved via "harder when more beautiful, never when
+noisy"):
+
+- **FLIP on the real mark, not a ghost clone.** The actual rendered words move —
+  no clone seam, no cross-fade fudge. The reflow risk is not a reason to dodge
+  it; it's the 200% tax: contain the moving element in its own layer / reserve
+  its space so the surrounding paragraph never twitches.
+- **Only the words travel.** A trailing card-echo is the noise; killed.
+- **Luxe, spring-eased (~480ms).** Snapping is for utilities; settling *into*
+  text is for reading. The craft is tuning a spring that feels inevitable, not
+  floaty.
+
+**Anatomy (FLIP across a navigation):**
+
+1. FIRST / capture (search page, on click): measure the result's `<mark>` rect;
+   capture its text + computed font/size/color; capture passage identity
+   (already in href). Enrich the existing sessionStorage payload.
+2. Leave: existing out-choreography — the list recedes, the clicked words hold.
+3. Handoff: existing sessionStorage + age gate.
+4. LAST / INVERT / PLAY (reader): build section -> highlight passage (existing
+   deep-link machinery) -> **scroll it to the reading sightline** -> measure
+   destination mark rect (LAST) -> place the real mark at the source rect
+   (INVERT) -> animate to home, tweening position + scale + color (PLAY) ->
+   settle into the real highlight -> clean up.
+
+**The 200% hard problems (where half-assing shows):**
+
+- **Scroll-then-measure ordering.** The reader scrolls the highlight to
+  `innerHeight * 0.36` (pinned by `anchor-regression`). Measure LAST *after*
+  that scroll, or the words land where the text *was* and snap.
+- **Reveal-hold without a double-highlight flash.** Current reveal is
+  `"immediate"` for tap-latency; continuity needs a new arrival mode where the
+  paragraph paints but the highlight's *final settle* arrives via the flight,
+  with no FOUC where the real `<mark>` flashes before the words land.
+- **Font tween.** Snippet sans -> reader serif, different size. `font-size`
+  isn't transformable: scale + cross-fade family. Pixel-accurate or it reads as
+  a slide.
+- **FLIP-on-real reflow containment.** Move the mark in a layer / reserve its
+  footprint so surrounding prose stays still.
+- **Fallback safety.** Direct nav, new tab, stale/mismatched/missing payload ->
+  fall straight through to the plain highlighted landing. The deep-link
+  highlight is the *guarantee*; the flight is *enhancement*; it must never be
+  load-bearing.
+- **Reduced motion + a11y.** Under `reduce`: no flight, instant highlighted
+  landing. Anything decorative is `aria-hidden`; focus management unchanged.
+
+**The keystone insight (sequencing):** Continuity hooks into exactly one seam —
+*the moment the reader has highlighted a passage and knows its on-screen rect.*
+Building continuity first **forces that seam to be a stable contract**: the
+reader emits *"highlight settled at rect X."* When the compiler (A, below) later
+rebuilds the reader internals, its job is to *honor that contract*. So the
+centerpiece is built first not recklessly but deliberately: **the centerpiece
+writes the spec the foundation must preserve.**
+
+**Cost we accept now.** `section.html` is ~312KB against its 320KB asset budget
+— the page that already absorbed two cross-page features. Continuity lands here
+too. Decision: **do not let the byte-budget veto the centerpiece** — bump the
+gate when continuity lands and book the real `section.js` split as a deliberate
+refactor immediately after (the budget comment already says "split rather than
+grow again"). Continuity is therefore two pieces of work: the effect, and the
+split that earns its room. It also needs its own `continuity-regression.js`
+(ghost/flight appears, lands on target within tolerance, fallbacks hold,
+reduced-motion skips).
+
+### Sub-projects (projects-within-the-project)
+
+Sorted by the axis that matters to the author: **derived (computes itself, ~zero
+human labor) vs authored (needs a pen).**
+
+**A) AST compiler — promote the AST from runtime parser to build-time
+compiler.** *Derived; zero authoring.* Today the AST parses in the browser on
+every section load (`content.js`: `parseDocument -> withoutLeadingHeadings ->
+astToLegacyBlocks / toSearchableText / passagesFromDocument`). The sub-project
+makes it a build-time compiler emitting finished, hydratable content + an
+authoritative passage map. Payoff: total control over rendered output; the
+client parser stops shipping (speed + asset budget); and it **dissolves the
+entire passage-alignment bug class** (no more "does the client parse match the
+index?"). This is the legitimate form of the "custom AST" itch — an *elevation*
+of the existing, fixtured toolchain (`ast:doctor/fixtures/corpus/compare/explain
+/tree`), not a from-scratch rewrite (which would be hackneyed-in-itself). Human
+cost: taste-review of render parity only. This is also where caching becomes
+Apple-clean: artifacts derived at the deploy build, not committed and nagged
+about.
+
+**B-feel) Bespoke typesetting (algorithmic only).** *Derived; zero authoring.*
+Rules applied to existing text: optical margins, hanging punctuation, ligatures,
+small-caps, drop-caps, widow/orphan control, and beautifully set
+headings/lists/**pull-quotes** (note: `PULL_QUOTE` is already an authored block
+type in the source, so it typesets for free). The compiler (A) makes per-passage
+typographic rules clean. **The editorial half of typography
+(footnotes/sidenotes) is cut** per the thesis above.
+
+**C) Literary apparatus / concordance.** *Derived; near-zero authoring — highest
+magic-to-effort ratio on the board.* A concordance is *computed*, not authored:
+every occurrence of a motif word across the essay, rarity (idf already exists
+for the oracle), co-occurrence, thematic threads, a generated index. The shipped
+"sand" motif card is the seed; this is the tree. Only human input: thumbs-up
+/down on an auto-seeded motif shortlist (frequency/idf gated, exactly like the
+existing motif card). **Open question (decide when we get there): where C lives
+— a dedicated index/concordance surface, or woven into the existing motif
+card.** Risk is taste-calibration (don't surface junk words), not labor.
+
+### Sequence & banked hygiene
+
+Order: **continuity (centerpiece, defines the contract) -> A (compiler, honors
+it) -> B-feel (rides A) -> C (orbits the corpus).** Bank these as cheap hygiene
+whenever convenient, not as gates:
+
+- **Legacy-engine purge** (parked, scoped). `window.RenaissanceSearch` is
+  **double-duty**: ranking engine (deletable) + the reader's highlight utilities
+  (`findOccurrencesInText`, `highlightSnippet`, `normalizeMode`, used by
+  `section.js` and `anchor-regression`). Purge only the ranking engine + the
+  four oracle-fallback branches; **keep the highlight kit.** Own commit. ~1-2h.
+- **Auto-caching.** Apple answer is **derive-at-deploy** (artifacts as build
+  output, gitignored, always fresh), which folds into A. The CI
+  **generator-bot** (run generators, commit refreshed artifacts back) is the
+  pragmatic fallback if the nag needs killing sooner — but it's the engineer's
+  answer, not the designer's.
+- **CodeQL.** One open alert: `js/trivial-conditional` at `section.js:2013`.
+  **Not a bug** — the sole caller pre-guards `paragraphAnchor &&
+  passageRangeOffsets`, so the `!anchor || !rangeOffsets` operands are provably
+  dead; the *live* operand `anchor.start !== anchor.end` correctly rejects
+  multi-passage ranges. Resolution: **dismiss with justification** (defensive
+  guard, intentional) rather than delete real null-safety. Advisory-tier; do not
+  gate.
+
+### Continuity phase checklist (live)
+
+- [ ] Define the reader's "highlight settled at rect X" contract (the seam A
+      must honor).
+- [ ] Enrich the transition payload: mark rect + text + computed type-style +
+      passage identity.
+- [ ] Source capture on result click (search/essay/home/Spotlight surfaces).
+- [ ] Destination replay: scroll-to-sightline -> measure LAST -> INVERT real
+      mark to source rect -> PLAY (luxe spring) -> settle.
+- [ ] New continuity arrival mode (no double-highlight flash / FOUC).
+- [ ] FLIP-on-real reflow containment (layer + reserved footprint).
+- [ ] Fallback safety: stale/missing/mismatched payload, direct nav, new tab ->
+      plain highlighted landing.
+- [ ] Reduced-motion + a11y (no flight under reduce; decorative bits
+      `aria-hidden`; focus unchanged).
+- [ ] `continuity-regression.js` (appears, lands on target within tolerance,
+      fallbacks hold, reduced-motion skips).
+- [ ] Bump `section.html` budget on landing; book the `section.js` split as the
+      immediate follow-on.
+- [ ] Validate on Actions (browser/full-chromium), not the laptop.
+
 ### Run Log Template
 
 ```text
