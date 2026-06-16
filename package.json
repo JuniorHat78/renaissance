@@ -84,6 +84,8 @@
     "test:spotlight": "node scripts/ci/run-with-server.js --port 4188 -- node scripts/tests/spotlight-regression.js --base http://127.0.0.1:4188",
     "ci:passage-alignment": "node scripts/ci/run-with-server.js --port 4189 -- node scripts/tests/passage-alignment-regression.js --base http://127.0.0.1:4189",
     "test:passage-alignment": "node scripts/ci/run-with-server.js --port 4189 -- node scripts/tests/passage-alignment-regression.js --base http://127.0.0.1:4189",
+    "ci:continuity": "node scripts/ci/run-with-server.js --port 4190 -- node scripts/tests/continuity-regression.js --base http://127.0.0.1:4190",
+    "test:continuity": "node scripts/ci/run-with-server.js --port 4190 -- node scripts/tests/continuity-regression.js --base http://127.0.0.1:4190",
     "icons:generate": "node scripts/pwa/generate-icons.js",
     "og:generate": "node scripts/og/generate-cards.js",
     "visual:capture": "node scripts/visual/capture.js",

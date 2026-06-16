@@ -339,24 +339,62 @@ whenever convenient, not as gates:
 
 ### Continuity phase checklist (live)
 
-- [ ] Define the reader's "highlight settled at rect X" contract (the seam A
-      must honor).
-- [ ] Enrich the transition payload: mark rect + text + computed type-style +
-      passage identity.
-- [ ] Source capture on result click (search/essay/home/Spotlight surfaces).
-- [ ] Destination replay: scroll-to-sightline -> measure LAST -> INVERT real
-      mark to source rect -> PLAY (luxe spring) -> settle.
-- [ ] New continuity arrival mode (no double-highlight flash / FOUC).
-- [ ] FLIP-on-real reflow containment (layer + reserved footprint).
-- [ ] Fallback safety: stale/missing/mismatched payload, direct nav, new tab ->
-      plain highlighted landing.
-- [ ] Reduced-motion + a11y (no flight under reduce; decorative bits
-      `aria-hidden`; focus unchanged).
-- [ ] `continuity-regression.js` (appears, lands on target within tolerance,
-      fallbacks hold, reduced-motion skips).
-- [ ] Bump `section.html` budget on landing; book the `section.js` split as the
-      immediate follow-on.
-- [ ] Validate on Actions (browser/full-chromium), not the laptop.
+Landed 2026-06-16 in `scripts/continuity.js` (one file, two roles: capture on
+source surfaces, replay in the reader). Local standalone green; local
+`test:continuity` green (flight runs + settles clean; reduced-motion and
+direct-nav both fall back to a clean highlighted landing). Awaiting Actions
+browser-tier confirmation.
+
+- [x] Define the reader's "highlight settled at rect" contract. Implemented as
+      a synchronous hook, not an event: `focusHighlight()` calls
+      `RenaissanceContinuity.claimArrival(mark, scrollToReadingSightline)`. A
+      `true` return means continuity owns scroll + motion; `false` hands back to
+      the normal flourish. This is the seam the AST compiler (A) must preserve.
+- [x] Enrich the transition payload: `<mark>` rect + colour + text + essay
+      /section identity, in `sessionStorage["renaissance:continuity"]` with an
+      8s age gate (mirrors the page-transition payload pattern).
+- [x] Source capture on result click. Generic: any clicked `a[href]` to
+      `section.html` that contains a `<mark>` — covers full search, essay
+      inline, home/archive inline, and Spotlight (any surface whose results are
+      mark-bearing anchors), no per-surface code. Capture-phase listener so it
+      runs before the page-transition navigation.
+- [x] Destination replay: scroll-to-sightline (instant) -> measure LAST ->
+      INVERT the real mark to the source rect -> PLAY transform+colour to home
+      (luxe `cubic-bezier(0.22,1,0.36,1)`, 480ms) -> settle with the reader's
+      existing arrival pulse.
+- [x] No double-highlight flash: INVERT is applied synchronously in the same
+      task the highlight is created (flushed via `offsetWidth`), so the first
+      painted frame is already at the source.
+- [x] FLIP-on-real reflow containment: motion is pure `transform` (composited,
+      no layout); the one layout touch is `display:inline-block` during flight,
+      and we bail (clean fallback) when the mark wraps multiple lines
+      (`getClientRects().length > 1`), so the paragraph never reflows.
+- [x] Fallback safety: stale/missing/mismatched payload, identity mismatch,
+      zero-size rect, direct nav, new tab -> plain highlighted landing. The
+      deep-link highlight is the guarantee; the flight is never load-bearing.
+- [x] Reduced-motion + a11y: `claimArrival` returns false under
+      `prefers-reduced-motion` (instant highlighted landing, no flight). The
+      mark is real content (not hidden); focus/tabindex handling unchanged.
+- [x] `continuity-regression.js` + `test:continuity`/`ci:continuity` (port
+      4190), wired into the `browser` and `full-chromium` suites. Three cases:
+      flight runs and settles clean, reduced-motion no-flight, direct-nav
+      no-flight; all assert a fully-highlighted landing and zero page errors.
+- [x] Bumped budgets on landing: `section.html` 320 -> 336, `index.html` 256 ->
+      272. **`section.js` split is now booked as the immediate follow-on** — the
+      next budget pressure is paid by the split, not another bump.
+- [ ] Validate on Actions (browser/full-chromium), not the laptop. (pushed
+      2026-06-16; awaiting run.)
+
+### Continuity follow-ons (parked)
+
+- **Spotlight polish**: capture already fires for mark-bearing Spotlight result
+  anchors; confirm the modal-context source rect reads correctly and the flight
+  feels right out of the overlay (vs in-page lists).
+- **`section.js` split** (booked above): the real fix for the section.html
+  budget; do it before any further reader growth.
+- **Scale fidelity**: flight scale is height-ratio uniform; if the snippet vs
+  reader type contrast ever feels off mid-flight, switch to a width-aware or
+  font-size-explicit tween.
 
 ### Run Log Template
 

@@ -1724,6 +1724,18 @@
       return;
     }
     mark.setAttribute("tabindex", "-1");
+
+    // Continuity arrival: when the reader was reached by clicking a search
+    // result, hand the arrival to the continuity transition — it flies the
+    // clicked words to this highlight and owns scroll + motion. It returns true
+    // only when it will actually fly (fresh, matching capture; motion allowed);
+    // otherwise we run the normal arrival flourish below. The highlight itself
+    // is already applied, so either path lands fully highlighted.
+    var continuity = window.RenaissanceContinuity;
+    if (continuity && continuity.claimArrival(mark, scrollToReadingSightline)) {
+      return;
+    }
+
     mark.classList.remove("reader-highlight-arrival");
     void mark.offsetWidth;
     mark.classList.add("reader-highlight-arrival");

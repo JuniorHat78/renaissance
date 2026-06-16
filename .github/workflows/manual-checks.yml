@@ -89,6 +89,7 @@ jobs:
               npm run ci:subpath
               npm run ci:notfound
               npm run ci:passage-alignment
+              npm run ci:continuity
               ;;
             pwa)
               npm run ci:offline
@@ -118,6 +119,7 @@ jobs:
               npm run ci:subpath
               npm run ci:notfound
               npm run ci:passage-alignment
+              npm run ci:continuity
               npm run ci:a11y
               npm run ci:offline
               npm run ci:focus
