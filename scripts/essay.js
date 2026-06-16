@@ -177,7 +177,12 @@
       return "";
     }
 
-    const percent = progressPercent(record.maxProgress || record.progress);
+    // Prefer attention (what was actually read) over scroll depth; legacy
+    // records without attention fall back to the scroll high-water mark.
+    const readValue = record.attentionProgress !== null && record.attentionProgress !== undefined
+      ? record.attentionProgress
+      : (record.maxProgress || record.progress);
+    const percent = progressPercent(readValue);
     const label = record.completed
       ? "Completed"
       : percent >= 4

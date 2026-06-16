@@ -91,7 +91,12 @@
         continueMeter.style.width = "100%";
       }
     } else {
-      const percent = progressPercent(target.progress);
+      // Attention progress (read words / total) is the honest "Continue
+      // reading" number; scroll `progress` is the legacy fallback.
+      const readValue = target.attentionProgress !== null && target.attentionProgress !== undefined
+        ? target.attentionProgress
+        : target.progress;
+      const percent = progressPercent(readValue);
       continueDetail.textContent = target.sectionLabel + ", " + target.sectionTitle;
       continueStatus.textContent = String(percent) + "%";
       setActionLabel("Resume");

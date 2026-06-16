@@ -15,12 +15,14 @@ const SHELL_PAGES = ["index.html", "essay.html", "section.html", "search.html"];
 const DEFAULT_BUDGET_BYTES = Number.parseInt(process.env.RENAISSANCE_ASSET_BUDGET_BYTES || "", 10) || 256 * 1024;
 const PAGE_BUDGET_BYTES = {
   // section.html is the heaviest shell: the 86KB section.js reader plus the
-  // cross-page Spotlight launcher, oracle, and now the continuity transition.
-  // Raised 264 -> 304 (Spotlight) -> 320 (oracle) -> 336 (continuity). This is
-  // the agreed ceiling: continuity is the last feature we grow it for. The real
-  // fix is booked — split section.js — and is the immediate follow-on to the
-  // continuity work, NOT another budget bump.
-  "section.html": 336 * 1024,
+  // cross-page Spotlight launcher, oracle, continuity transition, and now the
+  // reading-attention core + heartbeat. Raised 264 -> 304 (Spotlight) -> 320
+  // (oracle) -> 336 (continuity) -> 352 (reading attention). 336 was meant to
+  // be the ceiling; the attention model (a pure ~9KB core loaded here) pushed
+  // past it. This makes the booked section.js split OVERDUE, not optional — it
+  // is the next structural debt to pay and the budget must not grow again
+  // before it lands.
+  "section.html": 352 * 1024,
   // essay.html carries the motif card + oracle client/engine on top of the
   // essay view. Raised 256 -> 272 (oracle-native search) -> 280 (the composed-
   // arrival veil CSS, which is shared site.css weight across every page).

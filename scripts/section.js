@@ -18,6 +18,7 @@
     toAbsoluteUrl
   } = window.RenaissanceMeta;
   const readingState = window.RenaissanceReadingState;
+  const readingAttention = window.RenaissanceReadingAttention;
   const clipboardCitation = window.RenaissanceClipboardCitation;
   const recovery = window.RenaissanceRecovery;
 
@@ -51,6 +52,14 @@
   const RESTORE_SAVE_SUPPRESS_MS = 720;
   const BOOKMARK_AUTO_CLEAR_MS = 5600;
   const SECTION_NAV_SELECTOR = "#prev-link, #next-link, #next-cta";
+  // The attention heartbeat samples zone occupancy + scroll velocity on this
+  // cadence; reading credit accrues per tick. The reading zone is a band of
+  // +/- this fraction of the viewport around the sightline (the eyes are near
+  // the reading line, not at the screen edges). Attention is persisted at most
+  // this often while reading without scrolling.
+  const READING_ATTENTION_HEARTBEAT_MS = 250;
+  const READING_ATTENTION_ZONE_HALF = 0.18;
+  const READING_ATTENTION_SAVE_MS = 2000;
   const SECTION_TURN_OUT_MS = 96;
   const SECTION_TURN_IN_MS = 220;
   const SECTION_PAYLOAD_CACHE_MAX = 10;
@@ -64,6 +73,11 @@
   let selectionSyncFrame = null;
   let progressFrame = null;
   let progressSaveTimer = null;
+  let attentionModel = null;
+  let attentionHeartbeat = null;
+  let attentionLastSampleAt = null;
+  let attentionLastScrollY = 0;
+  let attentionLastSavedAt = null;
   let resumeBookmarkElement = null;
   let resumeBookmarkFadeTimer = null;
   let resumeBookmarkRemoveTimer = null;
@@ -1183,6 +1197,7 @@
     }
 
     const pointer = currentResumePointer();
+    const attention = attentionSnapshot();
     readingState.saveSectionProgress({
       essaySlug: currentEssay.slug,
       sectionNumber: currentSectionNumber,
@@ -1191,6 +1206,9 @@
       resumeParagraphIndex: pointer ? pointer.paragraphIndex : null,
       resumeParagraphRatio: pointer ? pointer.paragraphRatio : null,
       resumeParagraphSignature: pointer ? pointer.paragraphSignature : null,
+      attentionProgress: attention ? attention.progress : null,
+      readParagraphs: attention ? attention.readParagraphs : null,
+      attentionPartial: attention ? attention.partial : null,
       essayTitle: currentEssay.title,
       sectionTitle: currentDisplay.title,
       sectionLabel: currentDisplay.label
@@ -1251,12 +1269,167 @@
       }
     }, { passive: true });
     window.addEventListener("resize", scheduleReadingProgressSync);
-    window.addEventListener("pagehide", flushReadingProgress);
+    window.addEventListener("pagehide", () => {
+      stopAttentionHeartbeat();
+      flushReadingProgress();
+    });
     document.addEventListener("visibilitychange", () => {
       if (document.hidden) {
         flushReadingProgress();
       }
     });
+  }
+
+  // --- Reading-attention heartbeat -----------------------------------------
+  // The scroll-fraction above answers "where am I on the page" and drives the
+  // visual bar + resume geometry. The attention model answers a different
+  // question — "how much did I actually read" — and supersedes scroll depth for
+  // the archive's "Continue reading" percentage. It is a thin wiring layer: all
+  // the intelligence lives in the pure RenaissanceReadingAttention core, which
+  // is unit-tested in isolation. Here we only sample the DOM (zone occupancy,
+  // scroll velocity, presence) and feed it ticks.
+
+  function paragraphWordCount(paragraph) {
+    const text = (paragraph.textContent || "").trim();
+    if (!text) {
+      return 0;
+    }
+    return text.split(/\s+/).length;
+  }
+
+  function attentionParagraphElements() {
+    return sectionContent
+      ? Array.from(sectionContent.querySelectorAll("p[data-paragraph-index]"))
+      : [];
+  }
+
+  // Which paragraphs overlap the reading band, weighted by how much of the
+  // band each one occupies — credit follows the eyes, not the screen edges.
+  function readingZoneOccupancy() {
+    const viewportHeight = Math.max(1, window.innerHeight || 0);
+    const lineY = readingLineY();
+    const band = Math.max(1, viewportHeight * READING_ATTENTION_ZONE_HALF);
+    const top = lineY - band;
+    const bottom = lineY + band;
+    const span = Math.max(1, bottom - top);
+    const zone = [];
+
+    attentionParagraphElements().forEach((paragraph) => {
+      const index = paragraphIndexFromElement(paragraph);
+      if (index === null) {
+        return;
+      }
+      const rect = paragraph.getBoundingClientRect();
+      const overlap = Math.min(rect.bottom, bottom) - Math.max(rect.top, top);
+      if (overlap > 0) {
+        zone.push({ index, weight: clamp(overlap / span, 0, 1) });
+      }
+    });
+
+    return zone;
+  }
+
+  function setupReadingAttention() {
+    stopAttentionHeartbeat();
+    attentionModel = null;
+    attentionLastSampleAt = null;
+    attentionLastSavedAt = null;
+    attentionLastScrollY = documentScrollY();
+
+    if (!readingAttention || typeof readingAttention.create !== "function" || !sectionContent) {
+      return;
+    }
+
+    const paragraphs = attentionParagraphElements()
+      .map((paragraph) => ({
+        index: paragraphIndexFromElement(paragraph),
+        words: paragraphWordCount(paragraph)
+      }))
+      .filter((entry) => entry.index !== null);
+
+    if (!paragraphs.length) {
+      return;
+    }
+
+    let state = null;
+    if (readingState && currentEssay && currentSectionNumber) {
+      const record = readingState.getSectionRecord(currentEssay.slug, currentSectionNumber);
+      if (record && ((record.readParagraphs && record.readParagraphs.length) || record.attentionPartial)) {
+        state = {
+          readParagraphs: record.readParagraphs || [],
+          partial: record.attentionPartial || null
+        };
+      }
+    }
+
+    attentionModel = readingAttention.create(paragraphs, state ? { state } : undefined);
+  }
+
+  function attentionSnapshot() {
+    if (!attentionModel) {
+      return null;
+    }
+    const summary = attentionModel.summary();
+    const serialized = attentionModel.serialize();
+    return {
+      progress: summary.progress,
+      readParagraphs: serialized.readParagraphs,
+      partial: serialized.partial || null
+    };
+  }
+
+  function attentionClock() {
+    return (typeof performance === "object" && typeof performance.now === "function")
+      ? performance.now()
+      : Date.now();
+  }
+
+  function attentionTick() {
+    if (!attentionModel) {
+      return;
+    }
+
+    const now = attentionClock();
+    const visible = !document.hidden;
+    const scrollY = documentScrollY();
+    let velocity = 0;
+    if (attentionLastSampleAt !== null) {
+      const dt = now - attentionLastSampleAt;
+      if (dt > 0) {
+        velocity = Math.abs(scrollY - attentionLastScrollY) / dt;
+      }
+    }
+    attentionLastSampleAt = now;
+    attentionLastScrollY = scrollY;
+
+    attentionModel.tick({
+      now,
+      zone: visible ? readingZoneOccupancy() : [],
+      velocity,
+      visible
+    });
+
+    // Reading without scrolling fires no scroll event, so the heartbeat is the
+    // only thing that would persist the accruing read-set — save on a throttle.
+    if (!suppressProgressSave && (attentionLastSavedAt === null || now - attentionLastSavedAt >= READING_ATTENTION_SAVE_MS)) {
+      attentionLastSavedAt = now;
+      saveReadingProgress(computeReadingProgress());
+    }
+  }
+
+  function startAttentionHeartbeat() {
+    stopAttentionHeartbeat();
+    if (!attentionModel) {
+      return;
+    }
+    attentionHeartbeat = window.setInterval(attentionTick, READING_ATTENTION_HEARTBEAT_MS);
+  }
+
+  function stopAttentionHeartbeat() {
+    if (attentionHeartbeat) {
+      window.clearInterval(attentionHeartbeat);
+      attentionHeartbeat = null;
+    }
   }
 
   function maxDocumentScrollY() {
@@ -1426,6 +1599,8 @@
   function initializeReadingProgress(display) {
     currentDisplay = display;
     bindReadingProgressEvents();
+    setupReadingAttention();
+    startAttentionHeartbeat();
     syncReadingProgress({ save: false });
   }
 
