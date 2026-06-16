@@ -85,7 +85,7 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           additional_permissions: |
-            actions: write
+            actions: read
           prompt: |
             You are running inside GitHub Actions for JuniorHat78/renaissance.
 
@@ -151,7 +151,7 @@ jobs:
             Keep going until the queue is complete, a real blocker appears, or
             quota/time prevents useful further progress.
           claude_args: >-
-            --allowed-tools
+            --allowedTools
             Bash(git *),Bash(npm *),Bash(node *),Bash(npx playwright *),
             Bash(gh *),Bash(ls *),Bash(find *),Bash(grep *),Bash(rg *),
             Bash(sed *),Bash(cat *),Bash(pwd)
