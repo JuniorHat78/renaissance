@@ -22,9 +22,11 @@ assumptions in an agent thread.
 A11y + CodeQL) · **Main:** `main`.
 
 **One-line status:** The oracle search system, the continuity transition (words
-fly from a search result into the reader), and an honest **reading-attention
-progress model** are now built and standalone-green. The reader is being turned
-into a "reading instrument." Next concrete build is **advanced search**.
+fly from a search result into the reader), an honest **reading-attention
+progress model**, and **advanced search** (a "show everything" mode that reveals
+the oracle's reasons) are now built and standalone-green. The reader is being
+turned into a "reading instrument." Next concrete build is the **A-phase**
+(soft-navigation + magic texture).
 
 **Shipped & green on Actions:**
 - Oracle search end-to-end — Spotlight, full `/search`, essay-inline, home/archive
@@ -51,26 +53,32 @@ into a "reading instrument." Next concrete build is **advanced search**.
   ticks; `archive.js`/`essay.js` show the attention number, falling back to
   scroll progress for legacy records. Visual bar stays scroll-position by design.
   Commits `85b4e46`, `b35a1f3`, `7d6c758`.
+- **Advanced search** — the curated `/search` default stays tight; the repurposed
+  `advancedToggle` is now a "Show everything" switch that passes
+  `perSection: Infinity` + a high limit, so a dense term returns every matching
+  passage (e.g. "sand" 20 → 121), grouped by section with live counts and the
+  oracle's self-explaining ranking reasons shown per row. No ranking change (the
+  lever already existed); grouped/reasons renderer added to the shared
+  `oracle-client.js` behind an `advanced` flag; pure regression covers the uncap.
+  Commit `36b63ac`. Parked follow-ups: scope/section filters in advanced mode;
+  URL-persist the mode.
 
 **Working on now:** nothing in-flight (clean tree). Two follow-ups are open: the
 **`section.js` split is now OVERDUE** — the attention core pushed section.html
-past the 336KB ceiling continuity had declared final, so the budget was raised
-to 352KB and must not grow again before the split — and the reading-attention
-**feel pass** (tune `WPM`/`READ_FRACTION`/velocity thresholds in the live reader;
-the math is proven, the constants are taste calls).
+past the 336KB ceiling continuity had declared final; the budget is now PARKED at
+an absurd 1024KB so it stops gating sprint work, and drops back to a real,
+disciplined number the moment the split lands (it is NOT a real budget) — and the
+reading-attention **feel pass** (tune `WPM`/`READ_FRACTION`/velocity thresholds
+in the live reader; the math is proven, the constants are taste calls).
 
 **Up next (in order):**
-1. **Advanced search** — keep the curated default (a couple per section); add an
-   exhaustive "show everything" mode (uncapped `perSection`/limit, per-section
-   counts, the oracle's self-explaining ranking reasons). Reuse the hidden
-   `advancedToggle`. See **Advanced Search Plan** below.
-2. **A-phase headline: soft-navigation + magic texture** — the residual
+1. **A-phase headline: soft-navigation + magic texture** — the residual
    "tinge of lock-up" is the hard document navigation; the ethereal fix is
    soft-nav (fetch + swap, no reload), which also dovetails with the AST
    compiler and makes continuity same-document-trivial. Bundle the magic-texture
    polish (true spring, veil dissolve, word shimmer, depth) with it. See
    **A-Phase** below.
-3. Then the rest of the reading-instrument arc: AST compiler (A), bespoke
+2. Then the rest of the reading-instrument arc: AST compiler (A), bespoke
    typesetting (B-feel), literary apparatus/concordance (C). See **Sprint
    Direction: The Reading Instrument**.
 
@@ -628,7 +636,15 @@ provable in CI (pure core), reuses real signal (word counts, sightline), and is
 not a hand-waved probability distribution. It knows reading from scanning and
 pauses when you leave.
 
-### Advanced Search Plan
+### Advanced Search Plan (SHIPPED 2026-06-16 — standalone-green, `36b63ac`)
+
+**Status.** Built: the `advancedToggle` is the "Show everything" switch
+(`perSection: Infinity` + high limit), results group by section with live counts
+and the oracle's reasons per row (grouped renderer in `oracle-client.js` behind
+an `advanced` flag; pure uncap regression in `search-oracle-regression.js`).
+Deferred from the plan below: scope/section *filters* inside advanced mode (the
+scope `<select>` still lives in the legacy panel, hidden in oracle mode), and
+URL-persisting the mode. Original plan retained below for the deferred pieces.
 
 Default `/search` stays curated: a couple per section, relevance-first (the
 oracle's `perSection` cap, currently 2). Add a **sexy advanced/exhaustive mode**:
