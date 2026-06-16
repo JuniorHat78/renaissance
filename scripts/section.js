@@ -22,26 +22,37 @@
   const clipboardCitation = window.RenaissanceClipboardCitation;
   const recovery = window.RenaissanceRecovery;
 
-  const backToEssay = document.getElementById("back-to-essay");
-  const essayLine = document.getElementById("essay-line");
-  const sectionKicker = document.getElementById("section-kicker");
-  const sectionTitle = document.getElementById("section-title");
-  const sectionSubtitle = document.getElementById("section-subtitle");
-  const sectionMeta = document.getElementById("section-meta");
-  const sectionContent = document.getElementById("section-content");
-  const sectionTools = document.getElementById("section-tools");
-  const prevLink = document.getElementById("prev-link");
-  const nextLink = document.getElementById("next-link");
-  const nextCta = document.getElementById("next-cta");
-  const copyHighlightButton = document.getElementById("copy-highlight-link");
-  const copyHighlightStatus = document.getElementById("copy-highlight-status");
-  const highlightCapNote = document.getElementById("highlight-cap-note");
-  const readerProgressBar = document.getElementById("reader-progress-bar");
-  const readerLayout = document.querySelector(".reader-layout");
-  const chapterArticle = document.querySelector(".chapter-article");
-  let selectionCopyChip = document.getElementById("selection-copy-chip");
-  let selectionCopyBar = document.getElementById("selection-copy-bar");
-  let selectionCopyBarButton = document.getElementById("selection-copy-bar-button");
+  // View-scoped DOM refs. Assigned in queryElements() at mount() time (and
+  // re-queried each mount) so the reader can be mounted into freshly-swapped
+  // DOM by the soft-nav reading shell, not only on a fresh page load.
+  let backToEssay, essayLine, sectionKicker, sectionTitle, sectionSubtitle;
+  let sectionMeta, sectionContent, sectionTools, prevLink, nextLink, nextCta;
+  let copyHighlightButton, copyHighlightStatus, highlightCapNote, readerProgressBar;
+  let readerLayout, chapterArticle;
+  let selectionCopyChip, selectionCopyBar, selectionCopyBarButton;
+
+  function queryElements() {
+    backToEssay = document.getElementById("back-to-essay");
+    essayLine = document.getElementById("essay-line");
+    sectionKicker = document.getElementById("section-kicker");
+    sectionTitle = document.getElementById("section-title");
+    sectionSubtitle = document.getElementById("section-subtitle");
+    sectionMeta = document.getElementById("section-meta");
+    sectionContent = document.getElementById("section-content");
+    sectionTools = document.getElementById("section-tools");
+    prevLink = document.getElementById("prev-link");
+    nextLink = document.getElementById("next-link");
+    nextCta = document.getElementById("next-cta");
+    copyHighlightButton = document.getElementById("copy-highlight-link");
+    copyHighlightStatus = document.getElementById("copy-highlight-status");
+    highlightCapNote = document.getElementById("highlight-cap-note");
+    readerProgressBar = document.getElementById("reader-progress-bar");
+    readerLayout = document.querySelector(".reader-layout");
+    chapterArticle = document.querySelector(".chapter-article");
+    selectionCopyChip = document.getElementById("selection-copy-chip");
+    selectionCopyBar = document.getElementById("selection-copy-bar");
+    selectionCopyBarButton = document.getElementById("selection-copy-bar-button");
+  }
   const MAX_QUERY_ONLY_HIGHLIGHTS = 160;
   const CITATION_MIN_WORDS = 5;
   const CITATION_FULL_WORDS = 40;
@@ -89,6 +100,9 @@
   let isSelectingPointer = false;
   let progressEventsBound = false;
   let suppressProgressSave = false;
+  // AbortController for the current mount: every global (document/window)
+  // listener is registered with its signal so unmount() tears them all down.
+  let lifecycle = null;
   const CONTEXTUAL_LABEL_DEFAULT = "Copy link";
   const CONTEXTUAL_LABEL_COPIED = "Copied";
   const CONTEXTUAL_LABEL_ERROR = "Try copy again";
@@ -1261,23 +1275,24 @@
       return;
     }
     progressEventsBound = true;
+    const signal = lifecycle.signal;
 
     window.addEventListener("scroll", () => {
       scheduleReadingProgressSync();
       if (resumeBookmarkDismissArmed) {
         clearResumeBookmark({ fade: true });
       }
-    }, { passive: true });
-    window.addEventListener("resize", scheduleReadingProgressSync);
+    }, { passive: true, signal });
+    window.addEventListener("resize", scheduleReadingProgressSync, { signal });
     window.addEventListener("pagehide", () => {
       stopAttentionHeartbeat();
       flushReadingProgress();
-    });
+    }, { signal });
     document.addEventListener("visibilitychange", () => {
       if (document.hidden) {
         flushReadingProgress();
       }
-    });
+    }, { signal });
   }
 
   // --- Reading-attention heartbeat -----------------------------------------
@@ -2602,13 +2617,14 @@
   }
 
   function bindHighlightEvents() {
+    const signal = lifecycle.signal;
     if (copyHighlightButton) {
       copyHighlightButton.addEventListener("mousedown", (event) => {
         event.preventDefault();
-      });
+      }, { signal });
       copyHighlightButton.addEventListener("click", () => {
         copyHighlightLink();
-      });
+      }, { signal });
     }
 
     if (!hasContextualShare) {
@@ -2618,25 +2634,25 @@
     [selectionCopyChip, selectionCopyBarButton].filter((button) => Boolean(button)).forEach((button) => {
       button.addEventListener("mousedown", (event) => {
         event.preventDefault();
-      });
+      }, { signal });
       button.addEventListener("click", () => {
         copyHighlightLink(activeSelectionDetails);
-      });
+      }, { signal });
     });
 
     sectionContent.addEventListener("copy", (event) => {
       decorateClipboardWithSource(event);
-    });
+    }, { signal });
 
     document.addEventListener("selectionchange", () => {
       scheduleSyncContextualSelection();
-    });
+    }, { signal });
 
     sectionContent.addEventListener("pointerdown", (event) => {
       if (event.button === 0) {
         isSelectingPointer = true;
       }
-    });
+    }, { signal });
 
     document.addEventListener("pointerup", () => {
       if (!isSelectingPointer) {
@@ -2644,7 +2660,7 @@
       }
       isSelectingPointer = false;
       scheduleSyncContextualSelection();
-    });
+    }, { signal });
 
     document.addEventListener("pointercancel", () => {
       if (!isSelectingPointer) {
@@ -2652,7 +2668,7 @@
       }
       isSelectingPointer = false;
       scheduleSyncContextualSelection();
-    });
+    }, { signal });
 
     document.addEventListener("keydown", (event) => {
       const key = String(event.key || "").toLowerCase();
@@ -2678,11 +2694,11 @@
         activeSelectionDetails = null;
         hideContextualShare();
       }
-    });
+    }, { signal });
 
     window.addEventListener("resize", () => {
       scheduleSyncContextualSelection();
-    });
+    }, { signal });
 
     document.addEventListener("scroll", () => {
       if (!activeSelectionDetails) {
@@ -2690,7 +2706,7 @@
         return;
       }
       scheduleSyncContextualSelection();
-    }, { passive: true });
+    }, { passive: true, signal });
 
     document.addEventListener("visibilitychange", () => {
       if (document.hidden) {
@@ -2699,10 +2715,11 @@
         hideContextualShare();
         hideCopyToast();
       }
-    });
+    }, { signal });
   }
 
   function bindSectionNavigation() {
+    const signal = lifecycle.signal;
     document.addEventListener("click", (event) => {
       const link = event.target && event.target.closest
         ? event.target.closest(SECTION_NAV_SELECTOR)
@@ -2726,7 +2743,7 @@
         essaySlug: route.essaySlug,
         sectionNumber: route.sectionNumber
       });
-    });
+    }, { signal });
 
     document.addEventListener("pointerdown", (event) => {
       if (event.button !== undefined && event.button !== 0) {
@@ -2738,7 +2755,7 @@
       if (link && link.href) {
         prefetchSectionFromLink(link);
       }
-    }, { passive: true });
+    }, { passive: true, signal });
 
     document.addEventListener("touchstart", (event) => {
       const link = event.target && event.target.closest
@@ -2747,7 +2764,7 @@
       if (link && link.href) {
         prefetchSectionFromLink(link);
       }
-    }, { passive: true });
+    }, { passive: true, signal });
 
     document.addEventListener("mouseover", (event) => {
       const link = event.target && event.target.closest
@@ -2756,7 +2773,7 @@
       if (link && link.href) {
         prefetchSectionFromLink(link);
       }
-    });
+    }, { signal });
 
     document.addEventListener("focusin", (event) => {
       const link = event.target && event.target.closest
@@ -2765,7 +2782,7 @@
       if (link && link.href) {
         prefetchSectionFromLink(link);
       }
-    });
+    }, { signal });
 
     window.addEventListener("renaissance:route", (event) => {
       const route = event.detail || router.parse();
@@ -2783,7 +2800,7 @@
       pendingRouteScrollTop = false;
       pendingRouteDirection = "next";
       loadCurrentSection(options);
-    });
+    }, { signal });
   }
 
   async function loadCurrentSection(options) {
@@ -2908,7 +2925,9 @@
     }
   }
 
-  async function init() {
+  async function mount() {
+    lifecycle = new AbortController();
+    queryElements();
     initThemeToggle();
     ensureContextualShareControls();
     ensureCopyToast();
@@ -2918,5 +2937,66 @@
     loadCurrentSection();
   }
 
-  init();
+  function unmount() {
+    // Persist where the reader actually was before we tear the view down, then
+    // stop the heartbeat so it can't tick into swapped-out DOM.
+    try {
+      flushReadingProgress();
+    } catch (_error) {
+      // Teardown must never throw — a failed final save is not worth wedging
+      // navigation.
+    }
+    stopAttentionHeartbeat();
+
+    if (lifecycle) {
+      lifecycle.abort();
+      lifecycle = null;
+    }
+
+    // Invalidate any in-flight section load so a late resolve can't paint into
+    // the next view's DOM.
+    routeLoadToken += 1;
+
+    // Cancel every scheduled frame/timer this view owns.
+    if (progressFrame) {
+      cancelAnimationFrame(progressFrame);
+      progressFrame = null;
+    }
+    if (selectionSyncFrame) {
+      cancelAnimationFrame(selectionSyncFrame);
+      selectionSyncFrame = null;
+    }
+    [
+      progressSaveTimer, clearStatusTimer, hideContextualTimer, copyToastTimer,
+      resumeBookmarkFadeTimer, resumeBookmarkRemoveTimer, restoreSaveSuppressTimer,
+      copyHintTimer
+    ].forEach((timer) => {
+      if (timer) {
+        clearTimeout(timer);
+      }
+    });
+    progressSaveTimer = null;
+    clearStatusTimer = null;
+    hideContextualTimer = null;
+    copyToastTimer = null;
+    resumeBookmarkFadeTimer = null;
+    resumeBookmarkRemoveTimer = null;
+    restoreSaveSuppressTimer = null;
+    copyHintTimer = null;
+
+    // Reset the once-guards so a remount re-binds (abort removed the listeners).
+    progressEventsBound = false;
+    suppressProgressSave = false;
+    isSelectingPointer = false;
+    activeSelectionDetails = null;
+    currentEssay = null;
+    currentSectionNumber = null;
+    currentDisplay = null;
+  }
+
+  window.RenaissanceSectionView = { mount, unmount };
+
+  // Phase 1: each shell still hard-loads and mounts its own view once. The
+  // soft-nav reading shell (Phase 2) will drive mount/unmount instead.
+  mount();
 })();

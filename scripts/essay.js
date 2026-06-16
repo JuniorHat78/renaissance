@@ -25,28 +25,41 @@
 
   const PREVIEW_LIMIT = 3;
 
-  const essayTitle = document.getElementById("essay-title");
-  const essaySummary = document.getElementById("essay-summary");
-  const essayStats = document.getElementById("essay-stats");
-  const sectionList = document.getElementById("section-list");
+  // View-scoped DOM refs. Assigned in mount() (re-queried each mount) so this
+  // view can be mounted into freshly-swapped DOM by the soft-nav reading shell,
+  // not just on a fresh page load.
+  let essayTitle, essaySummary, essayStats, sectionList;
+  let searchForm, searchInput, searchHint, searchResults, searchPanel, searchViewFull;
+  let advancedToggle, advancedPanel, searchMode, searchCase;
 
-  const searchForm = document.getElementById("search-form");
-  const searchInput = document.getElementById("search-input");
-  const searchHint = document.getElementById("search-hint");
-  const searchResults = document.getElementById("search-results");
-  const searchPanel = document.getElementById("search-panel");
-  const searchViewFull = document.getElementById("search-view-full");
+  function queryElements() {
+    essayTitle = document.getElementById("essay-title");
+    essaySummary = document.getElementById("essay-summary");
+    essayStats = document.getElementById("essay-stats");
+    sectionList = document.getElementById("section-list");
 
-  const advancedToggle = document.getElementById("search-advanced-toggle");
-  const advancedPanel = document.getElementById("search-advanced");
-  const searchMode = document.getElementById("search-mode");
-  const searchCase = document.getElementById("search-case");
+    searchForm = document.getElementById("search-form");
+    searchInput = document.getElementById("search-input");
+    searchHint = document.getElementById("search-hint");
+    searchResults = document.getElementById("search-results");
+    searchPanel = document.getElementById("search-panel");
+    searchViewFull = document.getElementById("search-view-full");
+
+    advancedToggle = document.getElementById("search-advanced-toggle");
+    advancedPanel = document.getElementById("search-advanced");
+    searchMode = document.getElementById("search-mode");
+    searchCase = document.getElementById("search-case");
+  }
 
   let currentEssay = null;
   let currentSections = [];
   let searchEngine = null;
   let debounceTimer = null;
   let searchRunId = 0;
+  // AbortController for the current mount: every listener is registered with
+  // its signal, so unmount() tears them all down in one call.
+  let lifecycle = null;
+  let motifCardEl = null;
 
   const state = {
     query: "",
@@ -409,7 +422,6 @@
   // obsessions. Gated to single, non-stopword, recurring terms so it stays an
   // earned discovery, not noise on every search.
   let motifDataPromise = null;
-  let motifCardEl = null;
   let motifRunId = 0;
 
   function loadMotifIndex() {
@@ -635,10 +647,11 @@
   }
 
   function bindEvents() {
+    const signal = lifecycle.signal;
     searchForm.addEventListener("submit", (event) => {
       event.preventDefault();
       executeSearch();
-    });
+    }, { signal });
 
     searchInput.addEventListener("input", () => {
       if (!searchInput.value.trim()) {
@@ -648,17 +661,17 @@
         return;
       }
       scheduleSearch();
-    });
+    }, { signal });
 
     [searchMode, searchCase].forEach((element) => {
       element.addEventListener("change", () => {
         executeSearch();
-      });
+      }, { signal });
     });
 
     advancedToggle.addEventListener("click", () => {
       setAdvancedOpen(advancedPanel.hidden);
-    });
+    }, { signal });
 
     // Oracle search has no modes; hide the advanced controls unless we fall back
     // to the legacy engine (file:// / offline before precache).
@@ -680,7 +693,10 @@
     return essays[0].slug;
   }
 
-  async function init() {
+  async function mount() {
+    lifecycle = new AbortController();
+    queryElements();
+    motifCardEl = null;
     initThemeToggle();
     bindEvents();
     searchEngine = createSearchEngine(window.RenaissanceContent);
@@ -741,5 +757,27 @@
     }
   }
 
-  init();
+  function unmount() {
+    if (lifecycle) {
+      lifecycle.abort();
+      lifecycle = null;
+    }
+    if (debounceTimer) {
+      clearTimeout(debounceTimer);
+      debounceTimer = null;
+    }
+    // Invalidate any in-flight async so a late resolve can't paint into the
+    // next view's DOM.
+    searchRunId += 1;
+    motifRunId += 1;
+    currentEssay = null;
+    currentSections = [];
+    motifCardEl = null;
+  }
+
+  window.RenaissanceEssayView = { mount, unmount };
+
+  // Phase 1: each shell still hard-loads and mounts its own view once. The
+  // soft-nav reading shell (Phase 2) will drive mount/unmount instead.
+  mount();
 })();
