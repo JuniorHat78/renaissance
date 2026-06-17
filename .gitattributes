@@ -1,2 +1,9 @@
+# Normalize line endings to LF in the repo and on checkout. The Node generators
+# emit LF, so without this the freshness `--check` gates (search-index, embedded
+# data, site-registry, cache-version, …) fail spuriously on Windows, where
+# core.autocrlf would otherwise hand back a CRLF working copy that never matches
+# the generator's LF output.
+* text=auto eol=lf
+
 # Enforce LF line endings for all test fixtures to ensure platform-agnostic AST snapshots and diagnostics
 test-fixtures/**/* text eol=lf

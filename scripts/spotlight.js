@@ -2,7 +2,7 @@
   const content = window.RenaissanceContent;
   const router = window.RenaissanceRouter;
   const readingState = window.RenaissanceReadingState;
-  const oracle = window.RenaissanceOracle;
+  const oracleClient = window.RenaissanceOracleClient;
 
   if (!content || !router) {
     return;
@@ -13,8 +13,6 @@
   const WARMUP_DELAY_MS = 1600;
   const WARMUP_IDLE_TIMEOUT_MS = 9000;
 
-  let oracleIndexPromise = null;
-  let lexicon = null;
   let essaysPromise = null;
   let publishedEssays = [];
   let root = null;
@@ -72,7 +70,7 @@
     }
     warmupStarted = true;
     loadPublishedEssays()
-      .then(() => loadOracleIndex())
+      .then(() => (oracleClient ? oracleClient.loadData() : null))
       .catch(() => {
         // The visible search path has its own error fallback.
       });
@@ -231,25 +229,6 @@
     return results.slice(0, MAX_RESULTS);
   }
 
-  // The oracle (generated index) is the search truth.
-  function loadOracleIndex() {
-    if (!oracle) {
-      return Promise.resolve(null);
-    }
-    if (!oracleIndexPromise) {
-      oracleIndexPromise = Promise.all([
-        fetch("data/search-index.json").then((response) => (response.ok ? response.json() : null)),
-        fetch("data/search-lexicon.json").then((response) => (response.ok ? response.json() : null)).catch(() => null)
-      ])
-        .then(([index, lex]) => {
-          lexicon = lex;
-          return index;
-        })
-        .catch(() => null);
-    }
-    return oracleIndexPromise;
-  }
-
   function resultFromOracle(result, query) {
     if (result.kind === "essay") {
       return {
@@ -288,8 +267,14 @@
 
   async function searchResults(query) {
     await loadPublishedEssays();
-    const index = await loadOracleIndex();
-    if (!index || !oracle) {
+
+    // One ranking truth: the shared oracle client owns index/lexicon loading,
+    // caching, and ranking for every search surface (essay/home/full/Spotlight).
+    const essay = currentEssay();
+    const ranked = oracleClient
+      ? await oracleClient.search(query, { essaySlug: essay && essay.slug, limit: MAX_RESULTS - 1 })
+      : null;
+    if (!ranked) {
       return [
         actionResult(
           'Search "' + query + '"',
@@ -301,12 +286,6 @@
     }
 
     const route = currentRoute();
-    const essay = currentEssay();
-    const ranked = oracle.rank(index, query, {
-      essaySlug: essay && essay.slug,
-      lexicon,
-      limit: MAX_RESULTS - 1
-    });
 
     const results = [];
     const seen = new Set();

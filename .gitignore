@@ -16,6 +16,7 @@ desktop.ini
 RUN-LOG.txt
 TODO.txt
 TEMP-*.md
+*local-command-caveat*.txt
 
 # Local experiments
 exp-env.html

@@ -18,7 +18,15 @@
         .then(([index, lexicon]) => ({ index, lexicon }))
         .catch(() => ({ index: null, lexicon: null }));
     }
-    return dataPromise;
+    // A failed or empty load must not be cached for the page's lifetime: drop
+    // the memo so a later call (back online, or once the SW precache lands)
+    // retries instead of leaving search permanently dark.
+    return dataPromise.then((data) => {
+      if (!data || !data.index) {
+        dataPromise = null;
+      }
+      return data;
+    });
   }
 
   // Returns an oracle ranking, or null when the index is unavailable (e.g.
