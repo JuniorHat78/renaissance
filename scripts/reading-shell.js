@@ -21,6 +21,14 @@
   // Prevents overlapping navigations.
   var _inFlight = false;
 
+  // The reader owns section→section paging (#prev/#next/#next-cta): section.js
+  // routes those through the router with immediate queued feedback and a
+  // directional transition, and page-transition.js already skips them for that
+  // reason. The soft-nav shell must skip them too — otherwise it intercepts the
+  // click in the capture phase, stopPropagation()s it, and suppresses the
+  // reader's queued feedback. Soft-nav is for essay↔section trips, not paging.
+  var SECTION_READER_NAV = '#prev-link, #next-link, #next-cta';
+
   // ---- URL / view helpers ----
 
   function viewForUrl(href) {
@@ -296,6 +304,7 @@
       ? event.target.closest('a[href]')
       : null;
     if (!anchor) { return; }
+    if (anchor.matches && anchor.matches(SECTION_READER_NAV)) { return; }
     if (anchor.target && anchor.target.toLowerCase() !== '_self') { return; }
     if (anchor.hasAttribute('download')) { return; }
     if (anchor.hasAttribute('data-no-soft-nav') || anchor.hasAttribute('data-no-page-transition')) { return; }
