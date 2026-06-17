@@ -750,6 +750,12 @@ compiler; soft-nav is its companion), **B-feel** (algorithmic typesetting), **C*
   edit (adding soft-nav to the browser suite) that was rejected by git push
   due to missing `workflows` permission.
 
+**Legacy search engine purge — SHIPPED (2026-06-17, commit `0ca3fff`)**
+
+Oracle-only. `createSearchEngine` + all fallback branches removed from five
+callers. `findOccurrencesInText` + highlight kit kept. DOM-sink allowlist +
+regression tests updated.
+
 **Checkpoint 4: Magic texture polish — DEFERRED for visual review**
 
 No motion artifact has been captured yet. The texture tweaks (spring, dissolve,
