@@ -85,8 +85,11 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           additional_permissions: |
-            actions: read
-          show_full_output: true
+            actions: write
+            contents: write
+            pull-requests: write
+            issues: write
+          show_full_output: false
           prompt: |
             You are running inside GitHub Actions for JuniorHat78/renaissance.
 
@@ -122,6 +125,10 @@ jobs:
 
             Mandatory rules:
             - Commit and push frequently. Do not hoard a large unpushed diff.
+            - Before any final response, run `git status --short`, then
+              `git log --oneline origin/${{ env.TARGET_BRANCH }}..HEAD`.
+              If local commits exist, push them with
+              `git push origin HEAD:${{ env.TARGET_BRANCH }}` before replying.
             - Treat 30-45 minutes of coherent work as the maximum uncommitted
               window unless an edit is truly indivisible.
             - Use conventional commits.
@@ -138,6 +145,10 @@ jobs:
               transition, route, service-worker, accessibility, or device
               behavior changes. Dispatch Manual Checks suites with `gh workflow
               run` when useful, watch/read failures, and fix real regressions.
+              Do not edit `.github/workflows/**` during unattended sprint runs;
+              if workflow changes are needed, document the proposed patch and
+              continue with code, tests, or docs that do not require workflow
+              file permissions.
             - Keep draft PR #12 updated at meaningful checkpoints so the human
               can see what landed, what ran, what failed, and where to resume.
             - Create focused side branches and draft PRs when work is large,
@@ -161,8 +172,11 @@ jobs:
             npm run ci:devices
             npm run ci:slow-network
 
-            Keep going until the queue is complete, a real blocker appears, or
-            quota/time prevents useful further progress.
+            Do not end the run just because you completed and summarized one
+            checkpoint. After each coherent checkpoint, push it, choose the next
+            queued task, and keep working. Stop only when the queue is complete,
+            quota/time prevents useful further progress, or a real blocker
+            prevents useful work.
           claude_args: >-
             --permission-mode acceptEdits
             --allowedTools
@@ -178,3 +192,39 @@ jobs:
             "Bash(sed *)"
             "Bash(cat *)"
             "Bash(pwd)"
+            "Bash(wc *)"
+            "Bash(sort *)"
+            "Bash(head *)"
+
+      - name: Push any local Claude commits
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          git status --short
+          git fetch origin "${TARGET_BRANCH}"
+          AHEAD="$(git rev-list --count "origin/${TARGET_BRANCH}..HEAD")"
+          echo "Local commits ahead of origin/${TARGET_BRANCH}: ${AHEAD}"
+          if [ "${AHEAD}" != "0" ]; then
+            git log --oneline "origin/${TARGET_BRANCH}..HEAD"
+            git push origin "HEAD:${TARGET_BRANCH}"
+          fi
+
+      - name: Write run summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## One-Shot Claude Sprint"
+            echo
+            echo "- Mode: ${RUN_MODE}"
+            echo "- Target branch: ${TARGET_BRANCH}"
+            echo "- Workflow conclusion: ${GITHUB_JOB}"
+            echo "- Final HEAD: $(git rev-parse --short HEAD)"
+            echo
+            echo "### Recent commits"
+            git log --oneline -8
+            echo
+            echo "### Working tree"
+            git status --short
+          } >> "${GITHUB_STEP_SUMMARY}"
