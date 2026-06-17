@@ -30,6 +30,7 @@ permissions:
   pull-requests: write
   issues: write
   actions: write
+  checks: read
   id-token: write
 
 concurrency:
@@ -85,8 +86,12 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           additional_permissions: |
-            actions: read
-          show_full_output: true
+            actions: write
+            contents: write
+            pull-requests: write
+            issues: write
+            checks: read
+          show_full_output: false
           prompt: |
             You are running inside GitHub Actions for JuniorHat78/renaissance.
 
@@ -122,6 +127,10 @@ jobs:
 
             Mandatory rules:
             - Commit and push frequently. Do not hoard a large unpushed diff.
+            - Before any final response, run `git status --short`, then
+              `git log --oneline origin/${{ env.TARGET_BRANCH }}..HEAD`.
+              If local commits exist, push them with
+              `git push origin HEAD:${{ env.TARGET_BRANCH }}` before replying.
             - Treat 30-45 minutes of coherent work as the maximum uncommitted
               window unless an edit is truly indivisible.
             - Use conventional commits.
@@ -136,8 +145,16 @@ jobs:
               evidence, decisions, or known risks change.
             - Use GitHub Actions aggressively for evidence when browser,
               transition, route, service-worker, accessibility, or device
-              behavior changes. Dispatch Manual Checks suites with `gh workflow
-              run` when useful, watch/read failures, and fix real regressions.
+              behavior changes. Dispatch Manual Checks suites explicitly when
+              useful:
+              `gh workflow run "Manual Checks" -f suite=browser --ref ${{ env.TARGET_BRANCH }}`,
+              `gh workflow run "Manual Checks" -f suite=regression --ref ${{ env.TARGET_BRANCH }}`,
+              `gh workflow run "Manual Checks" -f suite=a11y --ref ${{ env.TARGET_BRANCH }}`,
+              `gh workflow run "Manual Checks" -f suite=devices --ref ${{ env.TARGET_BRANCH }}`,
+              and `gh workflow run "Manual Checks" -f suite=slow-network --ref ${{ env.TARGET_BRANCH }}`.
+              After dispatching, use `gh run list`, `gh run watch`, and
+              `gh run view --log` to inspect results, then fix real
+              regressions.
             - Keep draft PR #12 updated at meaningful checkpoints so the human
               can see what landed, what ran, what failed, and where to resume.
             - Create focused side branches and draft PRs when work is large,
@@ -164,6 +181,8 @@ jobs:
             Keep going until the queue is complete, a real blocker appears, or
             quota/time prevents useful further progress.
           claude_args: >-
+            --model claude-opus-4-8
+            --effort max
             --permission-mode acceptEdits
             --allowedTools
             "Bash(git *)"
