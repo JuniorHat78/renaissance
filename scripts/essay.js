@@ -8,9 +8,7 @@
     sectionDisplay
   } = window.RenaissanceContent;
   const {
-    createSearchEngine,
     escapeHtml,
-    highlightSnippet,
     normalizeMode
   } = window.RenaissanceSearch;
   const router = window.RenaissanceRouter;
@@ -22,8 +20,6 @@
   } = window.RenaissanceMeta;
   const readingState = window.RenaissanceReadingState;
   const recovery = window.RenaissanceRecovery;
-
-  const PREVIEW_LIMIT = 3;
 
   // View-scoped DOM refs. Assigned in mount() (re-queried each mount) so this
   // view can be mounted into freshly-swapped DOM by the soft-nav reading shell,
@@ -53,7 +49,6 @@
 
   let currentEssay = null;
   let currentSections = [];
-  let searchEngine = null;
   let debounceTimer = null;
   let searchRunId = 0;
   // AbortController for the current mount: every listener is registered with
@@ -305,118 +300,6 @@
       : router.build("search", {});
   }
 
-  function renderNoResults() {
-    searchPanel.hidden = false;
-    searchHint.textContent = "0 hits in 0 sections.";
-    searchResults.innerHTML = '<p class="muted">No matches found.</p>';
-    if (currentEssay) {
-      searchViewFull.href = router.build("search", {
-        query: state.query,
-        scope: currentEssay.slug,
-        mode: state.mode,
-        caseSensitive: state.caseSensitive
-      });
-    }
-  }
-
-  function groupPreviewHits(result) {
-    const groups = new Map();
-    const hits = result.hits.slice().sort((left, right) => {
-      if (left.sectionOrder !== right.sectionOrder) {
-        return left.sectionOrder - right.sectionOrder;
-      }
-      return left.index - right.index;
-    });
-
-    for (const hit of hits) {
-      const key = String(hit.sectionNumber);
-      let group = groups.get(key);
-      if (!group) {
-        group = {
-          sectionNumber: hit.sectionNumber,
-          sectionOrder: hit.sectionOrder,
-          sectionSearchLabel: hit.sectionSearchLabel,
-          total: 0,
-          hits: []
-        };
-        groups.set(key, group);
-      }
-
-      group.total += 1;
-      if (group.hits.length < PREVIEW_LIMIT) {
-        group.hits.push(hit);
-      }
-    }
-
-    return Array.from(groups.values()).sort((left, right) => left.sectionOrder - right.sectionOrder);
-  }
-
-  function renderPreview(result) {
-    searchPanel.hidden = false;
-
-    const hitLabel = result.totalHits === 1 ? "1 hit" : String(result.totalHits) + " hits";
-    const sectionLabel = result.totalSections === 1 ? "1 section" : String(result.totalSections) + " sections";
-    searchHint.textContent = hitLabel + " in " + sectionLabel + ".";
-
-    const grouped = groupPreviewHits(result);
-    searchResults.innerHTML = grouped
-      .map((group) => {
-        const sectionCountCopy = group.total === 1 ? "1 hit" : String(group.total) + " hits";
-        const sectionLink = router.build("section", {
-          essaySlug: currentEssay.slug,
-          sectionNumber: group.sectionNumber,
-          query: state.query,
-          mode: state.mode,
-          caseSensitive: state.caseSensitive
-        });
-        const previewHitsHtml = group.hits
-          .map((hit) => {
-            const occurrenceLink = router.build("section", {
-              essaySlug: currentEssay.slug,
-              sectionNumber: hit.sectionNumber,
-              passageId: hit.passageId,
-              rangeStart: hit.rangeStart,
-              rangeEnd: hit.rangeEnd,
-              query: state.query,
-              occurrence: hit.occurrence,
-              mode: state.mode,
-              caseSensitive: state.caseSensitive
-            });
-            return (
-              '<li class="search-preview-hit">' +
-                '<a href="' + occurrenceLink + '">' +
-                  '<span class="search-preview-hit-title">Occurrence ' + String(hit.occurrence) + "</span>" +
-                  '<span class="search-preview-hit-snippet">' + highlightSnippet(hit.snippet, hit.matchedText) + "</span>" +
-                "</a>" +
-              "</li>"
-            );
-          })
-          .join("");
-
-        const remaining = group.total - group.hits.length;
-        const remainingHtml = remaining > 0
-          ? '<p class="search-preview-more muted">+' + String(remaining) + " more in this section</p>"
-          : "";
-
-        return (
-          '<article class="search-preview-group">' +
-            '<h3><a href="' + sectionLink + '">' + escapeHtml(group.sectionSearchLabel) + "</a></h3>" +
-            '<p class="search-preview-meta muted">' + escapeHtml(sectionCountCopy) + "</p>" +
-            '<ol class="search-preview-hit-list">' + previewHitsHtml + "</ol>" +
-            remainingHtml +
-          "</article>"
-        );
-      })
-      .join("");
-
-    searchViewFull.href = router.build("search", {
-      query: state.query,
-      scope: currentEssay.slug,
-      mode: state.mode,
-      caseSensitive: state.caseSensitive
-    });
-  }
-
   // Motif card: when you search a recurring, distinctive word on an essay page,
   // a quiet card surfaces how the essay uses it — the archive noticing its own
   // obsessions. Gated to single, non-stopword, recurring terms so it stays an
@@ -599,41 +482,9 @@
       }
     }
 
-    // Fallback: legacy engine (oracle index unavailable, e.g. offline before
-    // precache, or opened over file://).
-    searchHint.textContent = "Searching...";
-    let result;
-    try {
-      result = await searchEngine.search({
-        query: state.query,
-        mode: state.mode,
-        scope: currentEssay.slug,
-        caseSensitive: state.caseSensitive
-      }, {
-        forceEssaySlug: currentEssay.slug
-      });
-    } catch (error) {
-      if (runId !== searchRunId) {
-        return;
-      }
-      searchHint.textContent = "Search is unavailable right now.";
-      searchResults.innerHTML = '<p class="muted">Unable to load search results.</p>';
-      searchViewFull.href = "search.html";
-      updateUrlState();
-      return;
-    }
-
-    if (runId !== searchRunId) {
-      return;
-    }
-
-    if (result.totalHits === 0) {
-      renderNoResults();
-      updateUrlState();
-      return;
-    }
-
-    renderPreview(result);
+    searchHint.textContent = "Search is unavailable right now.";
+    searchResults.innerHTML = '<p class="muted">Unable to load search results.</p>';
+    searchViewFull.href = router.build("search", { query: state.query, scope: currentEssay.slug });
     updateUrlState();
   }
 
@@ -673,8 +524,7 @@
       setAdvancedOpen(advancedPanel.hidden);
     }, { signal });
 
-    // Oracle search has no modes; hide the advanced controls unless we fall back
-    // to the legacy engine (file:// / offline before precache).
+    // Oracle search has no modes; the old advanced controls are hidden.
     if (window.RenaissanceOracleClient && window.RenaissanceOracleClient.available()) {
       advancedToggle.hidden = true;
     }
@@ -699,7 +549,6 @@
     motifCardEl = null;
     initThemeToggle();
     bindEvents();
-    searchEngine = createSearchEngine(window.RenaissanceContent);
 
     try {
       const essaySlug = await resolveEssaySlug();

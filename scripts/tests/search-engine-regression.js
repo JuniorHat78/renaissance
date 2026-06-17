@@ -8,285 +8,41 @@ require("../search-engine");
 
 const Search = global.window.RenaissanceSearch;
 
-main().catch((error) => {
-  console.error(error);
-  process.exit(1);
+check("fuzzy search finds bounded near matches", () => {
+  const hits = Search.findOccurrencesInText("cat cot cut cart", "cat", { mode: "fuzzy" });
+  assert.ok(hits.some((hit) => hit.matchedText === "cat"), "exact fuzzy candidate should match");
+  assert.ok(hits.some((hit) => hit.matchedText === "cot"), "near fuzzy candidate should match");
 });
 
-async function main() {
-  check("fuzzy search finds bounded near matches", () => {
-    const hits = Search.findOccurrencesInText("cat cot cut cart", "cat", { mode: "fuzzy" });
-    assert.ok(hits.some((hit) => hit.matchedText === "cat"), "exact fuzzy candidate should match");
-    assert.ok(hits.some((hit) => hit.matchedText === "cot"), "near fuzzy candidate should match");
-  });
+check("fuzzy search ignores very long tokens", () => {
+  const longToken = "a".repeat(80);
+  const hits = Search.findOccurrencesInText(longToken + " alpha", longToken, { mode: "fuzzy" });
+  assert.deepEqual(hits, []);
+});
 
-  check("fuzzy search ignores very long tokens", () => {
-    const longToken = "a".repeat(80);
-    const hits = Search.findOccurrencesInText(longToken + " alpha", longToken, { mode: "fuzzy" });
-    assert.deepEqual(hits, []);
-  });
+check("case sensitivity is explicit and deterministic", () => {
+  const loose = Search.findOccurrencesInText("Alpha alpha", "alpha", { mode: "contains", caseSensitive: false });
+  const strict = Search.findOccurrencesInText("Alpha alpha", "alpha", { mode: "contains", caseSensitive: true });
+  assert.deepEqual(loose.map((hit) => hit.matchedText), ["Alpha", "alpha"]);
+  assert.deepEqual(strict.map((hit) => hit.matchedText), ["alpha"]);
+});
 
-  check("case sensitivity is explicit and deterministic", () => {
-    const loose = Search.findOccurrencesInText("Alpha alpha", "alpha", { mode: "contains", caseSensitive: false });
-    const strict = Search.findOccurrencesInText("Alpha alpha", "alpha", { mode: "contains", caseSensitive: true });
-    assert.deepEqual(loose.map((hit) => hit.matchedText), ["Alpha", "alpha"]);
-    assert.deepEqual(strict.map((hit) => hit.matchedText), ["alpha"]);
-  });
+check("exact phrase mode tolerates whitespace but not empty noise", () => {
+  const hits = Search.findOccurrencesInText("alpha\nbeta alpha   beta", "alpha beta", { mode: "exact_phrase" });
+  assert.deepEqual(hits.map((hit) => hit.matchedText), ["alpha\nbeta", "alpha   beta"]);
+  assert.deepEqual(Search.findOccurrencesInText("alpha beta", "   ", { mode: "exact_phrase" }), []);
+});
 
-  check("exact phrase mode tolerates whitespace but not empty noise", () => {
-    const hits = Search.findOccurrencesInText("alpha\nbeta alpha   beta", "alpha beta", { mode: "exact_phrase" });
-    assert.deepEqual(hits.map((hit) => hit.matchedText), ["alpha\nbeta", "alpha   beta"]);
-    assert.deepEqual(Search.findOccurrencesInText("alpha beta", "   ", { mode: "exact_phrase" }), []);
-  });
+check("highlight snippets escape html before marking terms", () => {
+  assert.equal(
+    Search.highlightSnippet("<script>sand</script>", "sand"),
+    "&lt;script&gt;<mark>sand</mark>&lt;/script&gt;"
+  );
+});
 
-  check("fuzzy mode tokenizes punctuation-heavy queries", () => {
-    const hits = Search.findOccurrencesInText("silicon, language; cognition", "langauge!!!", { mode: "fuzzy" });
-    assert.deepEqual(hits.map((hit) => hit.matchedText), ["language"]);
-  });
-
-  check("search urls normalize empty and noisy state", () => {
-    assert.equal(Search.buildSearchUrl({ query: "   " }), "search.html");
-    assert.equal(
-      Search.buildSearchUrl({
-        query: " Alpha ",
-        mode: "bogus",
-        sort: "mystery",
-        page: "nope",
-        pageSize: 999,
-        caseSensitive: true
-      }),
-      "search.html?q=Alpha&case=1"
-    );
-  });
-
-  await check("search result cache evicts old entries", async () => {
-    const engine = Search.createSearchEngine(fakeContentApi());
-
-    for (let index = 0; index < 40; index += 1) {
-      await engine.search({ query: "term" + String(index), mode: "contains" });
-    }
-
-    assert.ok(engine.cacheSize() <= 24, "cache should stay bounded");
-  });
-
-  await check("cached searches preserve result shape", async () => {
-    const engine = Search.createSearchEngine(fakeContentApi());
-    const first = await engine.search({ query: "alpha", mode: "contains" });
-    const second = await engine.search({ query: "alpha", mode: "contains" });
-
-    assert.equal(first.totalHits, 1);
-    assert.equal(second.totalHits, 1);
-    assert.deepEqual(
-      second.hits.map((hit) => hit.matchedText),
-      ["alpha"]
-    );
-  });
-
-  await check("search index precomputes token and fuzzy records", async () => {
-    const engine = Search.createSearchEngine(fakeContentApi());
-    const index = await engine.ensureIndex();
-    const section = index.sections[0];
-
-    assert.ok(Array.isArray(section.tokens), "section record should include token spans");
-    assert.ok(section.tokens.some((token) => token.raw === "alpha"), "section tokens should preserve raw text");
-    assert.ok(section.fuzzyBuckets instanceof Map, "section record should include fuzzy candidate buckets");
-    assert.ok(section.fuzzyBuckets.size > 0, "fuzzy candidate buckets should not be empty");
-  });
-
-  await check("body hits carry passage anchors and range offsets", async () => {
-    const engine = Search.createSearchEngine(passageContentApi());
-    const result = await engine.search({ query: "beta", mode: "contains" });
-    const bodyHit = result.hits.find((hit) => hit.field === "body");
-
-    assert.ok(bodyHit, "expected a body hit");
-    assert.equal(bodyHit.passageId, "p2");
-    assert.equal(bodyHit.passageIndex, 2);
-    assert.equal(bodyHit.rangeStart, 0);
-    assert.equal(bodyHit.rangeEnd, 4);
-    assert.deepEqual(bodyHit.anchor, {
-      passageId: "p2",
-      rangeStart: 0,
-      rangeEnd: 4
-    });
-    assert.equal(
-      Search.buildSectionUrl(bodyHit.essaySlug, bodyHit.sectionNumber, "beta", {
-        passageId: bodyHit.passageId,
-        rangeStart: bodyHit.rangeStart,
-        rangeEnd: bodyHit.rangeEnd,
-        occurrence: bodyHit.occurrence
-      }),
-      "section.html?essay=fixture&section=1&p=p2&start=0&end=4&q=beta&occ=1"
-    );
-  });
-
-  await check("search index build timing is visible", async () => {
-    const engine = Search.createSearchEngine(fakeContentApi());
-    const started = performance.now();
-    const index = await engine.ensureIndex();
-    const duration = performance.now() - started;
-    const tokenCount = index.sections.reduce((count, section) => count + section.tokens.length, 0);
-
-    assert.equal(index.sections.length, 1);
-    assert.ok(tokenCount > 0, "timing output should include indexed token work");
-    console.log(
-      "INFO search index build: " +
-      duration.toFixed(2) +
-      "ms for " +
-      String(index.sections.length) +
-      " sections / " +
-      String(tokenCount) +
-      " tokens"
-    );
-  });
-
-  await check("fuzzy search uses indexed section records", async () => {
-    const engine = Search.createSearchEngine(fakeContentApi());
-    const result = await engine.search({ query: "alhpa", mode: "fuzzy" });
-
-    assert.equal(result.totalHits, 1);
-    assert.equal(result.hits[0].matchedText, "alpha");
-  });
-
-  await check("relevance ranking boosts essay and section titles over body hits", async () => {
-    const engine = Search.createSearchEngine(rankingContentApi());
-    const result = await engine.search({ query: "alpha", mode: "contains", sort: "relevance" });
-
-    assert.ok(result.hits.length >= 3, "fixture should produce title, section, and body hits");
-    assert.equal(result.hits[0].field, "essay_title");
-    assert.equal(result.hits[1].field, "section_title");
-    assert.ok(
-      result.hits.findIndex((hit) => hit.field === "body") > 1,
-      "body hit should rank after title fields"
-    );
-  });
-
-  await check("empty query returns an empty stable result", async () => {
-    const engine = Search.createSearchEngine(fakeContentApi());
-    const result = await engine.search({ query: "   ", mode: "contains" });
-    assert.equal(result.totalHits, 0);
-    assert.deepEqual(result.hits, []);
-    assert.equal(result.state.query, "");
-  });
-
-  console.log("Search engine regression checks passed.");
-}
-
-function fakeContentApi() {
-  const essay = {
-    slug: "fixture",
-    title: "Fixture",
-    published: true,
-    section_order: [1],
-  };
-
-  return {
-    async loadEssays() {
-      return [essay];
-    },
-    async loadEssaySections() {
-      return {
-        essay,
-        sections: [
-          {
-            sectionNumber: 1,
-            searchableText: "alpha beta gamma term39",
-          },
-        ],
-      };
-    },
-    sectionDisplay(_essay, sectionNumber) {
-      return {
-        label: "Section " + String(sectionNumber),
-        title: "Fixture Section",
-        searchLabel: "Section " + String(sectionNumber) + " | Fixture Section",
-      };
-    },
-  };
-}
-
-function passageContentApi() {
-  const essay = {
-    slug: "fixture",
-    title: "Fixture",
-    published: true,
-    section_order: [1],
-  };
-
-  return {
-    async loadEssays() {
-      return [essay];
-    },
-    async loadEssaySections() {
-      return {
-        essay,
-        sections: [
-          {
-            sectionNumber: 1,
-            searchableText: "alpha beta gamma",
-            passages: [
-              {
-                passageId: "p1",
-                passageIndex: 1,
-                blockType: "paragraph",
-                text: "alpha opens"
-              },
-              {
-                passageId: "p2",
-                passageIndex: 2,
-                blockType: "paragraph",
-                text: "beta lands here"
-              }
-            ],
-          },
-        ],
-      };
-    },
-    sectionDisplay(_essay, sectionNumber) {
-      return {
-        label: "Section " + String(sectionNumber),
-        title: "Fixture Section",
-        searchLabel: "Section " + String(sectionNumber) + " | Fixture Section",
-      };
-    },
-  };
-}
-
-function rankingContentApi() {
-  const essay = {
-    slug: "ranking-fixture",
-    title: "Alpha Archive",
-    summary: "Ranking fixture",
-    published: true,
-    section_order: [1],
-  };
-
-  return {
-    async loadEssays() {
-      return [essay];
-    },
-    async loadEssaySections() {
-      return {
-        essay,
-        sections: [
-          {
-            sectionNumber: 1,
-            searchableText: "A body paragraph mentions alpha once.",
-          },
-        ],
-      };
-    },
-    sectionDisplay() {
-      return {
-        label: "Section 1",
-        title: "Alpha Notes",
-        searchLabel: "Section 1 | Alpha Notes",
-      };
-    },
-  };
-}
+console.log("Search helper regression checks passed.");
 
 function check(name, fn) {
-  return Promise.resolve()
-    .then(fn)
-    .then(() => console.log("PASS " + name));
+  fn();
+  console.log("PASS " + name);
 }

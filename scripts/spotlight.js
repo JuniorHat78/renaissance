@@ -1,11 +1,10 @@
 (function () {
   const content = window.RenaissanceContent;
-  const Search = window.RenaissanceSearch;
   const router = window.RenaissanceRouter;
   const readingState = window.RenaissanceReadingState;
   const oracle = window.RenaissanceOracle;
 
-  if (!content || !Search || !router) {
+  if (!content || !router) {
     return;
   }
 
@@ -13,20 +12,7 @@
   const DEBOUNCE_MS = 80;
   const WARMUP_DELAY_MS = 1600;
   const WARMUP_IDLE_TIMEOUT_MS = 9000;
-  const ROMAN_VALUES = {
-    i: 1,
-    ii: 2,
-    iii: 3,
-    iv: 4,
-    v: 5,
-    vi: 6,
-    vii: 7,
-    viii: 8,
-    ix: 9,
-    x: 10
-  };
 
-  let engine = null;
   let oracleIndexPromise = null;
   let lexicon = null;
   let essaysPromise = null;
@@ -64,13 +50,6 @@
     return tag === "input" || tag === "textarea" || tag === "select" || element.isContentEditable;
   }
 
-  function ensureEngine() {
-    if (!engine) {
-      engine = Search.createSearchEngine(content);
-    }
-    return engine;
-  }
-
   function queueIdleTask(task, timeout) {
     if (typeof window.requestIdleCallback === "function") {
       window.requestIdleCallback(task, { timeout: timeout || WARMUP_IDLE_TIMEOUT_MS });
@@ -93,15 +72,7 @@
     }
     warmupStarted = true;
     loadPublishedEssays()
-      .then(() => ensureEngine().search({
-        query: "__renaissance_warmup__",
-        mode: "contains",
-        sort: "relevance",
-        scope: "all",
-        caseSensitive: false,
-        page: 1,
-        pageSize: 25
-      }))
+      .then(() => loadOracleIndex())
       .catch(() => {
         // The visible search path has its own error fallback.
       });
@@ -209,18 +180,6 @@
     document.head.appendChild(link);
   }
 
-  function sectionIntent(query) {
-    const match = /^(?:section|chapter|part)?\s*([ivx]+|\d{1,2})$/i.exec(query);
-    if (!match) {
-      return null;
-    }
-    const token = match[1].toLowerCase();
-    if (/^\d+$/.test(token)) {
-      return Number.parseInt(token, 10);
-    }
-    return ROMAN_VALUES[token] || null;
-  }
-
   function continueReadingResult() {
     if (!readingState || typeof readingState.continueTarget !== "function") {
       return null;
@@ -272,42 +231,7 @@
     return results.slice(0, MAX_RESULTS);
   }
 
-  function hitHref(hit, query) {
-    return router.build("section", {
-      essaySlug: hit.essaySlug,
-      sectionNumber: hit.sectionNumber,
-      passageId: hit.passageId,
-      rangeStart: hit.rangeStart,
-      rangeEnd: hit.rangeEnd,
-      query,
-      occurrence: hit.occurrence,
-      mode: "contains"
-    });
-  }
-
-  function resultFromHit(hit, query) {
-    const fieldCopy = hit.field === "body"
-      ? hit.sectionSearchLabel
-      : hit.field === "essay_title"
-        ? "Essay title"
-        : hit.field === "section_title"
-          ? "Section title"
-          : "Section label";
-    const title = hit.field === "body"
-      ? hit.sectionTitle
-      : hit.essayTitle;
-
-    return {
-      title: normalizeSpaces(title || hit.sectionSearchLabel || hit.essayTitle),
-      detail: normalizeSpaces([hit.essayTitle, fieldCopy, hit.snippet].filter(Boolean).join(" / ")),
-      href: hitHref(hit, query),
-      kind: hit.field === "body" ? "passage" : "match",
-      score: hit.score
-    };
-  }
-
-  // The oracle (generated index) is the primary search truth; the in-browser
-  // engine stays as a fallback for offline-before-precache or fetch failure.
+  // The oracle (generated index) is the search truth.
   function loadOracleIndex() {
     if (!oracle) {
       return Promise.resolve(null);
@@ -366,7 +290,14 @@
     await loadPublishedEssays();
     const index = await loadOracleIndex();
     if (!index || !oracle) {
-      return legacySearchResults(query);
+      return [
+        actionResult(
+          'Search "' + query + '"',
+          "Search unavailable right now",
+          router.build("search", { query }),
+          "search"
+        )
+      ];
     }
 
     const route = currentRoute();
@@ -381,49 +312,6 @@
     const seen = new Set();
     ranked.results.forEach((result) => {
       pushUnique(results, resultFromOracle(result, query), seen);
-    });
-
-    pushUnique(results, actionResult(
-      'Search "' + query + '"',
-      routeLabel(route) + " / full results",
-      router.build("search", { query, sort: "relevance" }),
-      "search"
-    ), seen);
-
-    return results.slice(0, MAX_RESULTS);
-  }
-
-  async function legacySearchResults(query) {
-    await loadPublishedEssays();
-    const route = currentRoute();
-    const intentSection = sectionIntent(query);
-    const results = [];
-    const seen = new Set();
-    const essay = currentEssay();
-
-    if (intentSection && essay && essay.section_order.includes(intentSection)) {
-      const display = content.sectionDisplay(essay, intentSection);
-      pushUnique(results, actionResult(
-        display.title,
-        essay.title + " / " + display.label,
-        router.build("section", { essaySlug: essay.slug, sectionNumber: intentSection }),
-        "section"
-      ), seen);
-    }
-
-    const result = await ensureEngine().search({
-      query,
-      mode: "contains",
-      sort: "relevance",
-      scope: "all",
-      caseSensitive: false
-    });
-
-    result.hits.forEach((hit) => {
-      if (results.length >= MAX_RESULTS - 1) {
-        return;
-      }
-      pushUnique(results, resultFromHit(hit, query), seen);
     });
 
     pushUnique(results, actionResult(
