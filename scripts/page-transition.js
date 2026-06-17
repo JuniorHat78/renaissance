@@ -355,11 +355,53 @@
   document.addEventListener("click", handleLinkClick);
   bindPrefetch();
 
+  // Public hooks for the soft-navigation shell (reading-shell.js) so the soft
+  // path reuses the EXACT leave/arrive choreography of a hard navigation instead
+  // of reimplementing a partial copy. beginLeave runs the outgoing feedback
+  // (motion + source-link mark + geometry + the out veil) and returns what the
+  // arrival needs; markArrival stamps the destination so the composed arrival
+  // reads as a real internal navigation. Reveal/cleanup still flows through
+  // revealPage() (clears the out veil and the source mark).
+  function beginLeave(anchor) {
+    if (!anchor) {
+      return { motion: "settle", point: null };
+    }
+    let url;
+    try {
+      url = new URL(anchor.getAttribute("href") || "", window.location.href);
+    } catch (_error) {
+      return { motion: "settle", point: null };
+    }
+    const motion = motionForUrl(url.href);
+    leaving = true;
+    setMotion(motion);
+    const point = markSourceAnchor(anchor, motion);
+    storeOutgoingMotion(motion, point);
+    if (!reducedMotion) {
+      root.classList.remove("page-transition-ready", "page-transition-prep");
+      root.classList.add("page-transition-out");
+      root.setAttribute("aria-busy", "true");
+    }
+    return { motion, point };
+  }
+
+  function markArrival(motion, point) {
+    setMotion(motion || "settle");
+    if (point && Number.isFinite(point.x) && Number.isFinite(point.y)) {
+      root.style.setProperty("--page-source-x", String(Math.round(point.x)) + "px");
+      root.style.setProperty("--page-source-y", String(Math.round(point.y)) + "px");
+    }
+    root.setAttribute("data-page-arrival", "navigation");
+  }
+
   window.RenaissancePageTransition = {
     outDelayMs: OUT_DURATION_MS,
     // Composed arrival: the reveal is gated on content-ready (capped) under the
     // paper veil, not painted immediately on an empty shell.
     revealMode: reducedMotion ? "immediate" : "composed",
-    ready: revealPage
+    ready: revealPage,
+    // Shared with the soft-nav shell so both paths choreograph identically.
+    beginLeave,
+    markArrival
   };
 })();

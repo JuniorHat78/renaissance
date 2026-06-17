@@ -210,7 +210,7 @@
 
   // ---- Core soft-navigation ----
 
-  async function softNavigate(destUrl) {
+  async function softNavigate(destUrl, leave) {
     // 1. Fetch the destination document.
     var destDoc;
     try {
@@ -275,6 +275,14 @@
       detail: { href: destUrl }
     }));
 
+    // 8b. Stamp the destination as a real internal-navigation arrival (motion +
+    //     source geometry + data-page-arrival), matching a hard navigation, so
+    //     the composed reveal and arrival listeners see identical signals.
+    if (window.RenaissancePageTransition &&
+        typeof window.RenaissancePageTransition.markArrival === 'function' && leave) {
+      window.RenaissancePageTransition.markArrival(leave.motion, leave.point);
+    }
+
     // 9. Wire the composed-arrival reveal BEFORE mounting so the view
     //    controller's announcePageReady() triggers the veil lift.
     wireReveal();
@@ -325,19 +333,29 @@
 
     _inFlight = true;
 
+    var RPT = window.RenaissancePageTransition;
     var reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    var outDelay = (window.RenaissancePageTransition && window.RenaissancePageTransition.outDelayMs) || 120;
-    var root = document.documentElement;
+    var outDelay = (RPT && RPT.outDelayMs) || 120;
 
-    // Mirror the page-transition-out animation so the existing CSS exit plays.
-    if (!reducedMotion) {
-      root.classList.remove('page-transition-ready', 'page-transition-prep');
-      root.classList.add('page-transition-out');
-      root.setAttribute('aria-busy', 'true');
+    // Run the SAME outgoing choreography as a hard navigation (motion +
+    // source-link mark + geometry + the out veil) through page-transition's
+    // shared hook, so soft and hard nav are indistinguishable. Fall back to a
+    // minimal out veil only if the hook is somehow unavailable.
+    var leave;
+    if (RPT && typeof RPT.beginLeave === 'function') {
+      leave = RPT.beginLeave(anchor);
+    } else {
+      leave = { motion: 'settle', point: null };
+      if (!reducedMotion) {
+        var root = document.documentElement;
+        root.classList.remove('page-transition-ready', 'page-transition-prep');
+        root.classList.add('page-transition-out');
+        root.setAttribute('aria-busy', 'true');
+      }
     }
 
     var doNav = function () {
-      softNavigate(url.href)
+      softNavigate(url.href, leave)
         .then(function () { _inFlight = false; })
         .catch(function () {
           _inFlight = false;
