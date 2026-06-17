@@ -111,24 +111,30 @@ jobs:
               npm run ci:lighthouse
               ;;
             full-chromium)
-              npm run ci:standalone
-              npm run ci:transition-evidence
-              npm run ci:spotlight
-              npm run ci:regression
-              npm run ci:page-transitions
-              npm run ci:subpath
-              npm run ci:notfound
-              npm run ci:passage-alignment
-              npm run ci:continuity
-              npm run ci:a11y
-              npm run ci:offline
-              npm run ci:focus
-              npm run ci:devices
-              npm run ci:keyboard
-              npm run ci:slow-network
-              npm run ci:sw-update
-              npm run ci:visual
-              npm run ci:lighthouse
+              # Run every suite and aggregate failures so one run is a complete
+              # damage report, instead of set -e aborting at the first failure.
+              fail=0
+              failed=""
+              for suite in \
+                ci:standalone ci:transition-evidence ci:spotlight ci:regression \
+                ci:page-transitions ci:subpath ci:notfound ci:passage-alignment \
+                ci:continuity ci:a11y ci:offline ci:focus ci:devices \
+                ci:keyboard ci:slow-network ci:sw-update ci:visual ci:lighthouse; do
+                echo "::group::$suite"
+                if npm run "$suite"; then
+                  echo "PASS $suite"
+                else
+                  echo "FAIL $suite"
+                  fail=1
+                  failed="$failed $suite"
+                fi
+                echo "::endgroup::"
+              done
+              if [ "$fail" != "0" ]; then
+                echo "::error::Full-chromium failing suites:$failed"
+                exit 1
+              fi
+              echo "All full-chromium suites passed."
               ;;
             *)
               echo "Unknown suite: ${{ inputs.suite }}" >&2
@@ -140,7 +146,7 @@ jobs:
         if: ${{ always() && (github.event_name == 'pull_request' || inputs.suite == 'visual' || inputs.suite == 'full-chromium') }}
         uses: actions/upload-artifact@v7
         with:
-          name: manual-visual-qa-${{ inputs.suite }}
+          name: manual-visual-qa-${{ inputs.suite || 'full-chromium' }}
           if-no-files-found: warn
           path: |
             qa/visual/current/**
@@ -152,7 +158,7 @@ jobs:
         if: ${{ always() && (github.event_name == 'pull_request' || inputs.suite == 'transition-evidence' || inputs.suite == 'full-chromium') }}
         uses: actions/upload-artifact@v7
         with:
-          name: manual-transition-evidence-${{ inputs.suite }}
+          name: manual-transition-evidence-${{ inputs.suite || 'full-chromium' }}
           if-no-files-found: warn
           path: qa/transition-evidence/**
 
@@ -160,7 +166,7 @@ jobs:
         if: ${{ always() && (github.event_name == 'pull_request' || inputs.suite == 'spotlight' || inputs.suite == 'full-chromium') }}
         uses: actions/upload-artifact@v7
         with:
-          name: manual-spotlight-${{ inputs.suite }}
+          name: manual-spotlight-${{ inputs.suite || 'full-chromium' }}
           if-no-files-found: warn
           path: qa/spotlight/**
 
@@ -168,7 +174,7 @@ jobs:
         if: ${{ always() && (github.event_name == 'pull_request' || inputs.suite == 'lighthouse' || inputs.suite == 'full-chromium') }}
         uses: actions/upload-artifact@v7
         with:
-          name: manual-lighthouse-${{ inputs.suite }}
+          name: manual-lighthouse-${{ inputs.suite || 'full-chromium' }}
           if-no-files-found: warn
           include-hidden-files: true
           path: .lighthouseci/**
