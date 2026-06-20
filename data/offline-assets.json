@@ -1,6 +1,7 @@
 {
   "version": 1,
   "assets": [
+    "data/compiled/etching-god-into-sand.json",
     "data/essays.json",
     "raw/etching-god-into-sand/1.txt",
     "raw/etching-god-into-sand/10.txt",

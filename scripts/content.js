@@ -14,6 +14,8 @@
 
   const EMBEDDED_MAP = new Map();
   const SECTION_TEXT_CACHE = new Map();
+  const COMPILED_PATH_PREFIX = "data/compiled/";
+  const COMPILED_ESSAY_CACHE = new Map();
   let essayCache = null;
   let embeddedChaptersPromise = null;
 
@@ -490,6 +492,86 @@
     }
   }
 
+  // The compiler (scripts/generate-content-ast.js) emits one artifact per
+  // published essay holding each section's content AST exactly as the reader
+  // renders it. We hydrate that here instead of re-parsing raw .txt on every
+  // load. Returns null — never throws — so loadSection can fall through to the
+  // live parser whenever the artifact is missing, offline-uncached, malformed,
+  // or built against an older AST grammar.
+  async function loadCompiledEssay(slug) {
+    if (COMPILED_ESSAY_CACHE.has(slug)) {
+      return COMPILED_ESSAY_CACHE.get(slug);
+    }
+
+    const promise = (async () => {
+      let artifact;
+      try {
+        artifact = JSON.parse(await fetchAsText(COMPILED_PATH_PREFIX + slug + ".json"));
+      } catch (error) {
+        return null;
+      }
+
+      if (!artifact || !Array.isArray(artifact.sections)) {
+        return null;
+      }
+
+      // Grammar-drift guard: a compiled artifact from an older AST version must
+      // not be trusted to render. Falling back to a fresh parse with the live
+      // parser keeps the AST the single source of truth even mid-deploy.
+      if (String(artifact.astVersion || "") !== String(AST.VERSION)) {
+        return null;
+      }
+
+      return artifact;
+    })().catch(() => null);
+
+    COMPILED_ESSAY_CACHE.set(slug, promise);
+    return promise;
+  }
+
+  function hydrateSectionFromArtifact(essay, sectionNumber, artifact) {
+    if (!artifact || !Array.isArray(artifact.sections)) {
+      return null;
+    }
+
+    const record = artifact.sections.find(
+      (entry) => parseNumber(entry && entry.sectionNumber) === sectionNumber
+    );
+    const contentAst = record && record.ast;
+    if (!contentAst || contentAst.type !== AST.BLOCK_TYPES.DOCUMENT) {
+      return null;
+    }
+
+    // The stored AST is the single truth; every projection is recomputed from it
+    // with the same functions the parse path uses, so a hydrated section is the
+    // section a fresh parse would have produced — same DOM, passages, and IDs.
+    const contentBlocks = AST.astToLegacyBlocks(contentAst);
+    const searchableText = AST.toSearchableText(contentAst);
+    const passages = AST.passagesFromDocument(contentAst);
+    const firstParagraphText = AST.firstParagraphText(contentAst);
+    const wordCount = AST.wordCount(searchableText);
+
+    return {
+      essay,
+      sectionNumber,
+      display: sectionDisplay(essay, sectionNumber),
+      // rawText/full ast (with leading headings) are source-only; the reader
+      // renders contentAst, and no shipped consumer reads them. Keeping `blocks`
+      // as the content blocks preserves the legacy contentBlocks||blocks alias.
+      rawText: null,
+      ast: contentAst,
+      contentAst,
+      blocks: contentBlocks,
+      contentBlocks,
+      passages,
+      searchableText,
+      firstParagraphText,
+      wordCount,
+      readMinutes: estimateReadMinutes(wordCount),
+      source: "compiled"
+    };
+  }
+
   async function loadSection(essaySlug, sectionNumber) {
     const essay = await loadEssay(essaySlug);
     if (!essay) {
@@ -503,6 +585,16 @@
 
     if (!essay.section_order.includes(section)) {
       throw new Error("Section not found for essay");
+    }
+
+    // Fast path: hydrate the precompiled content AST. CI's --check gate keeps the
+    // artifact fresh and the equivalence harness proves it matches a live parse,
+    // so this renders byte-for-byte what the parser would. Falls through below
+    // when the artifact is unavailable or stale.
+    const artifact = await loadCompiledEssay(essay.slug);
+    const hydrated = hydrateSectionFromArtifact(essay, section, artifact);
+    if (hydrated) {
+      return hydrated;
     }
 
     const rawText = await loadSectionText(essay, section);
@@ -529,7 +621,8 @@
       searchableText,
       firstParagraphText,
       wordCount,
-      readMinutes
+      readMinutes,
+      source: "parsed"
     };
   }
 
