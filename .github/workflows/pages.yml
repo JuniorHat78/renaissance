@@ -4,15 +4,16 @@ name: Deploy (Pages, derive-at-deploy)
 # artifact from source with `npm run build:artifacts`, then publishes the site
 # through GitHub Actions Pages instead of the legacy "deploy from branch" mode.
 #
-# DORMANT BY DESIGN: workflow_dispatch only. It does not auto-trigger on push,
-# so it never fights the current legacy branch-deploy. The live cutover is a
-# single deliberate dispatch from main — `configure-pages` with enablement
-# flips the Pages source to GitHub Actions on first run. The committed artifacts
-# stay the net until this pipeline is proven in production (then P5 nets off and
-# drops the client parser). build:artifacts is proven zero-delta against the
-# committed tree, so the first deploy serves byte-identical content to today.
+# This is the active deploy for `main` (the legacy branch-deploy was cut over to
+# GitHub Actions). Every push to main rebuilds artifacts and republishes; the
+# build fails closed if regeneration is not deterministic. The committed
+# artifacts stay the net until this pipeline is proven in production (then P5
+# nets off and drops the client parser). build:artifacts is proven zero-delta
+# against the committed tree, so the deploy serves byte-identical content.
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
