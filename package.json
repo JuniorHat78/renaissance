@@ -111,6 +111,8 @@
     "site-registry:generate": "node scripts/generate-site-registry.js",
     "404-catalogue:generate": "node scripts/generate-404-catalogue.js",
     "cache-version:generate": "node scripts/generate-cache-version.js",
+    "embedded:generate": "node scripts/generate-embedded-data.js",
+    "build:artifacts": "npm run embedded:generate && npm run search-index:generate && npm run content-ast:generate && npm run site-registry:generate && npm run 404-catalogue:generate && npm run offline-assets:generate && npm run discover:generate && npm run cache-version:generate",
     "artifacts:summary": "node scripts/artifact-summary.js",
     "validate:site-registry:check": "node scripts/generate-site-registry.js --check",
     "validate:404-catalogue:check": "node scripts/generate-404-catalogue.js --check",
