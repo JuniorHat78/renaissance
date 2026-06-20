@@ -80,15 +80,21 @@ function readSectionSource(essay, sectionNumber) {
   return fs.readFileSync(filePath, "utf8").replace(/\r\n/g, "\n");
 }
 
+// The single parse authority. Every consumer of an essay's content — the
+// compiled hydration artifact, the search index, anything downstream — derives
+// from this one projection, so there is exactly one place that turns source
+// text into a content AST. Match content.js's loadSection() exactly: the reader
+// renders withoutLeadingHeadings(parseDocument(text)) and numbers passages from
+// that projection, or a hydrated DOM (and its passage anchors) would diverge.
+function contentAstFor(essay, sectionNumber) {
+  const rawText = readSectionSource(essay, sectionNumber);
+  const document = ast.parseDocument(rawText, { sourceName: sourceNameFor(essay, sectionNumber) });
+  return ast.withoutLeadingHeadings(document);
+}
+
 function sectionRecord(essay, sectionNumber, order) {
   const meta = sectionMeta(essay, sectionNumber);
-  const rawText = readSectionSource(essay, sectionNumber);
-  // Match content.js's loadSection() exactly: the reader renders
-  // withoutLeadingHeadings(parseDocument(text)) and numbers passages from that
-  // projection. The compiled AST must come from the identical pipeline, or a
-  // hydrated DOM (and its passage anchors) would diverge from a runtime parse.
-  const document = ast.parseDocument(rawText, { sourceName: sourceNameFor(essay, sectionNumber) });
-  const contentAst = ast.withoutLeadingHeadings(document);
+  const contentAst = contentAstFor(essay, sectionNumber);
   const searchableText = ast.toSearchableText(contentAst);
   return {
     sectionNumber,
@@ -189,4 +195,4 @@ if (require.main === module) {
   main();
 }
 
-module.exports = { essayArtifact, build, stableJson, loadEssays, publishedEssays, sectionRecord };
+module.exports = { essayArtifact, build, stableJson, loadEssays, publishedEssays, sectionRecord, contentAstFor };

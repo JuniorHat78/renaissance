@@ -11,6 +11,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const ast = require("./ast/index.js");
+const compiler = require("./generate-content-ast.js");
 
 const root = path.join(__dirname, "..");
 const dataDir = path.join(root, "data");
@@ -60,18 +61,6 @@ function sectionMeta(essay, sectionNumber) {
   return meta && typeof meta === "object" ? meta : {};
 }
 
-function readSectionSource(essay, sectionNumber) {
-  const sourceDir = String((essay && essay.source_dir) || "").trim() || "raw";
-  const filePath = path.join(root, sourceDir, String(sectionNumber) + ".txt");
-  if (!fs.existsSync(filePath)) {
-    throw new Error(
-      "Missing section file for search index: " +
-      sourceDir + "/" + String(sectionNumber) + ".txt (" + essay.slug + ")"
-    );
-  }
-  return fs.readFileSync(filePath, "utf8").replace(/\r\n/g, "\n");
-}
-
 function passageRecord(passage) {
   return {
     passageId: String(passage.passageId),
@@ -86,11 +75,11 @@ function passageRecord(passage) {
 
 function sectionRecord(essay, sectionNumber, sectionOrder) {
   const meta = sectionMeta(essay, sectionNumber);
-  const rawText = readSectionSource(essay, sectionNumber);
-  // Match content.js exactly: the reader renders withoutLeadingHeadings(ast) and
-  // numbers passages from that projection, so passage IDs and offsets must come
-  // from the same content AST or reader highlight anchors land on the wrong text.
-  const contentAst = ast.withoutLeadingHeadings(ast.parseDocument(rawText));
+  // Derive from the compiler's single parse authority rather than re-parsing the
+  // source here. The reader hydrates the same content AST, so search passage IDs
+  // and offsets are the same projection the reader anchors highlights against —
+  // structurally, not just coincidentally.
+  const contentAst = compiler.contentAstFor(essay, sectionNumber);
   const passages = ast.passagesFromDocument(contentAst).map(passageRecord);
   // Section search text is the join of passage texts, so we do not store it
   // separately (it would duplicate ~half the artifact). wordCount is the only
