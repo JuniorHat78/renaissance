@@ -44,19 +44,29 @@ function readPageState() {
 }
 
 async function assertPageVisible(page, label) {
-  // A history restore (notably webkit's bfcache) can fire a follow-up
-  // navigation just after waitForReady resolves, destroying the execution
-  // context mid-evaluate. That is a not-yet-settled signal, not a regression:
-  // re-settle and read once more before trusting the throw.
+  // A history restore (notably webkit's bfcache) can fire one or more follow-up
+  // navigations just after waitForReady resolves, destroying the execution
+  // context mid-evaluate. That is a not-yet-settled signal, not a regression.
+  // Playwright 1.61's webkit timing can chain several such navigations, so a
+  // single retry is not enough: re-settle and retry a few times, trusting the
+  // throw only if the context keeps dying after the page should be quiescent.
   let state;
-  try {
-    state = await page.evaluate(readPageState);
-  } catch (error) {
-    if (!/Execution context was destroyed/.test(String(error && error.message))) {
-      throw error;
+  let lastError = null;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    try {
+      state = await page.evaluate(readPageState);
+      lastError = null;
+      break;
+    } catch (error) {
+      if (!/Execution context was destroyed/.test(String(error && error.message))) {
+        throw error;
+      }
+      lastError = error;
+      await waitForReady(page);
     }
-    await waitForReady(page);
-    state = await page.evaluate(readPageState);
+  }
+  if (lastError) {
+    throw lastError;
   }
   assert.equal(state.prep, false, label + " should not keep prep class");
   assert.equal(state.out, false, label + " should not keep outgoing class");
