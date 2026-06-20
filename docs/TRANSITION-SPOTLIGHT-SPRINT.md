@@ -17,18 +17,19 @@ assumptions in an agent thread.
 > thread, move it from **Up next** to **Shipped** and re-point **Working on now**.
 > Detail lives in the dated sections below — this is just the at-a-glance state.
 
-**Last updated:** 2026-06-16 · **Branch:** `sprint/transition-spotlight-oracle`
-(open as draft PR #12; pushes auto-run CI + Manual Checks full-chromium +
-A11y + CodeQL) · **Main:** `main`.
+**Last updated:** 2026-06-20 · **Branch:** `sprint/transition-spotlight-oracle`
+(open as draft PR #12 → `main`; AST-compiler work on `sprint/ast-compiler`,
+PR #13 → oracle) · **Main:** `main`.
 
 **One-line status:** The oracle search system, the continuity transition (words
 fly from a search result into the reader), an honest **reading-attention
 progress model**, **advanced search** (a "show everything" mode that reveals
-the oracle's reasons), and the **A-phase soft-navigation reading shell**
-(intercepts essay↔section clicks, swaps `<main>` without a page reload, lazy-
-loads the destination view script) are all built and standalone-green. The
-residual lock-up on document navigation is gone. Magic-texture polish is
-next.
+the oracle's reasons), and now the **AST compiler (P0–4)** — the runtime parser
+promoted into a precomputed, hydratable content contract — are all built and
+**full-chromium green on Actions**. The soft-navigation reading shell is built
+but **gated out of the live nav path** (commit `6ac1994`) pending the magic-
+texture pass. Remaining: the derive-at-deploy live cutover + dropping the client
+parser (P5), both gated on a post-merge production proof.
 
 **Shipped & green on Actions:**
 - Oracle search end-to-end — Spotlight, full `/search`, essay-inline, home/archive
@@ -41,9 +42,24 @@ next.
   is `"composed"`; reveal fires `renaissance:page-revealed`.
 - Selection copy-chip anchors to the selection's end (was pinning above
   multi-line highlights).
+- **AST compiler (P0–4)** — `scripts/generate-content-ast.js` emits
+  `data/compiled/<slug>.json` per published essay (each section's exact
+  `withoutLeadingHeadings(parseDocument)` projection). `content.js` hydrates it
+  instead of re-parsing, falling back to `fetch(.txt)+parse` on
+  missing/stale/offline/grammar-drift. The search index now derives from the
+  compiler's single `contentAstFor()` authority (byte-identical output). One
+  parse authority feeds reader + search, so passage IDs/anchors are structurally
+  aligned. `build:artifacts` regenerates everything deterministically
+  (proven zero-delta); a dormant `pages.yml` is the derive-at-deploy pipeline.
+  Equivalence harness `content-ast-regression.js` (oracle: compiled == live
+  parse). PR #13, commits `3ba6f38`→`6f696d5`. Full-chromium green incl.
+  `ci:passage-alignment`/`ci:offline`/`ci:continuity`.
 
-**Shipped & standalone-green (Actions browser-tier confirmation pending):**
-- **A-phase soft-navigation reading shell** — `scripts/reading-shell.js` (A-phase
+**Shipped & Actions-confirmed (full-chromium green):**
+- **A-phase soft-navigation reading shell** — built but **gated out of the live
+  nav path** (commit `6ac1994`) pending the magic-texture pass; the code below
+  describes it as wired, but it does not intercept on the live site today.
+  `scripts/reading-shell.js` (A-phase
   checkpoint 2/4, commits `f179788`/`dbcd8e5`). Intercepts essay↔section clicks
   in the capture phase, fetches the destination HTML, swaps `<main>` with
   `document.importNode` (no innerHTML sink), updates history + header nav + meta
@@ -57,8 +73,9 @@ next.
   extra code needed: `captureFromClick` stores geometry before the shell
   intercepts, `pushState` updates `window.location.search` so `currentIdentity()`
   reads correctly, and the flight defers to `renaissance:page-revealed` which the
-  shell dispatches. Awaiting human-dispatched `browser` suite (runner lacks
-  `actions:write`).
+  shell dispatches. The shared leave/arrive contract (`beginLeave`/`markArrival`
+  on `page-transition.js`) was finished and is full-chromium green, but the
+  shell stays gated out of the live nav path until the magic-texture pass.
 - **Reading-attention progress model** — `scripts/reading-attention.js` is a
   pure, DOM-free, dual-export core (unit-tested with synthetic tick streams in
   `reading-attention-regression.js`): per-paragraph dwell vs word-count-derived
@@ -81,25 +98,29 @@ next.
   Commit `36b63ac`. Parked follow-ups: scope/section filters in advanced mode;
   URL-persist the mode.
 
-**Working on now:** clean tree after soft-nav shell landed. **`section.js` split
-is OVERDUE** (budget is parked at 1024KB as a sprint-gate bypass — not a real
-number; the split is the fix). **Magic texture** (A-phase checkpoint 4) is next
-but deferred for visual review: no motion artifact captured yet, and the texture
-tweaks (spring, dissolve, shimmer) carry visual regression risk.
+**Working on now:** merge train — PR #13 (AST compiler) → oracle, then PR #12
+(the whole sprint) → `main`, plus the dependabot bumps. AST compiler P0–4 has
+landed; the **section.js split** remains the most durable structural win
+(budget parked at 1024KB as a sprint-gate bypass — the split is the real fix).
 
 **Up next (in order):**
-1. **A-phase checkpoint 4: magic texture polish** — true spring easing for
-   compose-in, veil dissolving (blur/luminosity bloom), arriving words shimmer.
-   Low code volume, high visual-review risk: do not ship without a motion
-   artifact pass. Can be deferred past the section.js split if preferred.
-2. **`section.js` split** (OVERDUE) — section.html is unguarded at 1024KB;
-   the split earns the room back and returns the budget to a real, disciplined
-   ceiling. See follow-up note under A-Phase.
-3. Reading-attention **feel pass** — tune `WPM`/`READ_FRACTION`/velocity
-   thresholds in the live reader; math is proven, constants are taste calls.
-4. Then the rest of the reading-instrument arc: AST compiler (A), bespoke
-   typesetting (B-feel), literary apparatus/concordance (C). See **Sprint
-   Direction: The Reading Instrument**.
+1. **Derive-at-deploy live cutover (P4)** — after PR #12 lands on `main`,
+   dispatch `pages.yml` once; `configure-pages` enablement flips the Pages
+   source from legacy branch-deploy to GitHub Actions. Verify the live site
+   serves identical bytes. Reversible via the Pages API.
+2. **AST compiler P5 — drop the client parser + net off** — remove
+   `parseDocument` from shipped JS (asset + speed win) and gitignore the
+   compiled blobs. Gated on the cutover proving out in production, because
+   dropping the parser removes the hydration fallback.
+3. **`section.js` split** — section.html is unguarded at 1024KB; the split earns
+   the room back and returns the budget to a real ceiling. See A-Phase note.
+4. **A-phase checkpoint 4: magic texture polish** — spring easing, veil dissolve,
+   arriving-words shimmer. Unblocks ungating the soft-nav shell. High visual-
+   review risk: do not ship without a motion-artifact pass.
+5. Reading-attention **feel pass** — tune `WPM`/`READ_FRACTION`/velocity in the
+   live reader; math is proven, constants are taste calls.
+6. Then bespoke typesetting (B-feel) and literary apparatus/concordance (C). See
+   **Sprint Direction: The Reading Instrument**.
 
 **Known cuts / decisions:** editorial apparatus (footnotes/sidenotes) is OUT
 (essays are continuous prose); never fabricate apparatus; per-passage search
