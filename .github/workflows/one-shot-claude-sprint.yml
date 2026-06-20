@@ -30,6 +30,7 @@ permissions:
   pull-requests: write
   issues: write
   actions: write
+  checks: read
   id-token: write
 
 concurrency:
@@ -89,6 +90,7 @@ jobs:
             contents: write
             pull-requests: write
             issues: write
+            checks: read
           show_full_output: false
           prompt: |
             You are running inside GitHub Actions for JuniorHat78/renaissance.
@@ -143,12 +145,16 @@ jobs:
               evidence, decisions, or known risks change.
             - Use GitHub Actions aggressively for evidence when browser,
               transition, route, service-worker, accessibility, or device
-              behavior changes. Dispatch Manual Checks suites with `gh workflow
-              run` when useful, watch/read failures, and fix real regressions.
-              Do not edit `.github/workflows/**` during unattended sprint runs;
-              if workflow changes are needed, document the proposed patch and
-              continue with code, tests, or docs that do not require workflow
-              file permissions.
+              behavior changes. Dispatch Manual Checks suites explicitly when
+              useful:
+              `gh workflow run "Manual Checks" -f suite=browser --ref ${{ env.TARGET_BRANCH }}`,
+              `gh workflow run "Manual Checks" -f suite=regression --ref ${{ env.TARGET_BRANCH }}`,
+              `gh workflow run "Manual Checks" -f suite=a11y --ref ${{ env.TARGET_BRANCH }}`,
+              `gh workflow run "Manual Checks" -f suite=devices --ref ${{ env.TARGET_BRANCH }}`,
+              and `gh workflow run "Manual Checks" -f suite=slow-network --ref ${{ env.TARGET_BRANCH }}`.
+              After dispatching, use `gh run list`, `gh run watch`, and
+              `gh run view --log` to inspect results, then fix real
+              regressions.
             - Keep draft PR #12 updated at meaningful checkpoints so the human
               can see what landed, what ran, what failed, and where to resume.
             - Create focused side branches and draft PRs when work is large,
@@ -172,12 +178,11 @@ jobs:
             npm run ci:devices
             npm run ci:slow-network
 
-            Do not end the run just because you completed and summarized one
-            checkpoint. After each coherent checkpoint, push it, choose the next
-            queued task, and keep working. Stop only when the queue is complete,
-            quota/time prevents useful further progress, or a real blocker
-            prevents useful work.
+            Keep going until the queue is complete, a real blocker appears, or
+            quota/time prevents useful further progress.
           claude_args: >-
+            --model claude-opus-4-8
+            --effort max
             --permission-mode acceptEdits
             --allowedTools
             "Bash(git *)"
@@ -192,39 +197,3 @@ jobs:
             "Bash(sed *)"
             "Bash(cat *)"
             "Bash(pwd)"
-            "Bash(wc *)"
-            "Bash(sort *)"
-            "Bash(head *)"
-
-      - name: Push any local Claude commits
-        if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-          git status --short
-          git fetch origin "${TARGET_BRANCH}"
-          AHEAD="$(git rev-list --count "origin/${TARGET_BRANCH}..HEAD")"
-          echo "Local commits ahead of origin/${TARGET_BRANCH}: ${AHEAD}"
-          if [ "${AHEAD}" != "0" ]; then
-            git log --oneline "origin/${TARGET_BRANCH}..HEAD"
-            git push origin "HEAD:${TARGET_BRANCH}"
-          fi
-
-      - name: Write run summary
-        if: always()
-        shell: bash
-        run: |
-          {
-            echo "## One-Shot Claude Sprint"
-            echo
-            echo "- Mode: ${RUN_MODE}"
-            echo "- Target branch: ${TARGET_BRANCH}"
-            echo "- Workflow conclusion: ${GITHUB_JOB}"
-            echo "- Final HEAD: $(git rev-parse --short HEAD)"
-            echo
-            echo "### Recent commits"
-            git log --oneline -8
-            echo
-            echo "### Working tree"
-            git status --short
-          } >> "${GITHUB_STEP_SUMMARY}"
