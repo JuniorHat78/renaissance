@@ -15,31 +15,27 @@ const allowedSinks = [
   ["scripts/archive.js", "essayList.innerHTML = essays", "essay cards escape data before joining"],
   ["scripts/archive.js", "searchScope.innerHTML = ['<option", "option values/titles are escaped"],
   ["scripts/archive.js", "searchResults.innerHTML = \"\";", "clear existing results"],
-  ["scripts/archive.js", "searchResults.innerHTML = '<p", "static empty-state markup"],
-  ["scripts/archive.js", "searchResults.innerHTML = grouped", "search snippets are escaped before highlighting"],
   ["scripts/archive.js", "searchResults.innerHTML = '<p", "static error-state markup"],
   ["scripts/archive.js", "essayList.innerHTML = '<li", "static error-state markup"],
 
   ["scripts/essay.js", "sectionList.innerHTML = sections", "section list values are escaped before joining"],
   ["scripts/essay.js", "searchResults.innerHTML = \"\";", "clear existing results"],
-  ["scripts/essay.js", "searchResults.innerHTML = '<p", "static empty-state markup"],
-  ["scripts/essay.js", "searchResults.innerHTML = grouped", "search snippets are escaped before highlighting"],
   ["scripts/essay.js", "searchResults.innerHTML = '<p", "static error-state markup"],
   ["scripts/essay.js", "essayStats.innerHTML = joinMetaParts([", "metadata parts are escaped in joinMetaParts"],
 
   ["scripts/search-page.js", "searchCounts.innerHTML = \"\";", "clear existing counts"],
   ["scripts/search-page.js", "searchResults.innerHTML = \"\";", "clear existing results"],
-  ["scripts/search-page.js", "searchCounts.innerHTML = rows.join(\"\");", "count rows escape labels before joining"],
-  ["scripts/search-page.js", "searchResults.innerHTML = pageData.items", "result cards escape text before highlighting"],
-  ["scripts/search-page.js", "searchCounts.innerHTML = \"\";", "clear existing counts"],
-  ["scripts/search-page.js", "searchResults.innerHTML = '<p", "static empty-state markup"],
   ["scripts/search-page.js", "searchCounts.innerHTML = \"\";", "clear existing counts"],
   ["scripts/search-page.js", "searchResults.innerHTML = '<p", "static error-state markup"],
   ["scripts/search-page.js", "searchScope.innerHTML = ['<option", "option values/titles are escaped"],
   ["scripts/search-page.js", "searchResults.innerHTML = '<p", "static index-error markup"],
 
   ["scripts/section.js", "button.innerHTML =", "static icon markup for injected copy controls"],
-  ["scripts/section.js", "sectionMeta.innerHTML = joinMetaParts([", "metadata parts are escaped in joinMetaParts"]
+  ["scripts/section.js", "sectionMeta.innerHTML = joinMetaParts([", "metadata parts are escaped in joinMetaParts"],
+
+  ["scripts/spotlight.js", "root.innerHTML =", "static dialog shell markup, no interpolation"],
+  ["scripts/spotlight.js", "list.innerHTML = '<p", "static empty-state markup"],
+  ["scripts/spotlight.js", "list.innerHTML = results", "result cards escape href/title/detail/kind before joining"]
 ];
 
 function trackedRuntimeFiles() {

@@ -124,6 +124,12 @@ lives in `docs/ENGINEERING-SPRINT.md`.
 
 Latest sprint notes:
 
+- Transition hardening, oracle search, AST anchors, and Spotlight planning live
+  in `docs/TRANSITION-SPOTLIGHT-SPRINT.md` and the companion specs under
+  `docs/specs/`.
+- Post-main artifact review, beta-testing, and expanded Actions gauntlets to
+  implement in the sprint are tracked in
+  `docs/specs/HARDENING-GAUNTLETS-SPEC.md`.
 - Recovery/offline/cache/generated-artifact hardening is tracked in
   `docs/ENGINEERING-SPRINT.md`.
 - AST syntax support and legacy bridge boundaries are documented in

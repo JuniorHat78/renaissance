@@ -4,6 +4,11 @@ This document records the current deterministic ranking model for Renaissance
 search. It is intentionally small: enough structure to keep results predictable
 without turning the site into a search product.
 
+For the Transition and Spotlight sprint, this document becomes a legacy/current
+state note. The target replacement is `ORACLE-SEARCH-SPEC.md`. The new work may
+replace the runtime API, result shape, URL grammar, and ranking model rather
+than preserving compatibility with this implementation.
+
 ## Goals
 
 - Keep reading order available as the default sort.

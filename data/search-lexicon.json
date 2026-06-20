@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "description": "Curated, hand-authored search lexicon. The oracle reads this as an extra signal source. Today it applies synonym/concept boosting to passages that already match a query term. Deferred build: match-creation from synonyms, essay aliases, and motif easter eggs (see docs/specs/ORACLE-SEARCH-SPEC.md).",
+  "synonyms": [
+    ["glass", "lens", "lenses", "telescope", "microscope"],
+    ["silicon", "chip", "wafer", "transistor", "microchip"]
+  ],
+  "aliases": [
+    { "match": "etching", "essay": "etching-god-into-sand" },
+    { "match": "sand essay", "essay": "etching-god-into-sand" },
+    { "match": "the sand essay", "essay": "etching-god-into-sand" }
+  ]
+}

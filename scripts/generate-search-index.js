@@ -1,0 +1,195 @@
+#!/usr/bin/env node
+"use strict";
+
+// Generates data/search-index.json: an AST-derived, deterministic precompute of
+// the per-essay/per-section/per-passage records the runtime search engine builds
+// in the browser. The goal is one shared search truth for full search, inline
+// search, and Spotlight, instead of rebuilding the index from raw text at
+// runtime. Unpublished essays are excluded. Run with --check in CI to fail when
+// the committed artifact drifts from the source content or AST grammar.
+
+const fs = require("node:fs");
+const path = require("node:path");
+const ast = require("./ast/index.js");
+const compiler = require("./generate-content-ast.js");
+
+const root = path.join(__dirname, "..");
+const dataDir = path.join(root, "data");
+const outPath = path.join(dataDir, "search-index.json");
+
+const INDEX_VERSION = 1;
+
+function readJson(filePath) {
+  return JSON.parse(fs.readFileSync(filePath, "utf8"));
+}
+
+function toNumber(value) {
+  const parsed = Number.parseInt(String(value), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function uniqueNumbers(values) {
+  if (!Array.isArray(values)) {
+    return [];
+  }
+  const seen = new Set();
+  const out = [];
+  for (const value of values) {
+    const number = toNumber(value);
+    if (number === null || seen.has(number)) {
+      continue;
+    }
+    seen.add(number);
+    out.push(number);
+  }
+  return out;
+}
+
+function loadEssays() {
+  const parsed = readJson(path.join(dataDir, "essays.json"));
+  return Array.isArray(parsed.essays) ? parsed.essays : [];
+}
+
+function publishedEssays(essays) {
+  return essays.filter((essay) => essay && essay.published !== false && essay.slug);
+}
+
+function sectionMeta(essay, sectionNumber) {
+  const meta = essay && essay.section_meta && typeof essay.section_meta === "object"
+    ? essay.section_meta[String(sectionNumber)]
+    : null;
+  return meta && typeof meta === "object" ? meta : {};
+}
+
+function passageRecord(passage) {
+  return {
+    passageId: String(passage.passageId),
+    passageIndex: Number(passage.passageIndex),
+    blockType: String(passage.blockType || ""),
+    text: String(passage.text || ""),
+    sourceStart: Number.isFinite(Number(passage.sourceStart)) ? Number(passage.sourceStart) : null,
+    sourceEnd: Number.isFinite(Number(passage.sourceEnd)) ? Number(passage.sourceEnd) : null,
+    sourceLine: Number.isFinite(Number(passage.sourceLine)) ? Number(passage.sourceLine) : null,
+  };
+}
+
+function sectionRecord(essay, sectionNumber, sectionOrder) {
+  const meta = sectionMeta(essay, sectionNumber);
+  // Derive from the compiler's single parse authority rather than re-parsing the
+  // source here. The reader hydrates the same content AST, so search passage IDs
+  // and offsets are the same projection the reader anchors highlights against —
+  // structurally, not just coincidentally.
+  const contentAst = compiler.contentAstFor(essay, sectionNumber);
+  const passages = ast.passagesFromDocument(contentAst).map(passageRecord);
+  // Section search text is the join of passage texts, so we do not store it
+  // separately (it would duplicate ~half the artifact). wordCount is the only
+  // derived field worth precomputing; consumers reconstruct full-section text
+  // from passages when they need it.
+  const wordCount = passages.reduce((count, passage) => count + ast.wordCount(passage.text), 0);
+  return {
+    sectionNumber,
+    order: sectionOrder,
+    title: String(meta.title || "Section " + String(sectionNumber)),
+    subtitle: meta.subtitle ? String(meta.subtitle) : "",
+    wordCount,
+    passages,
+  };
+}
+
+function essayRecord(essay, essayOrder) {
+  const sections = uniqueNumbers(essay.section_order).map((sectionNumber, sectionOrder) =>
+    sectionRecord(essay, sectionNumber, sectionOrder)
+  );
+  return {
+    slug: String(essay.slug),
+    title: String(essay.title || essay.slug),
+    summary: String(essay.summary || ""),
+    order: essayOrder,
+    sectionCount: sections.length,
+    passageCount: sections.reduce((count, section) => count + section.passages.length, 0),
+    sections,
+  };
+}
+
+function tokenize(text) {
+  const matches = String(text || "").toLowerCase().match(/[a-z0-9]+/g);
+  return matches ? matches : [];
+}
+
+// Passage-frequency per term, so the oracle can weight rare words (omega) above
+// common ones (point). Only terms appearing in >= 2 passages are stored; the
+// oracle treats an absent term as df=1 (maximally rare), which keeps the
+// artifact lean without losing the signal that matters.
+function buildTermStats(essayRecords) {
+  const df = new Map();
+  for (const essay of essayRecords) {
+    for (const section of essay.sections) {
+      for (const passage of section.passages) {
+        for (const term of new Set(tokenize(passage.text))) {
+          df.set(term, (df.get(term) || 0) + 1);
+        }
+      }
+    }
+  }
+  const terms = {};
+  for (const term of Array.from(df.keys()).sort()) {
+    if (df.get(term) >= 2) {
+      terms[term] = df.get(term);
+    }
+  }
+  return { terms, vocabulary: df.size };
+}
+
+function buildSearchIndex(essays) {
+  const essayRecords = publishedEssays(essays).map(essayRecord);
+  const termStats = buildTermStats(essayRecords);
+  return {
+    version: INDEX_VERSION,
+    astVersion: String(ast.VERSION),
+    essays: essayRecords,
+    terms: termStats.terms,
+    stats: {
+      essays: essayRecords.length,
+      sections: essayRecords.reduce((count, essay) => count + essay.sectionCount, 0),
+      passages: essayRecords.reduce((count, essay) => count + essay.passageCount, 0),
+      vocabulary: termStats.vocabulary,
+      indexedTerms: Object.keys(termStats.terms).length,
+    },
+  };
+}
+
+function stableJson(value) {
+  return JSON.stringify(value, null, 2) + "\n";
+}
+
+function main() {
+  const expected = stableJson(buildSearchIndex(loadEssays()));
+  const check = process.argv.includes("--check");
+
+  if (check) {
+    const actual = fs.existsSync(outPath) ? fs.readFileSync(outPath, "utf8") : "";
+    if (actual !== expected) {
+      console.error("Out of date: data/search-index.json");
+      console.error("Run: node scripts/generate-search-index.js");
+      process.exit(1);
+    }
+    console.log("Search index is up to date.");
+    return;
+  }
+
+  fs.writeFileSync(outPath, expected, "utf8");
+  const index = JSON.parse(expected);
+  console.log(
+    "Wrote data/search-index.json (" +
+    index.stats.essays + " essays, " +
+    index.stats.sections + " sections, " +
+    index.stats.passages + " passages, ast " +
+    index.astVersion + ")"
+  );
+}
+
+if (require.main === module) {
+  main();
+}
+
+module.exports = { buildSearchIndex, stableJson, loadEssays, publishedEssays };

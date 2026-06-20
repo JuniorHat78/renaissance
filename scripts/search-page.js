@@ -2,16 +2,12 @@
   const { initThemeToggle } = window.RenaissanceTheme;
   const { loadEssays } = window.RenaissanceContent;
   const {
-    DEFAULT_PAGE_SIZE,
-    createSearchEngine,
     escapeHtml,
-    highlightSnippet,
     normalizeMode,
     normalizePage,
     normalizePageSize,
     normalizeScope,
-    normalizeSort,
-    paginate
+    normalizeSort
   } = window.RenaissanceSearch;
   const router = window.RenaissanceRouter;
 
@@ -29,13 +25,9 @@
   const searchCounts = document.getElementById("search-page-counts");
   const searchResults = document.getElementById("search-page-results");
   const searchPagination = document.getElementById("search-page-pagination");
-  const searchPrev = document.getElementById("search-page-prev");
-  const searchNext = document.getElementById("search-page-next");
   const searchStatus = document.getElementById("search-page-status");
 
   let publishedEssays = [];
-  let searchEngine = null;
-  let latestResult = null;
   let debounceTimer = null;
   let searchRunId = 0;
 
@@ -46,8 +38,15 @@
     scope: "all",
     caseSensitive: false,
     page: 1,
-    pageSize: DEFAULT_PAGE_SIZE
+    pageSize: window.RenaissanceRouter.DEFAULT_PAGE_SIZE,
+    // Advanced "show everything" mode: uncap the oracle's per-section limit and
+    // render the full, grouped, self-explaining result set. Curated by default.
+    exhaustive: false
   };
+
+  function oracleMode() {
+    return Boolean(window.RenaissanceOracleClient && window.RenaissanceOracleClient.available());
+  }
 
   function announcePageReady() {
     window.dispatchEvent(new CustomEvent("renaissance:page-ready"));
@@ -104,7 +103,7 @@
       state.mode !== "contains" ||
       state.sort !== "reading_order" ||
       state.caseSensitive ||
-      state.pageSize !== DEFAULT_PAGE_SIZE
+      state.pageSize !== window.RenaissanceRouter.DEFAULT_PAGE_SIZE
     );
   }
 
@@ -126,98 +125,9 @@
   }
 
   function clearSearchView() {
-    latestResult = null;
     searchHint.textContent = "Enter a query to search all published essays.";
     searchCounts.innerHTML = "";
     searchResults.innerHTML = "";
-    searchStatus.textContent = "";
-    searchPagination.hidden = true;
-  }
-
-  function renderSearchSummary(result) {
-    const hitLabel = result.totalHits === 1 ? "1 hit" : String(result.totalHits) + " hits";
-    const essayLabel = result.totalEssays === 1 ? "1 essay" : String(result.totalEssays) + " essays";
-    const sectionLabel = result.totalSections === 1 ? "1 section" : String(result.totalSections) + " sections";
-    searchHint.textContent = hitLabel + " in " + essayLabel + " and " + sectionLabel + ".";
-  }
-
-  function renderSearchCounts(result) {
-    const maxRows = 16;
-    const visible = result.sectionCounts.slice(0, maxRows);
-    const rows = visible.map((entry) => {
-      const countCopy = entry.count === 1 ? "1 hit" : String(entry.count) + " hits";
-      const href = router.build("section", {
-        essaySlug: entry.essaySlug,
-        sectionNumber: entry.sectionNumber,
-        query: state.query,
-        mode: state.mode,
-        caseSensitive: state.caseSensitive
-      });
-      return (
-        '<p class="search-count-row">' +
-          '<a href="' + href + '">' +
-            escapeHtml(entry.essayTitle + " . " + entry.sectionSearchLabel) +
-          "</a>" +
-          '<span class="muted">' + escapeHtml(countCopy) + "</span>" +
-        "</p>"
-      );
-    });
-
-    if (result.sectionCounts.length > maxRows) {
-      rows.push(
-        '<p class="search-count-row search-count-row-note">' +
-          '<span class="muted">More sections match this query.</span>' +
-        "</p>"
-      );
-    }
-
-    searchCounts.innerHTML = rows.join("");
-  }
-
-  function renderSearchPage(result) {
-    const pageData = paginate(result.hits, state.page, state.pageSize);
-    state.page = pageData.page;
-
-    searchResults.innerHTML = pageData.items
-      .map((hit) => {
-        const resultTitle = hit.sectionSearchLabel + " . Occurrence " + String(hit.occurrence);
-        const href = router.build("section", {
-          essaySlug: hit.essaySlug,
-          sectionNumber: hit.sectionNumber,
-          query: state.query,
-          occurrence: hit.occurrence,
-          mode: state.mode,
-          caseSensitive: state.caseSensitive
-        });
-        return (
-          '<article class="result-card">' +
-            '<h3><a href="' + href + '">' +
-              '<span class="search-result-kicker">' + escapeHtml(hit.essayTitle) + "</span>" +
-              '<span class="search-result-title">' + escapeHtml(resultTitle) + "</span>" +
-            "</a></h3>" +
-            "<p>" + highlightSnippet(hit.snippet, hit.matchedText) + "</p>" +
-          "</article>"
-        );
-      })
-      .join("");
-
-    searchStatus.textContent =
-      "Showing " +
-      String(pageData.start) +
-      "-" +
-      String(pageData.end) +
-      " of " +
-      String(pageData.total) +
-      " results";
-    searchPrev.disabled = pageData.page <= 1;
-    searchNext.disabled = pageData.page >= pageData.totalPages;
-    searchPagination.hidden = pageData.total <= 0;
-  }
-
-  function renderNoResults() {
-    searchHint.textContent = "0 hits in 0 essays and 0 sections.";
-    searchCounts.innerHTML = "";
-    searchResults.innerHTML = '<p class="muted">No matches found.</p>';
     searchStatus.textContent = "";
     searchPagination.hidden = true;
   }
@@ -230,48 +140,60 @@
       return;
     }
 
-    searchHint.textContent = "Searching...";
-
     const runId = ++searchRunId;
-    let result;
-    try {
-      result = await searchEngine.search({
-        query: state.query,
-        mode: state.mode,
-        sort: state.sort,
-        scope: state.scope,
-        caseSensitive: state.caseSensitive
-      });
-    } catch (error) {
+
+    const client = window.RenaissanceOracleClient;
+    if (client && client.available()) {
+      let ranked;
+      try {
+        const searchOptions = state.exhaustive
+          ? { scope: state.scope, perSection: Infinity, limit: 5000 }
+          : { scope: state.scope, limit: 60 };
+        ranked = await client.search(state.query, searchOptions);
+      } catch (_error) {
+        ranked = null;
+      }
       if (runId !== searchRunId) {
         return;
       }
-      searchHint.textContent = "Search is unavailable right now.";
-      searchCounts.innerHTML = "";
-      searchResults.innerHTML = '<p class="muted">Unable to load search results.</p>';
-      searchStatus.textContent = "";
-      searchPagination.hidden = true;
-      updateUrlState();
-      return;
+      if (ranked) {
+        // Oracle-native: one relevance-ranked list. Curated by default (the
+        // oracle's per-section cap keeps it tight); advanced mode uncaps it into
+        // the full, section-grouped, self-explaining "show everything" view.
+        //
+        // SEAM: with a single essay, the cross-essay "map" is unnecessary. When
+        // index.stats.essays > 1 and triage-across-essays earns its rent, the
+        // re-entry point is the scope selector (already wired, auto-populated).
+        const count = ranked.totalMatched || 0;
+        searchCounts.textContent = "";
+        searchPagination.hidden = true;
+        client.renderResults(searchResults, ranked, {
+          query: state.query,
+          advanced: state.exhaustive,
+          emptyText: "Nothing matches “" + state.query + "”."
+        });
+        const passages = count + (count === 1 ? " passage" : " passages");
+        const hint = count === 0
+          ? "No matches."
+          : state.exhaustive
+            ? "Everything: " + passages + " for “" + state.query + "”"
+            : passages + " for “" + state.query + "”";
+        searchHint.textContent = hint;
+        searchStatus.textContent = hint;
+        updateUrlState();
+        return;
+      }
     }
 
     if (runId !== searchRunId) {
       return;
     }
 
-    latestResult = result;
-    state.scope = result.state.scope;
-    searchScope.value = state.scope;
-
-    if (result.totalHits === 0) {
-      renderNoResults();
-      updateUrlState();
-      return;
-    }
-
-    renderSearchSummary(result);
-    renderSearchCounts(result);
-    renderSearchPage(result);
+    searchHint.textContent = "Search is unavailable right now.";
+    searchCounts.innerHTML = "";
+    searchResults.innerHTML = '<p class="muted">Unable to load search results.</p>';
+    searchStatus.textContent = "";
+    searchPagination.hidden = true;
     updateUrlState();
   }
 
@@ -317,33 +239,41 @@
       });
     });
 
-    searchPrev.addEventListener("click", () => {
-      if (!latestResult) {
-        return;
-      }
-      state.page = Math.max(1, state.page - 1);
-      renderSearchPage(latestResult);
-      updateUrlState();
-    });
-
-    searchNext.addEventListener("click", () => {
-      if (!latestResult) {
-        return;
-      }
-      state.page += 1;
-      renderSearchPage(latestResult);
-      updateUrlState();
-    });
-
     advancedToggle.addEventListener("click", () => {
+      if (oracleMode()) {
+        setExhaustive(!state.exhaustive);
+        return;
+      }
       setAdvancedOpen(advancedPanel.hidden);
     });
+
+    // In oracle mode the legacy mode/sort/page-size knobs are meaningless, so
+    // the advanced toggle is repurposed into the "show everything" switch: one
+    // click expands the curated list into every matching passage, grouped by
+    // section with the oracle's ranking reasons shown. The legacy panel stays
+    // closed; the toggle is a pressed-state button, not a disclosure.
+    if (oracleMode()) {
+      advancedPanel.hidden = true;
+      advancedToggle.removeAttribute("aria-controls");
+      advancedToggle.removeAttribute("aria-expanded");
+      setExhaustive(state.exhaustive, { silent: true });
+    }
+  }
+
+  function setExhaustive(on, options) {
+    const settings = options || {};
+    state.exhaustive = Boolean(on);
+    advancedToggle.setAttribute("aria-pressed", state.exhaustive ? "true" : "false");
+    advancedToggle.textContent = state.exhaustive ? "Show top matches" : "Show everything";
+    if (!settings.silent && state.query) {
+      state.page = 1;
+      executeSearch();
+    }
   }
 
   async function init() {
     initThemeToggle();
     bindEvents();
-    searchEngine = createSearchEngine(window.RenaissanceContent);
 
     try {
       const essays = await loadEssays();
@@ -352,7 +282,11 @@
 
       applyState(parseInitialState());
       syncControlsFromState();
-      setAdvancedOpen(hasAdvancedState());
+      // In oracle mode the legacy options panel is unused; the advanced toggle
+      // is the "show everything" switch instead (set up in bindEvents).
+      if (!oracleMode()) {
+        setAdvancedOpen(hasAdvancedState());
+      }
 
       if (state.query) {
         await executeSearch();

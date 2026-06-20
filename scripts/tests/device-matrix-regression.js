@@ -48,7 +48,7 @@ async function journey(browser, deviceName, base) {
     await page.goto(base + "/search.html", { waitUntil: "networkidle", timeout: 45000 });
     await page.waitForSelector("#search-page-input", { timeout: 45000 });
     await page.fill("#search-page-input", "sand");
-    await page.waitForSelector("#search-page-results .result-card", { timeout: 45000 });
+    await page.waitForSelector("#search-page-results .oracle-result", { timeout: 45000 });
 
     assert.deepEqual(pageErrors, [], "[" + deviceName + "] uncaught page errors:\n  " + pageErrors.join("\n  "));
     console.log("PASS " + deviceName + " (" + descriptor.viewport.width + "x" + descriptor.viewport.height + ", touch=" + Boolean(descriptor.hasTouch) + ")");

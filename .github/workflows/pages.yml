@@ -1,0 +1,97 @@
+name: Deploy (Pages, derive-at-deploy)
+
+# Derive-at-deploy pipeline (AST compiler P4). Regenerates every derived
+# artifact from source with `npm run build:artifacts`, then publishes the site
+# through GitHub Actions Pages instead of the legacy "deploy from branch" mode.
+#
+# DORMANT BY DESIGN: workflow_dispatch only. It does not auto-trigger on push,
+# so it never fights the current legacy branch-deploy. The live cutover is a
+# single deliberate dispatch from main — `configure-pages` with enablement
+# flips the Pages source to GitHub Actions on first run. The committed artifacts
+# stay the net until this pipeline is proven in production (then P5 nets off and
+# drops the client parser). build:artifacts is proven zero-delta against the
+# committed tree, so the first deploy serves byte-identical content to today.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22.17.0
+          cache: npm
+
+      - name: Install Node Dependencies
+        run: npm ci
+
+      - name: Regenerate all derived artifacts from source
+        run: npm run build:artifacts
+
+      - name: Fail if the build is not deterministic
+        # build:artifacts must be a pure function of source. If regenerating
+        # dirtied the tree, the artifact set is non-deterministic and the deploy
+        # would publish something no test ever saw — stop instead.
+        run: |
+          if ! git diff --quiet; then
+            echo "::error::build:artifacts produced a non-deterministic tree:"
+            git --no-pager diff --stat
+            exit 1
+          fi
+          echo "build:artifacts is deterministic (clean tree)."
+
+      - name: Configure Pages (enable GitHub Actions as the Pages source)
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - name: Stage the served site
+        # The site is served from the repo root (no build output dir), so the
+        # deployable is the working tree minus VCS, CI, dev tooling, and QA
+        # runtime noise that the live site never references.
+        run: |
+          rsync -a --delete \
+            --exclude '_site' \
+            --exclude '.git' \
+            --exclude '.github' \
+            --exclude 'node_modules' \
+            --exclude 'qa' \
+            --exclude 'tmp' \
+            --exclude 'exports' \
+            --exclude '.lighthouseci' \
+            --exclude '.npm-cache' \
+            --exclude '.chrome-test*' \
+            ./ ./_site/
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: ./_site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

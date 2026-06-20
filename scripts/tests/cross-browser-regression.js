@@ -80,8 +80,8 @@ async function runJourney(browserName, base) {
     await page.goto(base + "/search.html", { waitUntil: "networkidle", timeout: 45000 });
     await page.waitForSelector("#search-page-input", { timeout: 45000 });
     await page.fill("#search-page-input", "sand");
-    await page.waitForSelector("#search-page-results .result-card", { timeout: 45000 });
-    const hits = await page.$$eval("#search-page-results .result-card", (nodes) => nodes.length);
+    await page.waitForSelector("#search-page-results .oracle-result", { timeout: 45000 });
+    const hits = await page.$$eval("#search-page-results .oracle-result", (nodes) => nodes.length);
     assert.ok(hits > 0, "[" + browserName + "] search should return results");
 
     assert.deepEqual(pageErrors, [], "[" + browserName + "] should have no uncaught page errors:\n  " + pageErrors.join("\n  "));

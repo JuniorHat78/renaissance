@@ -69,6 +69,9 @@ async function main() {
         view: route.view,
         essaySlug: route.essaySlug,
         sectionNumber: route.sectionNumber,
+        passageId: route.passageId,
+        rangeStart: route.rangeStart,
+        rangeEnd: route.rangeEnd,
         scope: route.scope,
         query: route.query,
         mode: route.mode,
@@ -83,6 +86,9 @@ async function main() {
     assert.equal(result.view, "archive", "view should detect archive from index.html");
     assert.equal(result.essaySlug, "", "essaySlug default empty");
     assert.equal(result.sectionNumber, null, "sectionNumber default null");
+    assert.equal(result.passageId, "", "passageId default empty");
+    assert.equal(result.rangeStart, null, "rangeStart default null");
+    assert.equal(result.rangeEnd, null, "rangeEnd default null");
     assert.equal(result.scope, "all", "scope default all");
     assert.equal(result.query, "", "query default empty");
     assert.equal(result.mode, "contains", "mode default contains");
@@ -129,6 +135,9 @@ async function main() {
       const sectionUrl = r.build("section", {
         essaySlug: "etching-god-into-sand",
         sectionNumber: 3,
+        passageId: "p12",
+        rangeStart: 4,
+        rangeEnd: 9,
         query: "sand",
         mode: "fuzzy",
         caseSensitive: true,
@@ -153,7 +162,7 @@ async function main() {
       return { sectionUrl, archiveDefaults, archiveWithDefaults, searchAll };
     });
 
-    assert.match(result.sectionUrl, /section\.html\?essay=etching-god-into-sand&section=3&q=sand&occ=2&mode=fuzzy&case=1$/, "section URL has stable param order: essay,section,q,occ,mode,case");
+    assert.match(result.sectionUrl, /section\.html\?essay=etching-god-into-sand&section=3&p=p12&start=4&end=9&q=sand&occ=2&mode=fuzzy&case=1$/, "section URL has stable param order: essay,section,p,start,end,q,occ,mode,case");
     assert.ok(/index\.html$/.test(result.archiveDefaults), "archive default URL has no query");
     assert.ok(/index\.html$/.test(result.archiveWithDefaults), "explicit defaults must be elided");
     assert.match(result.searchAll, /search\.html\?scope=shadows&q=shadow&sort=relevance&page=2&page_size=25$/, "search URL stable order");
@@ -169,7 +178,7 @@ async function main() {
     const result = await page.evaluate(() => {
       const r = window.RenaissanceRouter;
       const cases = [
-        { view: "section", params: { essaySlug: "shadows", sectionNumber: 5, query: "moon", mode: "exact_phrase", caseSensitive: true, occurrence: 4 } },
+        { view: "section", params: { essaySlug: "shadows", sectionNumber: 5, passageId: "p9", rangeStart: 2, rangeEnd: 14, query: "moon", mode: "exact_phrase", caseSensitive: true, occurrence: 4 } },
         { view: "search", params: { query: "umbra", scope: "etching-god-into-sand", mode: "fuzzy", sort: "relevance", caseSensitive: true, page: 3, pageSize: 25 } },
         { view: "essay", params: { essaySlug: "etching-god-into-sand", query: "verdun", mode: "exact_phrase" } },
         { view: "archive", params: { query: "sand", scope: "shadows", caseSensitive: true } }
@@ -185,6 +194,9 @@ async function main() {
     assert.equal(sectionCase.view, "section");
     assert.equal(sectionCase.essaySlug, "shadows");
     assert.equal(sectionCase.sectionNumber, 5);
+    assert.equal(sectionCase.passageId, "p9");
+    assert.equal(sectionCase.rangeStart, 2);
+    assert.equal(sectionCase.rangeEnd, 14);
     assert.equal(sectionCase.query, "moon");
     assert.equal(sectionCase.mode, "exact_phrase");
     assert.equal(sectionCase.caseSensitive, true);
@@ -271,8 +283,8 @@ async function main() {
     assert.match(cleaned, /case=1/, "valid case flag preserved");
   }, failures);
 
-  await runCase("self-heal preserves unknown extras (hl, p, r)", browser, options, async (page) => {
-    await page.goto(new URL("/section.html?essay=etching-god-into-sand&section=1&hl=first&p=3", options.base).toString(), {
+  await runCase("self-heal preserves unknown extras beside passage anchors", browser, options, async (page) => {
+    await page.goto(new URL("/section.html?essay=etching-god-into-sand&section=1&hl=first&mark=3&p=3&start=4&end=9", options.base).toString(), {
       waitUntil: "domcontentloaded",
       timeout: 30000
     });
@@ -283,7 +295,10 @@ async function main() {
     );
     const search = await page.evaluate(() => window.location.search);
     assert.match(search, /hl=first/, "unknown extra hl preserved");
-    assert.match(search, /p=3/, "unknown extra p preserved");
+    assert.match(search, /mark=3/, "unknown extra mark preserved");
+    assert.match(search, /p=p3/, "canonical passage id preserved");
+    assert.match(search, /start=4/, "range start preserved");
+    assert.match(search, /end=9/, "range end preserved");
   }, failures);
 
   await runCase("saveScroll() persists scrollY into history.state", browser, options, async (page) => {

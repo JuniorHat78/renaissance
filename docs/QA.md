@@ -121,6 +121,14 @@ suite that proves the change, inspect the Actions logs, then iterate. Keep
 secrets, deploys, Pages publishing, and write permissions out of manual check
 workflows unless a future task explicitly needs them.
 
+For the Transition/Spotlight sprint, "green" is not enough when the change is
+visual, motion-heavy, search-ranking-sensitive, cache-sensitive, or
+accessibility-sensitive. Review the useful artifacts: screenshots, visual diffs,
+videos, traces, ranking explanations, anchor diagnostics, generated artifact
+summaries, Lighthouse reports, and Actions logs. The hardening gauntlet plan
+lives in `docs/specs/HARDENING-GAUNTLETS-SPEC.md`; its focused Actions suites
+are part of the sprint implementation, not deferred wishlist work.
+
 ## Reader-State Debugging
 
 Add `debugReadingState=1` to a reader URL to show the local continuity

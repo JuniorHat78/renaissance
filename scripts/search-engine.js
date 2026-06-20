@@ -3,16 +3,8 @@
   const SORTS = ["reading_order", "relevance"];
   const PAGE_SIZES = [25, 50, 100];
   const DEFAULT_PAGE_SIZE = 50;
-  const MAX_SEARCH_CACHE_ENTRIES = 24;
   const MAX_FUZZY_QUERY_TOKENS = 8;
   const MAX_FUZZY_TOKEN_LENGTH = 48;
-  const YIELD_EVERY_SECTIONS = 4;
-  const FIELD_BOOSTS = {
-    essay_title: 80,
-    section_title: 60,
-    section_label: 30,
-    body: 0
-  };
 
   function escapeHtml(text) {
     return String(text)
@@ -47,6 +39,21 @@
 
   function parseBooleanFlag(value) {
     return value === "1" || value === "true";
+  }
+
+  function normalizePassageId(value) {
+    const raw = String(value || "").trim().toLowerCase();
+    if (!raw) {
+      return "";
+    }
+    const number = raw.startsWith("p") ? raw.slice(1) : raw;
+    const parsed = Number.parseInt(number, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? "p" + String(parsed) : "";
+  }
+
+  function normalizeRangeOffset(value) {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
   }
 
   function normalizeScope(value, allowedScopes) {
@@ -399,360 +406,11 @@
     return findContainsOccurrences(section, needle, caseSensitive);
   }
 
-  function searchField(field, text, query, options) {
-    const sourceText = String(text || "");
-    if (!sourceText) {
-      return [];
-    }
-    const record = {
-      text: sourceText,
-      lowerText: sourceText.toLowerCase(),
-      tokens: tokenizeWordSpans(sourceText)
-    };
-    record.fuzzyBuckets = buildFuzzyBuckets(record.tokens);
-    const boost = FIELD_BOOSTS[field] || 0;
-    return findOccurrencesInTextRecord(record, query, options).map((hit) => ({
-      ...hit,
-      field,
-      score: hit.score + boost
-    }));
-  }
-
-  function fieldSearchesForSection(section) {
-    return [
-      { field: "essay_title", text: section.essayTitle },
-      { field: "section_title", text: section.sectionTitle },
-      { field: "section_label", text: section.sectionLabel },
-      { field: "body", text: section.text }
-    ];
-  }
-
-  function searchSectionField(section, entry, query, options) {
-    if (entry.field === "body") {
-      return findOccurrencesInSection(section, query, options).map((hit) => ({
-        ...hit,
-        field: "body",
-        score: hit.score + FIELD_BOOSTS.body
-      }));
-    }
-    return searchField(entry.field, entry.text, query, options);
-  }
-
-  function snippetForHit(section, field, hit) {
-    if (field === "body") {
-      return makeSnippet(section.text, hit.index, hit.length);
-    }
-    const source = fieldSearchesForSection(section).find((entry) => entry.field === field);
-    return source ? source.text : hit.matchedText;
-  }
-
-  function indexForHit(field, index) {
-    if (field === "essay_title") {
-      return -3000 + index;
-    }
-    if (field === "section_title") {
-      return -2000 + index;
-    }
-    if (field === "section_label") {
-      return -1000 + index;
-    }
-    return index;
-  }
-
-  function buildSectionUrl(essaySlug, sectionNumber, query, options) {
-    const settings = options || {};
-    const params = new URLSearchParams();
-    params.set("essay", essaySlug);
-    params.set("section", String(sectionNumber));
-    if (query) {
-      params.set("q", query);
-    }
-    const occurrence = Number.parseInt(settings.occurrence, 10);
-    if (Number.isFinite(occurrence) && occurrence > 0) {
-      params.set("occ", String(occurrence));
-    }
-    const mode = normalizeMode(settings.mode);
-    if (mode !== "contains") {
-      params.set("mode", mode);
-    }
-    if (settings.caseSensitive) {
-      params.set("case", "1");
-    }
-    return "section.html?" + params.toString();
-  }
-
-  function buildSearchUrl(rawState, options) {
-    const settings = options || {};
-    const scopeChoices = Array.isArray(settings.allowedScopes)
-      ? settings.allowedScopes
-      : [];
-    const path = settings.path || "search.html";
-    const state = normalizeState(rawState, scopeChoices);
-
-    if (!state.query) {
-      return path;
-    }
-
-    const params = new URLSearchParams();
-    params.set("q", state.query);
-    if (state.scope !== "all") {
-      params.set("scope", state.scope);
-    }
-    if (state.mode !== "contains") {
-      params.set("mode", state.mode);
-    }
-    if (state.sort !== "reading_order") {
-      params.set("sort", state.sort);
-    }
-    if (state.caseSensitive) {
-      params.set("case", "1");
-    }
-    if (state.page > 1) {
-      params.set("page", String(state.page));
-    }
-    if (state.pageSize !== DEFAULT_PAGE_SIZE) {
-      params.set("page_size", String(state.pageSize));
-    }
-
-    return path + "?" + params.toString();
-  }
-
-  function createSearchEngine(contentApi) {
-    if (!contentApi) {
-      throw new Error("Content API is required");
-    }
-
-    let indexPromise = null;
-    const resultCache = new Map();
-
-    async function buildIndex() {
-      const essays = (await contentApi.loadEssays()).filter((essay) => essay.published !== false);
-      const sections = [];
-
-      for (let essayOrder = 0; essayOrder < essays.length; essayOrder += 1) {
-        const essay = essays[essayOrder];
-        const payload = await contentApi.loadEssaySections(essay.slug);
-
-        for (let sectionOrder = 0; sectionOrder < payload.sections.length; sectionOrder += 1) {
-          const section = payload.sections[sectionOrder];
-          const display = contentApi.sectionDisplay(essay, section.sectionNumber);
-          const text = section.searchableText || "";
-          const tokens = tokenizeWordSpans(text);
-
-          sections.push({
-            essaySlug: essay.slug,
-            essayTitle: essay.title,
-            essaySummary: essay.summary || "",
-            essayOrder,
-            sectionNumber: section.sectionNumber,
-            sectionOrder,
-            sectionLabel: display.label,
-            sectionTitle: display.title,
-            sectionSearchLabel: display.searchLabel,
-            text,
-            lowerText: text.toLowerCase(),
-            tokens,
-            fuzzyBuckets: buildFuzzyBuckets(tokens)
-          });
-        }
-      }
-
-      return { essays, sections };
-    }
-
-    async function ensureIndex() {
-      if (!indexPromise) {
-        indexPromise = buildIndex();
-      }
-      return indexPromise;
-    }
-
-    function cacheKeyForState(state, activeScope) {
-      return [
-        activeScope || state.scope,
-        state.query,
-        state.mode,
-        state.sort,
-        state.caseSensitive ? "1" : "0",
-        String(state.page),
-        String(state.pageSize)
-      ].join("\u001f");
-    }
-
-    function rememberResult(key, result) {
-      if (resultCache.has(key)) {
-        resultCache.delete(key);
-      }
-      resultCache.set(key, result);
-      while (resultCache.size > MAX_SEARCH_CACHE_ENTRIES) {
-        const oldest = resultCache.keys().next().value;
-        resultCache.delete(oldest);
-      }
-      return result;
-    }
-
-    function cachedResult(key) {
-      if (!resultCache.has(key)) {
-        return null;
-      }
-      const result = resultCache.get(key);
-      resultCache.delete(key);
-      resultCache.set(key, result);
-      return result;
-    }
-
-    function yieldToBrowser() {
-      return new Promise((resolve) => setTimeout(resolve, 0));
-    }
-
-    async function search(rawState, options) {
-      const settings = options || {};
-      const index = await ensureIndex();
-      const allowedScopes = index.essays.map((essay) => essay.slug);
-      const state = normalizeState(rawState, allowedScopes);
-
-      const forcedScope = settings.forceEssaySlug ? String(settings.forceEssaySlug).trim() : "";
-      const activeScope = forcedScope || state.scope;
-      const sections = activeScope === "all"
-        ? index.sections
-        : index.sections.filter((section) => section.essaySlug === activeScope);
-
-      if (!state.query) {
-        return {
-          state: {
-            ...state,
-            scope: activeScope || state.scope
-          },
-          hits: [],
-          sectionCounts: [],
-          essayCounts: [],
-          totalHits: 0,
-          totalSections: 0,
-          totalEssays: 0,
-          essays: index.essays
-        };
-      }
-
-      const cacheKey = cacheKeyForState(state, activeScope);
-      const cached = cachedResult(cacheKey);
-      if (cached) {
-        return cached;
-      }
-
-      const allHits = [];
-      const sectionOccurrenceCounts = new Map();
-      for (let sectionIndex = 0; sectionIndex < sections.length; sectionIndex += 1) {
-        const section = sections[sectionIndex];
-        if (sectionIndex > 0 && sectionIndex % YIELD_EVERY_SECTIONS === 0) {
-          await yieldToBrowser();
-        }
-
-        const hitOptions = {
-          mode: state.mode,
-          caseSensitive: state.caseSensitive
-        };
-        const sectionHits = fieldSearchesForSection(section).flatMap((entry) =>
-          searchSectionField(section, entry, state.query, hitOptions)
-        );
-
-        for (const hit of sectionHits) {
-          const sectionKey = section.essaySlug + ":" + String(section.sectionNumber);
-          const occurrence = (sectionOccurrenceCounts.get(sectionKey) || 0) + 1;
-          sectionOccurrenceCounts.set(sectionKey, occurrence);
-
-          allHits.push({
-            essaySlug: section.essaySlug,
-            essayTitle: section.essayTitle,
-            essaySummary: section.essaySummary,
-            essayOrder: section.essayOrder,
-            sectionNumber: section.sectionNumber,
-            sectionOrder: section.sectionOrder,
-            sectionLabel: section.sectionLabel,
-            sectionTitle: section.sectionTitle,
-            sectionSearchLabel: section.sectionSearchLabel,
-            field: hit.field,
-            index: indexForHit(hit.field, hit.index),
-            length: hit.length,
-            score: hit.score,
-            occurrence,
-            matchedText: hit.matchedText,
-            snippet: snippetForHit(section, hit.field, hit)
-          });
-        }
-      }
-
-      const sortedHits = allHits
-        .slice()
-        .sort(state.sort === "relevance" ? sortRelevance : sortReadingOrder);
-
-      const sectionCountsMap = new Map();
-      const essayCountsMap = new Map();
-
-      for (const hit of sortedHits) {
-        const sectionKey = hit.essaySlug + ":" + String(hit.sectionNumber);
-        const sectionCount = sectionCountsMap.get(sectionKey) || {
-          essaySlug: hit.essaySlug,
-          essayTitle: hit.essayTitle,
-          essayOrder: hit.essayOrder,
-          sectionNumber: hit.sectionNumber,
-          sectionOrder: hit.sectionOrder,
-          sectionSearchLabel: hit.sectionSearchLabel,
-          count: 0
-        };
-        sectionCount.count += 1;
-        sectionCountsMap.set(sectionKey, sectionCount);
-
-        const essayCount = essayCountsMap.get(hit.essaySlug) || {
-          essaySlug: hit.essaySlug,
-          essayTitle: hit.essayTitle,
-          essayOrder: hit.essayOrder,
-          count: 0
-        };
-        essayCount.count += 1;
-        essayCountsMap.set(hit.essaySlug, essayCount);
-      }
-
-      const sectionCounts = Array.from(sectionCountsMap.values()).sort((left, right) => {
-        if (left.essayOrder !== right.essayOrder) {
-          return left.essayOrder - right.essayOrder;
-        }
-        return left.sectionOrder - right.sectionOrder;
-      });
-      const essayCounts = Array.from(essayCountsMap.values()).sort((left, right) => left.essayOrder - right.essayOrder);
-
-      return rememberResult(cacheKey, {
-        state: {
-          ...state,
-          scope: activeScope || state.scope
-        },
-        hits: sortedHits,
-        sectionCounts,
-        essayCounts,
-        totalHits: sortedHits.length,
-        totalSections: sectionCounts.length,
-        totalEssays: essayCounts.length,
-        essays: index.essays
-      });
-    }
-
-    return {
-      cacheSize() {
-        return resultCache.size;
-      },
-      ensureIndex,
-      search
-    };
-  }
-
   window.RenaissanceSearch = {
-    buildSearchUrl,
     DEFAULT_PAGE_SIZE,
-    FIELD_BOOSTS,
     MODES,
     PAGE_SIZES,
     SORTS,
-    buildSectionUrl,
-    createSearchEngine,
     escapeHtml,
     findOccurrencesInSection,
     findOccurrencesInText,

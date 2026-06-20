@@ -8,9 +8,7 @@
     sectionDisplay
   } = window.RenaissanceContent;
   const {
-    createSearchEngine,
     escapeHtml,
-    highlightSnippet,
     normalizeMode
   } = window.RenaissanceSearch;
   const router = window.RenaissanceRouter;
@@ -23,30 +21,40 @@
   const readingState = window.RenaissanceReadingState;
   const recovery = window.RenaissanceRecovery;
 
-  const PREVIEW_LIMIT = 3;
+  // View-scoped DOM refs. Assigned in mount() (re-queried each mount) so this
+  // view can be mounted into freshly-swapped DOM by the soft-nav reading shell,
+  // not just on a fresh page load.
+  let essayTitle, essaySummary, essayStats, sectionList;
+  let searchForm, searchInput, searchHint, searchResults, searchPanel, searchViewFull;
+  let advancedToggle, advancedPanel, searchMode, searchCase;
 
-  const essayTitle = document.getElementById("essay-title");
-  const essaySummary = document.getElementById("essay-summary");
-  const essayStats = document.getElementById("essay-stats");
-  const sectionList = document.getElementById("section-list");
+  function queryElements() {
+    essayTitle = document.getElementById("essay-title");
+    essaySummary = document.getElementById("essay-summary");
+    essayStats = document.getElementById("essay-stats");
+    sectionList = document.getElementById("section-list");
 
-  const searchForm = document.getElementById("search-form");
-  const searchInput = document.getElementById("search-input");
-  const searchHint = document.getElementById("search-hint");
-  const searchResults = document.getElementById("search-results");
-  const searchPanel = document.getElementById("search-panel");
-  const searchViewFull = document.getElementById("search-view-full");
+    searchForm = document.getElementById("search-form");
+    searchInput = document.getElementById("search-input");
+    searchHint = document.getElementById("search-hint");
+    searchResults = document.getElementById("search-results");
+    searchPanel = document.getElementById("search-panel");
+    searchViewFull = document.getElementById("search-view-full");
 
-  const advancedToggle = document.getElementById("search-advanced-toggle");
-  const advancedPanel = document.getElementById("search-advanced");
-  const searchMode = document.getElementById("search-mode");
-  const searchCase = document.getElementById("search-case");
+    advancedToggle = document.getElementById("search-advanced-toggle");
+    advancedPanel = document.getElementById("search-advanced");
+    searchMode = document.getElementById("search-mode");
+    searchCase = document.getElementById("search-case");
+  }
 
   let currentEssay = null;
   let currentSections = [];
-  let searchEngine = null;
   let debounceTimer = null;
   let searchRunId = 0;
+  // AbortController for the current mount: every listener is registered with
+  // its signal, so unmount() tears them all down in one call.
+  let lifecycle = null;
+  let motifCardEl = null;
 
   const state = {
     query: "",
@@ -177,7 +185,12 @@
       return "";
     }
 
-    const percent = progressPercent(record.maxProgress || record.progress);
+    // Prefer attention (what was actually read) over scroll depth; legacy
+    // records without attention fall back to the scroll high-water mark.
+    const readValue = record.attentionProgress !== null && record.attentionProgress !== undefined
+      ? record.attentionProgress
+      : (record.maxProgress || record.progress);
+    const percent = progressPercent(readValue);
     const label = record.completed
       ? "Completed"
       : percent >= 4
@@ -287,117 +300,152 @@
       : router.build("search", {});
   }
 
-  function renderNoResults() {
-    searchPanel.hidden = false;
-    searchHint.textContent = "0 hits in 0 sections.";
-    searchResults.innerHTML = '<p class="muted">No matches found.</p>';
-    if (currentEssay) {
-      searchViewFull.href = router.build("search", {
-        query: state.query,
-        scope: currentEssay.slug,
-        mode: state.mode,
-        caseSensitive: state.caseSensitive
-      });
+  // Motif card: when you search a recurring, distinctive word on an essay page,
+  // a quiet card surfaces how the essay uses it — the archive noticing its own
+  // obsessions. Gated to single, non-stopword, recurring terms so it stays an
+  // earned discovery, not noise on every search.
+  let motifDataPromise = null;
+  let motifRunId = 0;
+
+  function loadMotifIndex() {
+    if (!motifDataPromise) {
+      motifDataPromise = fetch("data/search-index.json")
+        .then((response) => (response.ok ? response.json() : null))
+        .catch(() => null);
     }
+    return motifDataPromise;
   }
 
-  function groupPreviewHits(result) {
-    const groups = new Map();
-    const hits = result.hits.slice().sort((left, right) => {
-      if (left.sectionOrder !== right.sectionOrder) {
-        return left.sectionOrder - right.sectionOrder;
-      }
-      return left.index - right.index;
-    });
+  function escapeRegExpLiteral(text) {
+    return String(text).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
 
-    for (const hit of hits) {
-      const key = String(hit.sectionNumber);
-      let group = groups.get(key);
-      if (!group) {
-        group = {
-          sectionNumber: hit.sectionNumber,
-          sectionOrder: hit.sectionOrder,
-          sectionSearchLabel: hit.sectionSearchLabel,
-          total: 0,
-          hits: []
-        };
-        groups.set(key, group);
-      }
+  function essayMotifStats(index, slug, term) {
+    if (!index || !Array.isArray(index.essays)) {
+      return null;
+    }
+    const essay = index.essays.find((entry) => entry.slug === slug);
+    if (!essay) {
+      return null;
+    }
+    const totalPassages = (index.stats && index.stats.passages) || 1;
+    const df = (index.terms && index.terms[term]) || 1;
+    if (Math.log(1 + totalPassages / df) < 1.5) {
+      return null; // stopword-ish; not a motif worth remarking on
+    }
 
-      group.total += 1;
-      if (group.hits.length < PREVIEW_LIMIT) {
-        group.hits.push(hit);
+    const pattern = new RegExp("\\b" + escapeRegExpLiteral(term) + "\\b", "gi");
+    let uses = 0;
+    let sectionsWithTerm = 0;
+    let firstSection = null;
+    let lastSection = null;
+
+    for (const section of essay.sections) {
+      let sectionUses = 0;
+      for (const passage of section.passages) {
+        const matches = passage.text.match(pattern);
+        if (matches) {
+          sectionUses += matches.length;
+        }
+      }
+      if (sectionUses > 0) {
+        uses += sectionUses;
+        sectionsWithTerm += 1;
+        if (!firstSection) {
+          firstSection = section;
+        }
+        lastSection = section;
       }
     }
 
-    return Array.from(groups.values()).sort((left, right) => left.sectionOrder - right.sectionOrder);
+    if (uses < 6) {
+      return null;
+    }
+
+    return {
+      term,
+      uses,
+      sections: sectionsWithTerm,
+      firstTitle: firstSection ? firstSection.title : "",
+      lastTitle: lastSection ? lastSection.title : ""
+    };
   }
 
-  function renderPreview(result) {
-    searchPanel.hidden = false;
+  function ensureMotifCard() {
+    if (!motifCardEl && searchPanel && searchResults) {
+      motifCardEl = document.createElement("aside");
+      motifCardEl.className = "motif-card";
+      motifCardEl.hidden = true;
+      searchPanel.insertBefore(motifCardEl, searchResults);
+    }
+    return motifCardEl;
+  }
 
-    const hitLabel = result.totalHits === 1 ? "1 hit" : String(result.totalHits) + " hits";
-    const sectionLabel = result.totalSections === 1 ? "1 section" : String(result.totalSections) + " sections";
-    searchHint.textContent = hitLabel + " in " + sectionLabel + ".";
+  function motifNumber(value) {
+    const strong = document.createElement("strong");
+    strong.className = "motif-card-num";
+    strong.textContent = String(value);
+    return strong;
+  }
 
-    const grouped = groupPreviewHits(result);
-    searchResults.innerHTML = grouped
-      .map((group) => {
-        const sectionCountCopy = group.total === 1 ? "1 hit" : String(group.total) + " hits";
-        const sectionLink = router.build("section", {
-          essaySlug: currentEssay.slug,
-          sectionNumber: group.sectionNumber,
-          query: state.query,
-          mode: state.mode,
-          caseSensitive: state.caseSensitive
-        });
-        const previewHitsHtml = group.hits
-          .map((hit) => {
-            const occurrenceLink = router.build("section", {
-              essaySlug: currentEssay.slug,
-              sectionNumber: hit.sectionNumber,
-              query: state.query,
-              occurrence: hit.occurrence,
-              mode: state.mode,
-              caseSensitive: state.caseSensitive
-            });
-            return (
-              '<li class="search-preview-hit">' +
-                '<a href="' + occurrenceLink + '">' +
-                  '<span class="search-preview-hit-title">Occurrence ' + String(hit.occurrence) + "</span>" +
-                  '<span class="search-preview-hit-snippet">' + highlightSnippet(hit.snippet, hit.matchedText) + "</span>" +
-                "</a>" +
-              "</li>"
-            );
-          })
-          .join("");
+  function renderMotifCard(stats) {
+    const card = ensureMotifCard();
+    if (!card) {
+      return;
+    }
+    while (card.firstChild) {
+      card.removeChild(card.firstChild);
+    }
+    if (!stats) {
+      card.hidden = true;
+      return;
+    }
 
-        const remaining = group.total - group.hits.length;
-        const remainingHtml = remaining > 0
-          ? '<p class="search-preview-more muted">+' + String(remaining) + " more in this section</p>"
-          : "";
+    const eyebrow = document.createElement("p");
+    eyebrow.className = "motif-card-eyebrow";
+    eyebrow.textContent = "In this essay";
+    card.appendChild(eyebrow);
 
-        return (
-          '<article class="search-preview-group">' +
-            '<h3><a href="' + sectionLink + '">' + escapeHtml(group.sectionSearchLabel) + "</a></h3>" +
-            '<p class="search-preview-meta muted">' + escapeHtml(sectionCountCopy) + "</p>" +
-            '<ol class="search-preview-hit-list">' + previewHitsHtml + "</ol>" +
-            remainingHtml +
-          "</article>"
-        );
-      })
-      .join("");
+    const term = document.createElement("p");
+    term.className = "motif-card-term";
+    term.textContent = "“" + stats.term + "”";
+    card.appendChild(term);
 
-    searchViewFull.href = router.build("search", {
-      query: state.query,
-      scope: currentEssay.slug,
-      mode: state.mode,
-      caseSensitive: state.caseSensitive
-    });
+    const stat = document.createElement("p");
+    stat.className = "motif-card-stat";
+    stat.append(
+      "appears ", motifNumber(stats.uses), " times across ",
+      motifNumber(stats.sections), stats.sections === 1 ? " section" : " sections"
+    );
+    card.appendChild(stat);
+
+    if (stats.firstTitle && stats.lastTitle && stats.firstTitle !== stats.lastTitle) {
+      const range = document.createElement("p");
+      range.className = "motif-card-range";
+      range.textContent = "from “" + stats.firstTitle + "” to “" + stats.lastTitle + "”";
+      card.appendChild(range);
+    }
+
+    card.hidden = false;
+  }
+
+  async function updateMotifCard(rawQuery) {
+    const tokens = String(rawQuery || "").trim().toLowerCase().match(/[a-z0-9]+/g) || [];
+    const runId = ++motifRunId;
+    if (!currentEssay || tokens.length !== 1) {
+      renderMotifCard(null);
+      return;
+    }
+    const index = await loadMotifIndex();
+    if (runId !== motifRunId) {
+      return;
+    }
+    renderMotifCard(essayMotifStats(index, currentEssay.slug, tokens[0]));
   }
 
   async function executeSearch() {
     syncStateFromControls();
+    updateMotifCard(state.query);
     if (!state.query || !currentEssay) {
       clearSearchView();
       updateUrlState();
@@ -405,41 +453,38 @@
     }
 
     searchPanel.hidden = false;
-    searchHint.textContent = "Searching...";
-
     const runId = ++searchRunId;
-    let result;
-    try {
-      result = await searchEngine.search({
-        query: state.query,
-        mode: state.mode,
-        scope: currentEssay.slug,
-        caseSensitive: state.caseSensitive
-      }, {
-        forceEssaySlug: currentEssay.slug
-      });
-    } catch (error) {
+
+    const client = window.RenaissanceOracleClient;
+    if (client && client.available()) {
+      let ranked;
+      try {
+        ranked = await client.search(state.query, { essaySlug: currentEssay.slug, scope: currentEssay.slug, limit: 8 });
+      } catch (_error) {
+        ranked = null;
+      }
       if (runId !== searchRunId) {
         return;
       }
-      searchHint.textContent = "Search is unavailable right now.";
-      searchResults.innerHTML = '<p class="muted">Unable to load search results.</p>';
-      searchViewFull.href = "search.html";
-      updateUrlState();
-      return;
+      if (ranked) {
+        const count = ranked.totalMatched || 0;
+        client.renderResults(searchResults, ranked, {
+          query: state.query,
+          limit: 8,
+          emptyText: "Nothing in this essay matches “" + state.query + "”."
+        });
+        searchHint.textContent = count === 0
+          ? ""
+          : count + (count === 1 ? " passage" : " passages");
+        searchViewFull.href = router.build("search", { query: state.query, scope: currentEssay.slug });
+        updateUrlState();
+        return;
+      }
     }
 
-    if (runId !== searchRunId) {
-      return;
-    }
-
-    if (result.totalHits === 0) {
-      renderNoResults();
-      updateUrlState();
-      return;
-    }
-
-    renderPreview(result);
+    searchHint.textContent = "Search is unavailable right now.";
+    searchResults.innerHTML = '<p class="muted">Unable to load search results.</p>';
+    searchViewFull.href = router.build("search", { query: state.query, scope: currentEssay.slug });
     updateUrlState();
   }
 
@@ -453,10 +498,11 @@
   }
 
   function bindEvents() {
+    const signal = lifecycle.signal;
     searchForm.addEventListener("submit", (event) => {
       event.preventDefault();
       executeSearch();
-    });
+    }, { signal });
 
     searchInput.addEventListener("input", () => {
       if (!searchInput.value.trim()) {
@@ -466,17 +512,22 @@
         return;
       }
       scheduleSearch();
-    });
+    }, { signal });
 
     [searchMode, searchCase].forEach((element) => {
       element.addEventListener("change", () => {
         executeSearch();
-      });
+      }, { signal });
     });
 
     advancedToggle.addEventListener("click", () => {
       setAdvancedOpen(advancedPanel.hidden);
-    });
+    }, { signal });
+
+    // Oracle search has no modes; the old advanced controls are hidden.
+    if (window.RenaissanceOracleClient && window.RenaissanceOracleClient.available()) {
+      advancedToggle.hidden = true;
+    }
   }
 
   async function resolveEssaySlug() {
@@ -492,10 +543,12 @@
     return essays[0].slug;
   }
 
-  async function init() {
+  async function mount() {
+    lifecycle = new AbortController();
+    queryElements();
+    motifCardEl = null;
     initThemeToggle();
     bindEvents();
-    searchEngine = createSearchEngine(window.RenaissanceContent);
 
     try {
       const essaySlug = await resolveEssaySlug();
@@ -553,5 +606,30 @@
     }
   }
 
-  init();
+  function unmount() {
+    if (lifecycle) {
+      lifecycle.abort();
+      lifecycle = null;
+    }
+    if (debounceTimer) {
+      clearTimeout(debounceTimer);
+      debounceTimer = null;
+    }
+    // Invalidate any in-flight async so a late resolve can't paint into the
+    // next view's DOM.
+    searchRunId += 1;
+    motifRunId += 1;
+    currentEssay = null;
+    currentSections = [];
+    motifCardEl = null;
+  }
+
+  window.RenaissanceEssayView = { mount, unmount };
+
+  // Auto-mount on static page load. The soft-nav reading shell suppresses this
+  // by setting _managing=true before lazy-loading this script, then calls
+  // mount() itself after DOM surgery is complete.
+  if (!window.RenaissanceReadingShell || !window.RenaissanceReadingShell._managing) {
+    mount();
+  }
 })();

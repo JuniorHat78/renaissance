@@ -18,29 +18,41 @@
     toAbsoluteUrl
   } = window.RenaissanceMeta;
   const readingState = window.RenaissanceReadingState;
+  const readingAttention = window.RenaissanceReadingAttention;
   const clipboardCitation = window.RenaissanceClipboardCitation;
   const recovery = window.RenaissanceRecovery;
 
-  const backToEssay = document.getElementById("back-to-essay");
-  const essayLine = document.getElementById("essay-line");
-  const sectionKicker = document.getElementById("section-kicker");
-  const sectionTitle = document.getElementById("section-title");
-  const sectionSubtitle = document.getElementById("section-subtitle");
-  const sectionMeta = document.getElementById("section-meta");
-  const sectionContent = document.getElementById("section-content");
-  const sectionTools = document.getElementById("section-tools");
-  const prevLink = document.getElementById("prev-link");
-  const nextLink = document.getElementById("next-link");
-  const nextCta = document.getElementById("next-cta");
-  const copyHighlightButton = document.getElementById("copy-highlight-link");
-  const copyHighlightStatus = document.getElementById("copy-highlight-status");
-  const highlightCapNote = document.getElementById("highlight-cap-note");
-  const readerProgressBar = document.getElementById("reader-progress-bar");
-  const readerLayout = document.querySelector(".reader-layout");
-  const chapterArticle = document.querySelector(".chapter-article");
-  let selectionCopyChip = document.getElementById("selection-copy-chip");
-  let selectionCopyBar = document.getElementById("selection-copy-bar");
-  let selectionCopyBarButton = document.getElementById("selection-copy-bar-button");
+  // View-scoped DOM refs. Assigned in queryElements() at mount() time (and
+  // re-queried each mount) so the reader can be mounted into freshly-swapped
+  // DOM by the soft-nav reading shell, not only on a fresh page load.
+  let backToEssay, essayLine, sectionKicker, sectionTitle, sectionSubtitle;
+  let sectionMeta, sectionContent, sectionTools, prevLink, nextLink, nextCta;
+  let copyHighlightButton, copyHighlightStatus, highlightCapNote, readerProgressBar;
+  let readerLayout, chapterArticle;
+  let selectionCopyChip, selectionCopyBar, selectionCopyBarButton;
+
+  function queryElements() {
+    backToEssay = document.getElementById("back-to-essay");
+    essayLine = document.getElementById("essay-line");
+    sectionKicker = document.getElementById("section-kicker");
+    sectionTitle = document.getElementById("section-title");
+    sectionSubtitle = document.getElementById("section-subtitle");
+    sectionMeta = document.getElementById("section-meta");
+    sectionContent = document.getElementById("section-content");
+    sectionTools = document.getElementById("section-tools");
+    prevLink = document.getElementById("prev-link");
+    nextLink = document.getElementById("next-link");
+    nextCta = document.getElementById("next-cta");
+    copyHighlightButton = document.getElementById("copy-highlight-link");
+    copyHighlightStatus = document.getElementById("copy-highlight-status");
+    highlightCapNote = document.getElementById("highlight-cap-note");
+    readerProgressBar = document.getElementById("reader-progress-bar");
+    readerLayout = document.querySelector(".reader-layout");
+    chapterArticle = document.querySelector(".chapter-article");
+    selectionCopyChip = document.getElementById("selection-copy-chip");
+    selectionCopyBar = document.getElementById("selection-copy-bar");
+    selectionCopyBarButton = document.getElementById("selection-copy-bar-button");
+  }
   const MAX_QUERY_ONLY_HIGHLIGHTS = 160;
   const CITATION_MIN_WORDS = 5;
   const CITATION_FULL_WORDS = 40;
@@ -51,8 +63,17 @@
   const RESTORE_SAVE_SUPPRESS_MS = 720;
   const BOOKMARK_AUTO_CLEAR_MS = 5600;
   const SECTION_NAV_SELECTOR = "#prev-link, #next-link, #next-cta";
-  const SECTION_TURN_OUT_MS = 130;
-  const SECTION_TURN_IN_MS = 260;
+  // The attention heartbeat samples zone occupancy + scroll velocity on this
+  // cadence; reading credit accrues per tick. The reading zone is a band of
+  // +/- this fraction of the viewport around the sightline (the eyes are near
+  // the reading line, not at the screen edges). Attention is persisted at most
+  // this often while reading without scrolling.
+  const READING_ATTENTION_HEARTBEAT_MS = 250;
+  const READING_ATTENTION_ZONE_HALF = 0.18;
+  const READING_ATTENTION_SAVE_MS = 2000;
+  const SECTION_TURN_OUT_MS = 96;
+  const SECTION_TURN_IN_MS = 220;
+  const SECTION_PAYLOAD_CACHE_MAX = 10;
 
   let currentEssay = null;
   let currentSectionNumber = null;
@@ -63,6 +84,11 @@
   let selectionSyncFrame = null;
   let progressFrame = null;
   let progressSaveTimer = null;
+  let attentionModel = null;
+  let attentionHeartbeat = null;
+  let attentionLastSampleAt = null;
+  let attentionLastScrollY = 0;
+  let attentionLastSavedAt = null;
   let resumeBookmarkElement = null;
   let resumeBookmarkFadeTimer = null;
   let resumeBookmarkRemoveTimer = null;
@@ -74,6 +100,9 @@
   let isSelectingPointer = false;
   let progressEventsBound = false;
   let suppressProgressSave = false;
+  // AbortController for the current mount: every global (document/window)
+  // listener is registered with its signal so unmount() tears them all down.
+  let lifecycle = null;
   const CONTEXTUAL_LABEL_DEFAULT = "Copy link";
   const CONTEXTUAL_LABEL_COPIED = "Copied";
   const CONTEXTUAL_LABEL_ERROR = "Try copy again";
@@ -86,7 +115,7 @@
   let pendingRouteScrollTop = false;
   let pendingRouteDirection = "next";
   let routeLoadToken = 0;
-  const prefetchedSections = new Set();
+  const prefetchedSections = new Map();
   const shouldLogHighlightPerf = (() => {
     const protocol = String(window.location.protocol || "").toLowerCase();
     if (protocol === "file:") {
@@ -397,20 +426,49 @@
     }
   }
 
-  function prefetchSectionFromLink(link) {
-    const route = routeFromLink(link);
-    if (!route || route.view !== "section" || !route.essaySlug || !route.sectionNumber) {
-      return;
+  function sectionPayloadKey(essaySlug, sectionNumber) {
+    return String(essaySlug) + ":" + String(sectionNumber);
+  }
+
+  function rememberSectionPayload(key, promise) {
+    if (prefetchedSections.has(key)) {
+      prefetchedSections.delete(key);
+    }
+    prefetchedSections.set(key, promise);
+    while (prefetchedSections.size > SECTION_PAYLOAD_CACHE_MAX) {
+      const oldest = prefetchedSections.keys().next().value;
+      prefetchedSections.delete(oldest);
+    }
+    return promise;
+  }
+
+  function loadSectionPayload(essaySlug, sectionNumber) {
+    const key = sectionPayloadKey(essaySlug, sectionNumber);
+    const cached = prefetchedSections.get(key);
+    if (cached) {
+      return cached;
     }
 
-    const key = route.essaySlug + ":" + String(route.sectionNumber);
-    if (prefetchedSections.has(key)) {
-      return;
-    }
-    prefetchedSections.add(key);
-    loadSection(route.essaySlug, route.sectionNumber).catch(() => {
-      prefetchedSections.delete(key);
+    const promise = loadSection(essaySlug, sectionNumber);
+    rememberSectionPayload(key, promise);
+    promise.catch(() => {
+      if (prefetchedSections.get(key) === promise) {
+        prefetchedSections.delete(key);
+      }
     });
+    return promise;
+  }
+
+  function prefetchSectionRoute(route) {
+    if (!route || route.view !== "section" || !route.essaySlug || !route.sectionNumber) {
+      return null;
+    }
+
+    return loadSectionPayload(route.essaySlug, route.sectionNumber).catch(() => null);
+  }
+
+  function prefetchSectionFromLink(link) {
+    return prefetchSectionRoute(routeFromLink(link));
   }
 
   function setFallbackVisible(isVisible) {
@@ -802,10 +860,15 @@
       return null;
     }
 
+    const parsePassageNumber = (part) => {
+      const normalized = String(part || "").trim().toLowerCase().replace(/^p/, "");
+      const parsed = Number.parseInt(normalized, 10);
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+    };
     const parts = value.split("-");
-    const start = Number.parseInt(parts[0], 10);
-    const end = parts.length > 1 ? Number.parseInt(parts[1], 10) : start;
-    if (!Number.isFinite(start) || !Number.isFinite(end) || start <= 0 || end <= 0) {
+    const start = parsePassageNumber(parts[0]);
+    const end = parts.length > 1 ? parsePassageNumber(parts[1]) : start;
+    if (start === null || end === null) {
       return null;
     }
 
@@ -835,10 +898,27 @@
     return { start, end };
   }
 
+  function queryPassageRangeOffsets() {
+    const params = queryParams();
+    if (!params.has("start") || !params.has("end")) {
+      return null;
+    }
+
+    const start = Number.parseInt(params.get("start"), 10);
+    const end = Number.parseInt(params.get("end"), 10);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end <= start) {
+      return null;
+    }
+
+    return { start, end };
+  }
+
   function hasReaderAnchorIntent() {
     const params = queryParams();
     return (
       params.has("p") ||
+      params.has("start") ||
+      params.has("end") ||
       params.has("r") ||
       params.has("hl") ||
       params.has("occ") ||
@@ -1020,6 +1100,19 @@
     return sectionContent.querySelector('p[data-paragraph-index="' + String(safeIndex) + '"]');
   }
 
+  function passageElementByIndex(index) {
+    const safeIndex = Number.parseInt(index, 10);
+    if (!Number.isFinite(safeIndex) || safeIndex <= 0) {
+      return null;
+    }
+    const passageId = "p" + String(safeIndex);
+    return sectionContent.querySelector(
+      '[data-passage-index="' + String(safeIndex) + '"], ' +
+      '[data-passage-id="' + passageId + '"], ' +
+      'p[data-paragraph-index="' + String(safeIndex) + '"]'
+    );
+  }
+
   function paragraphSignatureFromElement(paragraph) {
     if (!paragraph || !readingState || typeof readingState.paragraphSignatureFromText !== "function") {
       return null;
@@ -1118,6 +1211,7 @@
     }
 
     const pointer = currentResumePointer();
+    const attention = attentionSnapshot();
     readingState.saveSectionProgress({
       essaySlug: currentEssay.slug,
       sectionNumber: currentSectionNumber,
@@ -1126,6 +1220,9 @@
       resumeParagraphIndex: pointer ? pointer.paragraphIndex : null,
       resumeParagraphRatio: pointer ? pointer.paragraphRatio : null,
       resumeParagraphSignature: pointer ? pointer.paragraphSignature : null,
+      attentionProgress: attention ? attention.progress : null,
+      readParagraphs: attention ? attention.readParagraphs : null,
+      attentionPartial: attention ? attention.partial : null,
       essayTitle: currentEssay.title,
       sectionTitle: currentDisplay.title,
       sectionLabel: currentDisplay.label
@@ -1178,20 +1275,176 @@
       return;
     }
     progressEventsBound = true;
+    const signal = lifecycle.signal;
 
     window.addEventListener("scroll", () => {
       scheduleReadingProgressSync();
       if (resumeBookmarkDismissArmed) {
         clearResumeBookmark({ fade: true });
       }
-    }, { passive: true });
-    window.addEventListener("resize", scheduleReadingProgressSync);
-    window.addEventListener("pagehide", flushReadingProgress);
+    }, { passive: true, signal });
+    window.addEventListener("resize", scheduleReadingProgressSync, { signal });
+    window.addEventListener("pagehide", () => {
+      stopAttentionHeartbeat();
+      flushReadingProgress();
+    }, { signal });
     document.addEventListener("visibilitychange", () => {
       if (document.hidden) {
         flushReadingProgress();
       }
+    }, { signal });
+  }
+
+  // --- Reading-attention heartbeat -----------------------------------------
+  // The scroll-fraction above answers "where am I on the page" and drives the
+  // visual bar + resume geometry. The attention model answers a different
+  // question — "how much did I actually read" — and supersedes scroll depth for
+  // the archive's "Continue reading" percentage. It is a thin wiring layer: all
+  // the intelligence lives in the pure RenaissanceReadingAttention core, which
+  // is unit-tested in isolation. Here we only sample the DOM (zone occupancy,
+  // scroll velocity, presence) and feed it ticks.
+
+  function paragraphWordCount(paragraph) {
+    const text = (paragraph.textContent || "").trim();
+    if (!text) {
+      return 0;
+    }
+    return text.split(/\s+/).length;
+  }
+
+  function attentionParagraphElements() {
+    return sectionContent
+      ? Array.from(sectionContent.querySelectorAll("p[data-paragraph-index]"))
+      : [];
+  }
+
+  // Which paragraphs overlap the reading band, weighted by how much of the
+  // band each one occupies — credit follows the eyes, not the screen edges.
+  function readingZoneOccupancy() {
+    const viewportHeight = Math.max(1, window.innerHeight || 0);
+    const lineY = readingLineY();
+    const band = Math.max(1, viewportHeight * READING_ATTENTION_ZONE_HALF);
+    const top = lineY - band;
+    const bottom = lineY + band;
+    const span = Math.max(1, bottom - top);
+    const zone = [];
+
+    attentionParagraphElements().forEach((paragraph) => {
+      const index = paragraphIndexFromElement(paragraph);
+      if (index === null) {
+        return;
+      }
+      const rect = paragraph.getBoundingClientRect();
+      const overlap = Math.min(rect.bottom, bottom) - Math.max(rect.top, top);
+      if (overlap > 0) {
+        zone.push({ index, weight: clamp(overlap / span, 0, 1) });
+      }
     });
+
+    return zone;
+  }
+
+  function setupReadingAttention() {
+    stopAttentionHeartbeat();
+    attentionModel = null;
+    attentionLastSampleAt = null;
+    attentionLastSavedAt = null;
+    attentionLastScrollY = documentScrollY();
+
+    if (!readingAttention || typeof readingAttention.create !== "function" || !sectionContent) {
+      return;
+    }
+
+    const paragraphs = attentionParagraphElements()
+      .map((paragraph) => ({
+        index: paragraphIndexFromElement(paragraph),
+        words: paragraphWordCount(paragraph)
+      }))
+      .filter((entry) => entry.index !== null);
+
+    if (!paragraphs.length) {
+      return;
+    }
+
+    let state = null;
+    if (readingState && currentEssay && currentSectionNumber) {
+      const record = readingState.getSectionRecord(currentEssay.slug, currentSectionNumber);
+      if (record && ((record.readParagraphs && record.readParagraphs.length) || record.attentionPartial)) {
+        state = {
+          readParagraphs: record.readParagraphs || [],
+          partial: record.attentionPartial || null
+        };
+      }
+    }
+
+    attentionModel = readingAttention.create(paragraphs, state ? { state } : undefined);
+  }
+
+  function attentionSnapshot() {
+    if (!attentionModel) {
+      return null;
+    }
+    const summary = attentionModel.summary();
+    const serialized = attentionModel.serialize();
+    return {
+      progress: summary.progress,
+      readParagraphs: serialized.readParagraphs,
+      partial: serialized.partial || null
+    };
+  }
+
+  function attentionClock() {
+    return (typeof performance === "object" && typeof performance.now === "function")
+      ? performance.now()
+      : Date.now();
+  }
+
+  function attentionTick() {
+    if (!attentionModel) {
+      return;
+    }
+
+    const now = attentionClock();
+    const visible = !document.hidden;
+    const scrollY = documentScrollY();
+    let velocity = 0;
+    if (attentionLastSampleAt !== null) {
+      const dt = now - attentionLastSampleAt;
+      if (dt > 0) {
+        velocity = Math.abs(scrollY - attentionLastScrollY) / dt;
+      }
+    }
+    attentionLastSampleAt = now;
+    attentionLastScrollY = scrollY;
+
+    attentionModel.tick({
+      now,
+      zone: visible ? readingZoneOccupancy() : [],
+      velocity,
+      visible
+    });
+
+    // Reading without scrolling fires no scroll event, so the heartbeat is the
+    // only thing that would persist the accruing read-set — save on a throttle.
+    if (!suppressProgressSave && (attentionLastSavedAt === null || now - attentionLastSavedAt >= READING_ATTENTION_SAVE_MS)) {
+      attentionLastSavedAt = now;
+      saveReadingProgress(computeReadingProgress());
+    }
+  }
+
+  function startAttentionHeartbeat() {
+    stopAttentionHeartbeat();
+    if (!attentionModel) {
+      return;
+    }
+    attentionHeartbeat = window.setInterval(attentionTick, READING_ATTENTION_HEARTBEAT_MS);
+  }
+
+  function stopAttentionHeartbeat() {
+    if (attentionHeartbeat) {
+      window.clearInterval(attentionHeartbeat);
+      attentionHeartbeat = null;
+    }
   }
 
   function maxDocumentScrollY() {
@@ -1361,6 +1614,8 @@
   function initializeReadingProgress(display) {
     currentDisplay = display;
     bindReadingProgressEvents();
+    setupReadingAttention();
+    startAttentionHeartbeat();
     syncReadingProgress({ save: false });
   }
 
@@ -1513,6 +1768,12 @@
     const paragraphs = sectionContent.querySelectorAll("p");
     paragraphs.forEach((paragraph, index) => {
       paragraph.dataset.paragraphIndex = String(index + 1);
+      if (!paragraph.dataset.passageIndex) {
+        paragraph.dataset.passageIndex = String(index + 1);
+      }
+      if (!paragraph.dataset.passageId) {
+        paragraph.dataset.passageId = "p" + String(index + 1);
+      }
     });
   }
 
@@ -1593,12 +1854,12 @@
     return mark;
   }
 
-  function wrapAbsoluteRange(start, length) {
+  function wrapTextRange(root, start, length) {
     if (!Number.isFinite(start) || !Number.isFinite(length) || length <= 0) {
       return null;
     }
 
-    const index = buildNodeSpans(sectionContent);
+    const index = buildNodeSpans(root || sectionContent);
     const end = start + length;
     const startPos = locateStartOffset(index.spans, start);
     const endPos = locateEndOffset(index.spans, end);
@@ -1626,6 +1887,10 @@
     }
   }
 
+  function wrapAbsoluteRange(start, length) {
+    return wrapTextRange(sectionContent, start, length);
+  }
+
   // Bring an element to rest on the same sightline the reader resumes at
   // (READING_LINE_RATIO from the top), so a search hit and a resumed bookmark
   // land in the same place. Honours prefers-reduced-motion: no smooth glide.
@@ -1649,6 +1914,18 @@
       return;
     }
     mark.setAttribute("tabindex", "-1");
+
+    // Continuity arrival: when the reader was reached by clicking a search
+    // result, hand the arrival to the continuity transition — it flies the
+    // clicked words to this highlight and owns scroll + motion. It returns true
+    // only when it will actually fly (fresh, matching capture; motion allowed);
+    // otherwise we run the normal arrival flourish below. The highlight itself
+    // is already applied, so either path lands fully highlighted.
+    var continuity = window.RenaissanceContinuity;
+    if (continuity && continuity.claimArrival(mark, scrollToReadingSightline)) {
+      return;
+    }
+
     mark.classList.remove("reader-highlight-arrival");
     void mark.offsetWidth;
     mark.classList.add("reader-highlight-arrival");
@@ -1923,15 +2200,30 @@
       return false;
     }
 
-    const startParagraph = sectionContent.querySelector('p[data-paragraph-index="' + String(anchor.start) + '"]');
-    const endParagraph = sectionContent.querySelector('p[data-paragraph-index="' + String(anchor.end) + '"]');
-    if (!startParagraph || !endParagraph) {
+    const startPassage = passageElementByIndex(anchor.start);
+    const endPassage = passageElementByIndex(anchor.end);
+    if (!startPassage || !endPassage) {
       return false;
     }
 
-    const start = absoluteOffsetFromDomPoint(startParagraph, 0);
-    const end = absoluteOffsetFromDomPoint(endParagraph, endParagraph.childNodes.length);
+    const start = absoluteOffsetFromDomPoint(startPassage, 0);
+    const end = absoluteOffsetFromDomPoint(endPassage, endPassage.childNodes.length);
     return highlightAbsoluteRange(start, end);
+  }
+
+  function highlightPassageRangeAnchor(anchor, rangeOffsets) {
+    if (!anchor || !rangeOffsets || anchor.start !== anchor.end) {
+      return false;
+    }
+
+    const passage = passageElementByIndex(anchor.start);
+    if (!passage) {
+      return false;
+    }
+
+    const mark = wrapTextRange(passage, rangeOffsets.start, rangeOffsets.end - rangeOffsets.start);
+    focusHighlight(mark);
+    return Boolean(mark);
   }
 
   function resolveInitialAnchor() {
@@ -1940,12 +2232,18 @@
     clearHighlightCapNote();
 
     const paragraphAnchor = queryParagraphAnchor();
+    const passageRangeOffsets = queryPassageRangeOffsets();
     const rangeAnchor = queryRangeAnchor();
     const payload = queryHighlightPayload();
     const query = querySearchTerm();
     const occurrence = queryOccurrence();
     const mode = queryMatchMode();
     const caseSensitive = queryCaseSensitive();
+
+    if (paragraphAnchor && passageRangeOffsets && highlightPassageRangeAnchor(paragraphAnchor, passageRangeOffsets)) {
+      logHighlightPerf("resolve_anchor", startedAt, { strategy: "passage_range" });
+      return;
+    }
 
     if (paragraphAnchor && highlightParagraphAnchor(paragraphAnchor)) {
       logHighlightPerf("resolve_anchor", startedAt, { strategy: "paragraph" });
@@ -2017,14 +2315,22 @@
   }
 
   function rangeRect(range) {
+    // Anchor to the END of the selection (its last line), not the bounding box
+    // of the whole thing. A multi-line highlight's bounding box starts at the
+    // first line, so anchoring there pins the chip far above — while the pointer
+    // finished down at the last line. The last client rect is the end line for a
+    // multi-line selection and the only rect for a single-line one.
+    const rects = range.getClientRects();
+    if (rects.length > 0) {
+      const last = rects[rects.length - 1];
+      if (last && (last.width > 0 || last.height > 0)) {
+        return last;
+      }
+    }
+
     const direct = range.getBoundingClientRect();
     if (direct && (direct.width > 0 || direct.height > 0)) {
       return direct;
-    }
-
-    const rects = range.getClientRects();
-    if (rects.length > 0) {
-      return rects[0];
     }
     return null;
   }
@@ -2311,13 +2617,14 @@
   }
 
   function bindHighlightEvents() {
+    const signal = lifecycle.signal;
     if (copyHighlightButton) {
       copyHighlightButton.addEventListener("mousedown", (event) => {
         event.preventDefault();
-      });
+      }, { signal });
       copyHighlightButton.addEventListener("click", () => {
         copyHighlightLink();
-      });
+      }, { signal });
     }
 
     if (!hasContextualShare) {
@@ -2327,25 +2634,25 @@
     [selectionCopyChip, selectionCopyBarButton].filter((button) => Boolean(button)).forEach((button) => {
       button.addEventListener("mousedown", (event) => {
         event.preventDefault();
-      });
+      }, { signal });
       button.addEventListener("click", () => {
         copyHighlightLink(activeSelectionDetails);
-      });
+      }, { signal });
     });
 
     sectionContent.addEventListener("copy", (event) => {
       decorateClipboardWithSource(event);
-    });
+    }, { signal });
 
     document.addEventListener("selectionchange", () => {
       scheduleSyncContextualSelection();
-    });
+    }, { signal });
 
     sectionContent.addEventListener("pointerdown", (event) => {
       if (event.button === 0) {
         isSelectingPointer = true;
       }
-    });
+    }, { signal });
 
     document.addEventListener("pointerup", () => {
       if (!isSelectingPointer) {
@@ -2353,7 +2660,7 @@
       }
       isSelectingPointer = false;
       scheduleSyncContextualSelection();
-    });
+    }, { signal });
 
     document.addEventListener("pointercancel", () => {
       if (!isSelectingPointer) {
@@ -2361,7 +2668,7 @@
       }
       isSelectingPointer = false;
       scheduleSyncContextualSelection();
-    });
+    }, { signal });
 
     document.addEventListener("keydown", (event) => {
       const key = String(event.key || "").toLowerCase();
@@ -2387,11 +2694,11 @@
         activeSelectionDetails = null;
         hideContextualShare();
       }
-    });
+    }, { signal });
 
     window.addEventListener("resize", () => {
       scheduleSyncContextualSelection();
-    });
+    }, { signal });
 
     document.addEventListener("scroll", () => {
       if (!activeSelectionDetails) {
@@ -2399,7 +2706,7 @@
         return;
       }
       scheduleSyncContextualSelection();
-    }, { passive: true });
+    }, { passive: true, signal });
 
     document.addEventListener("visibilitychange", () => {
       if (document.hidden) {
@@ -2408,10 +2715,11 @@
         hideContextualShare();
         hideCopyToast();
       }
-    });
+    }, { signal });
   }
 
   function bindSectionNavigation() {
+    const signal = lifecycle.signal;
     document.addEventListener("click", (event) => {
       const link = event.target && event.target.closest
         ? event.target.closest(SECTION_NAV_SELECTOR)
@@ -2426,6 +2734,7 @@
       }
 
       event.preventDefault();
+      prefetchSectionRoute(route);
       pendingRouteTransition = true;
       pendingRouteScrollTop = true;
       pendingRouteDirection = sectionDirection(route.sectionNumber);
@@ -2434,7 +2743,28 @@
         essaySlug: route.essaySlug,
         sectionNumber: route.sectionNumber
       });
-    });
+    }, { signal });
+
+    document.addEventListener("pointerdown", (event) => {
+      if (event.button !== undefined && event.button !== 0) {
+        return;
+      }
+      const link = event.target && event.target.closest
+        ? event.target.closest(SECTION_NAV_SELECTOR)
+        : null;
+      if (link && link.href) {
+        prefetchSectionFromLink(link);
+      }
+    }, { passive: true, signal });
+
+    document.addEventListener("touchstart", (event) => {
+      const link = event.target && event.target.closest
+        ? event.target.closest(SECTION_NAV_SELECTOR)
+        : null;
+      if (link && link.href) {
+        prefetchSectionFromLink(link);
+      }
+    }, { passive: true, signal });
 
     document.addEventListener("mouseover", (event) => {
       const link = event.target && event.target.closest
@@ -2443,7 +2773,7 @@
       if (link && link.href) {
         prefetchSectionFromLink(link);
       }
-    });
+    }, { signal });
 
     document.addEventListener("focusin", (event) => {
       const link = event.target && event.target.closest
@@ -2452,7 +2782,7 @@
       if (link && link.href) {
         prefetchSectionFromLink(link);
       }
-    });
+    }, { signal });
 
     window.addEventListener("renaissance:route", (event) => {
       const route = event.detail || router.parse();
@@ -2470,7 +2800,7 @@
       pendingRouteScrollTop = false;
       pendingRouteDirection = "next";
       loadCurrentSection(options);
-    });
+    }, { signal });
   }
 
   async function loadCurrentSection(options) {
@@ -2517,7 +2847,7 @@
         return;
       }
 
-      const payload = await loadSection(essay.slug, sectionNumber);
+      const payload = await loadSectionPayload(essay.slug, sectionNumber);
       const display = sectionDisplay(essay, sectionNumber);
       const contentAst = payload.contentAst || payload.contentBlocks || payload.blocks;
       if (token !== routeLoadToken) {
@@ -2595,7 +2925,9 @@
     }
   }
 
-  async function init() {
+  async function mount() {
+    lifecycle = new AbortController();
+    queryElements();
     initThemeToggle();
     ensureContextualShareControls();
     ensureCopyToast();
@@ -2605,5 +2937,69 @@
     loadCurrentSection();
   }
 
-  init();
+  function unmount() {
+    // Persist where the reader actually was before we tear the view down, then
+    // stop the heartbeat so it can't tick into swapped-out DOM.
+    try {
+      flushReadingProgress();
+    } catch (_error) {
+      // Teardown must never throw — a failed final save is not worth wedging
+      // navigation.
+    }
+    stopAttentionHeartbeat();
+
+    if (lifecycle) {
+      lifecycle.abort();
+      lifecycle = null;
+    }
+
+    // Invalidate any in-flight section load so a late resolve can't paint into
+    // the next view's DOM.
+    routeLoadToken += 1;
+
+    // Cancel every scheduled frame/timer this view owns.
+    if (progressFrame) {
+      cancelAnimationFrame(progressFrame);
+      progressFrame = null;
+    }
+    if (selectionSyncFrame) {
+      cancelAnimationFrame(selectionSyncFrame);
+      selectionSyncFrame = null;
+    }
+    [
+      progressSaveTimer, clearStatusTimer, hideContextualTimer, copyToastTimer,
+      resumeBookmarkFadeTimer, resumeBookmarkRemoveTimer, restoreSaveSuppressTimer,
+      copyHintTimer
+    ].forEach((timer) => {
+      if (timer) {
+        clearTimeout(timer);
+      }
+    });
+    progressSaveTimer = null;
+    clearStatusTimer = null;
+    hideContextualTimer = null;
+    copyToastTimer = null;
+    resumeBookmarkFadeTimer = null;
+    resumeBookmarkRemoveTimer = null;
+    restoreSaveSuppressTimer = null;
+    copyHintTimer = null;
+
+    // Reset the once-guards so a remount re-binds (abort removed the listeners).
+    progressEventsBound = false;
+    suppressProgressSave = false;
+    isSelectingPointer = false;
+    activeSelectionDetails = null;
+    currentEssay = null;
+    currentSectionNumber = null;
+    currentDisplay = null;
+  }
+
+  window.RenaissanceSectionView = { mount, unmount };
+
+  // Auto-mount on static page load. The soft-nav reading shell suppresses this
+  // by setting _managing=true before lazy-loading this script, then calls
+  // mount() itself after DOM surgery is complete.
+  if (!window.RenaissanceReadingShell || !window.RenaissanceReadingShell._managing) {
+    mount();
+  }
 })();

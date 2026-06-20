@@ -62,6 +62,55 @@
     return signature || null;
   }
 
+  // The attention model persists a compact read-set (which paragraphs were
+  // actually read) plus an optional in-progress paragraph's dwell, so a reload
+  // resumes mid-paragraph. Both are sanitized defensively — this data comes
+  // back out of localStorage and must never crash the reader.
+  function normalizeReadParagraphs(value) {
+    if (!Array.isArray(value)) {
+      return [];
+    }
+    const seen = new Set();
+    value.forEach((entry) => {
+      const index = Number.parseInt(entry, 10);
+      if (Number.isFinite(index) && index > 0) {
+        seen.add(index);
+      }
+    });
+    return Array.from(seen).sort((a, b) => a - b);
+  }
+
+  function mergeReadParagraphs(previousList, incomingList) {
+    const merged = new Set(normalizeReadParagraphs(previousList));
+    normalizeReadParagraphs(incomingList).forEach((index) => merged.add(index));
+    return Array.from(merged).sort((a, b) => a - b);
+  }
+
+  function normalizeAttentionPartial(value) {
+    if (!value || typeof value !== "object") {
+      return null;
+    }
+    const index = Number.parseInt(value.index, 10);
+    const dwellMs = Number(value.dwellMs);
+    if (!Number.isFinite(index) || index <= 0 || !Number.isFinite(dwellMs) || dwellMs <= 0) {
+      return null;
+    }
+    return { index, dwellMs };
+  }
+
+  // Completion means "you read it," not "you scrolled to the end." When the
+  // attention-derived progress is present it decides completion; only records
+  // that predate the attention model fall back to the scroll high-water mark.
+  function deriveCompleted(attentionProgress, maxProgress, previousCompleted) {
+    if (previousCompleted) {
+      return true;
+    }
+    if (attentionProgress !== null) {
+      return attentionProgress >= COMPLETE_THRESHOLD;
+    }
+    return maxProgress >= COMPLETE_THRESHOLD;
+  }
+
   function sectionKey(sectionNumber) {
     return String(sectionNumber);
   }
@@ -79,24 +128,30 @@
 
     const progress = clamp(raw.progress, 0, 1);
     const maxProgress = Math.max(progress, clamp(raw.maxProgress, 0, 1));
-    const completed = Boolean(raw.completed) || maxProgress >= COMPLETE_THRESHOLD;
+    const attentionProgress = normalizeRatio(raw.attentionProgress);
+    const completed = deriveCompleted(attentionProgress, maxProgress, Boolean(raw.completed));
     const scrollY = Math.max(0, Number(raw.scrollY) || 0);
     const updatedAt = Math.max(0, Number(raw.updatedAt) || 0);
     const resumeParagraphIndex = normalizePositiveInteger(raw.resumeParagraphIndex);
     const resumeParagraphRatio = normalizeRatio(raw.resumeParagraphRatio);
     const resumeParagraphSignature = normalizeParagraphSignature(raw.resumeParagraphSignature);
+    const readParagraphs = normalizeReadParagraphs(raw.readParagraphs);
+    const attentionPartial = normalizeAttentionPartial(raw.attentionPartial);
 
     return {
       essaySlug,
       sectionNumber,
       progress,
       maxProgress,
+      attentionProgress,
       scrollY,
       completed,
       updatedAt,
       resumeParagraphIndex,
       resumeParagraphRatio,
       resumeParagraphSignature,
+      readParagraphs,
+      attentionPartial,
       essayTitle: String(raw.essayTitle || "").trim(),
       sectionTitle: String(raw.sectionTitle || "").trim(),
       sectionLabel: String(raw.sectionLabel || "").trim()
@@ -193,7 +248,19 @@
     const previous = normalizeRecord(essayMap[key]);
     const progress = clamp(source.progress, 0, 1);
     const maxProgress = Math.max(progress, previous ? previous.maxProgress : 0);
-    const completed = maxProgress >= COMPLETE_THRESHOLD;
+    const previousAttention = previous && previous.attentionProgress !== null && previous.attentionProgress !== undefined
+      ? previous.attentionProgress
+      : null;
+    const incomingAttention = normalizeRatio(source.attentionProgress);
+    // Attention progress is monotonic, mirroring maxProgress: a save that lacks
+    // a fresh reading (or carries a lower number) never lowers it.
+    const attentionProgress = incomingAttention !== null
+      ? Math.max(incomingAttention, previousAttention || 0)
+      : previousAttention;
+    const readParagraphs = mergeReadParagraphs(previous ? previous.readParagraphs : [], source.readParagraphs);
+    const attentionPartial = normalizeAttentionPartial(source.attentionPartial) ||
+      (previous ? previous.attentionPartial : null);
+    const completed = deriveCompleted(attentionProgress, maxProgress, Boolean(previous && previous.completed));
     const updatedAt = Number.isFinite(source.updatedAt) ? Number(source.updatedAt) : Date.now();
     const resumeParagraphIndex = normalizePositiveInteger(source.resumeParagraphIndex) ||
       (previous ? previous.resumeParagraphIndex : null);
@@ -209,12 +276,15 @@
       sectionNumber,
       progress,
       maxProgress,
+      attentionProgress,
       scrollY: Math.max(0, Number(source.scrollY) || 0),
       completed,
       updatedAt,
       resumeParagraphIndex,
       resumeParagraphRatio: resolvedResumeParagraphRatio,
       resumeParagraphSignature,
+      readParagraphs,
+      attentionPartial,
       essayTitle: String(source.essayTitle || (previous && previous.essayTitle) || "").trim(),
       sectionTitle: String(source.sectionTitle || (previous && previous.sectionTitle) || "").trim(),
       sectionLabel: String(source.sectionLabel || (previous && previous.sectionLabel) || "").trim()
@@ -290,6 +360,7 @@
       action: shouldAdvance ? "next" : "continue",
       progress: last.progress,
       maxProgress: last.maxProgress,
+      attentionProgress: last.attentionProgress,
       completed: last.completed,
       sectionLabel: sectionDisplay.label,
       sectionTitle: sectionDisplay.title

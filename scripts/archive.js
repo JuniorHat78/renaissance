@@ -2,16 +2,12 @@
   const { initThemeToggle } = window.RenaissanceTheme;
   const { loadEssays, sectionDisplay } = window.RenaissanceContent;
   const {
-    createSearchEngine,
     escapeHtml,
-    highlightSnippet,
     normalizeMode,
     normalizeScope
   } = window.RenaissanceSearch;
   const router = window.RenaissanceRouter;
   const readingState = window.RenaissanceReadingState;
-
-  const PREVIEW_LIMIT = 3;
 
   const continuePanel = document.getElementById("continue-reading-panel");
   const continueLink = document.getElementById("continue-reading-link");
@@ -34,7 +30,6 @@
   const searchViewFull = document.getElementById("global-search-view-full");
 
   let publishedEssays = [];
-  let searchEngine = null;
   let debounceTimer = null;
   let searchRunId = 0;
 
@@ -91,7 +86,12 @@
         continueMeter.style.width = "100%";
       }
     } else {
-      const percent = progressPercent(target.progress);
+      // Attention progress (read words / total) is the honest "Continue
+      // reading" number; scroll `progress` is the legacy fallback.
+      const readValue = target.attentionProgress !== null && target.attentionProgress !== undefined
+        ? target.attentionProgress
+        : target.progress;
+      const percent = progressPercent(readValue);
       continueDetail.textContent = target.sectionLabel + ", " + target.sectionTitle;
       continueStatus.textContent = String(percent) + "%";
       setActionLabel("Resume");
@@ -193,129 +193,6 @@
     searchViewFull.href = router.build("search", {});
   }
 
-  function renderNoResults() {
-    searchPanel.hidden = false;
-    searchHint.textContent = "0 hits in 0 essays and 0 sections.";
-    searchResults.innerHTML = '<p class="muted">No matches found.</p>';
-    searchViewFull.href = router.build("search", {
-      query: state.query,
-      scope: state.scope,
-      mode: state.mode,
-      caseSensitive: state.caseSensitive
-    });
-  }
-
-  function readingOrder(left, right) {
-    if (left.essayOrder !== right.essayOrder) {
-      return left.essayOrder - right.essayOrder;
-    }
-    if (left.sectionOrder !== right.sectionOrder) {
-      return left.sectionOrder - right.sectionOrder;
-    }
-    return left.index - right.index;
-  }
-
-  function groupPreviewHits(result) {
-    const groups = new Map();
-    const hits = result.hits.slice().sort(readingOrder);
-
-    for (const hit of hits) {
-      const key = hit.essaySlug + ":" + String(hit.sectionNumber);
-      let group = groups.get(key);
-      if (!group) {
-        group = {
-          essaySlug: hit.essaySlug,
-          essayTitle: hit.essayTitle,
-          essayOrder: hit.essayOrder,
-          sectionNumber: hit.sectionNumber,
-          sectionOrder: hit.sectionOrder,
-          sectionSearchLabel: hit.sectionSearchLabel,
-          total: 0,
-          hits: []
-        };
-        groups.set(key, group);
-      }
-
-      group.total += 1;
-      if (group.hits.length < PREVIEW_LIMIT) {
-        group.hits.push(hit);
-      }
-    }
-
-    return Array.from(groups.values()).sort((left, right) => {
-      if (left.essayOrder !== right.essayOrder) {
-        return left.essayOrder - right.essayOrder;
-      }
-      return left.sectionOrder - right.sectionOrder;
-    });
-  }
-
-  function renderPreview(result) {
-    searchPanel.hidden = false;
-
-    const hitLabel = result.totalHits === 1 ? "1 hit" : String(result.totalHits) + " hits";
-    const essayLabel = result.totalEssays === 1 ? "1 essay" : String(result.totalEssays) + " essays";
-    const sectionLabel = result.totalSections === 1 ? "1 section" : String(result.totalSections) + " sections";
-    searchHint.textContent = hitLabel + " in " + essayLabel + " and " + sectionLabel + ".";
-
-    const grouped = groupPreviewHits(result);
-    searchResults.innerHTML = grouped
-      .map((group) => {
-        const sectionCountCopy = group.total === 1 ? "1 hit" : String(group.total) + " hits";
-        const sectionLink = router.build("section", {
-          essaySlug: group.essaySlug,
-          sectionNumber: group.sectionNumber,
-          query: state.query,
-          mode: state.mode,
-          caseSensitive: state.caseSensitive
-        });
-        const previewHitsHtml = group.hits
-          .map((hit) => {
-            const occurrenceLink = router.build("section", {
-              essaySlug: hit.essaySlug,
-              sectionNumber: hit.sectionNumber,
-              query: state.query,
-              occurrence: hit.occurrence,
-              mode: state.mode,
-              caseSensitive: state.caseSensitive
-            });
-            return (
-              '<li class="search-preview-hit">' +
-                '<a href="' + occurrenceLink + '">' +
-                  '<span class="search-preview-hit-title">Occurrence ' + String(hit.occurrence) + "</span>" +
-                  '<span class="search-preview-hit-snippet">' + highlightSnippet(hit.snippet, hit.matchedText) + "</span>" +
-                "</a>" +
-              "</li>"
-            );
-          })
-          .join("");
-
-        const remaining = group.total - group.hits.length;
-        const remainingHtml = remaining > 0
-          ? '<p class="search-preview-more muted">+' + String(remaining) + " more in this section</p>"
-          : "";
-
-        return (
-          '<article class="search-preview-group">' +
-            '<h3>' +
-              '<a href="' + sectionLink + '">' + escapeHtml(group.essayTitle + " . " + group.sectionSearchLabel) + "</a>" +
-            "</h3>" +
-            '<p class="search-preview-meta muted">' + escapeHtml(sectionCountCopy) + "</p>" +
-            '<ol class="search-preview-hit-list">' + previewHitsHtml + "</ol>" +
-            remainingHtml +
-          "</article>"
-        );
-      })
-      .join("");
-
-    searchViewFull.href = router.build("search", {
-      query: state.query,
-      scope: state.scope,
-      mode: state.mode,
-      caseSensitive: state.caseSensitive
-    });
-  }
-
   async function executeSearch() {
     syncStateFromControls();
     if (!state.query) {
@@ -325,42 +202,36 @@
     }
 
     searchPanel.hidden = false;
-    searchHint.textContent = "Searching...";
-
     const runId = ++searchRunId;
-    let result;
-    try {
-      result = await searchEngine.search({
-        query: state.query,
-        mode: state.mode,
-        scope: state.scope,
-        caseSensitive: state.caseSensitive
-      });
-    } catch (error) {
+
+    const client = window.RenaissanceOracleClient;
+    if (client && client.available()) {
+      let ranked;
+      try {
+        ranked = await client.search(state.query, { scope: state.scope, limit: 8 });
+      } catch (_error) {
+        ranked = null;
+      }
       if (runId !== searchRunId) {
         return;
       }
-      searchHint.textContent = "Search is unavailable right now.";
-      searchResults.innerHTML = '<p class="muted">Unable to load search results.</p>';
-      searchViewFull.href = "search.html";
-      updateUrlState();
-      return;
+      if (ranked) {
+        const count = ranked.totalMatched || 0;
+        client.renderResults(searchResults, ranked, {
+          query: state.query,
+          limit: 8,
+          emptyText: "Nothing matches “" + state.query + "”."
+        });
+        searchHint.textContent = count === 0 ? "" : count + (count === 1 ? " passage" : " passages");
+        searchViewFull.href = router.build("search", { query: state.query, scope: state.scope });
+        updateUrlState();
+        return;
+      }
     }
 
-    if (runId !== searchRunId) {
-      return;
-    }
-
-    state.scope = result.state.scope;
-    searchScope.value = state.scope;
-
-    if (result.totalHits === 0) {
-      renderNoResults();
-      updateUrlState();
-      return;
-    }
-
-    renderPreview(result);
+    searchHint.textContent = "Search is unavailable right now.";
+    searchResults.innerHTML = '<p class="muted">Unable to load search results.</p>';
+    searchViewFull.href = router.build("search", { query: state.query, scope: state.scope });
     updateUrlState();
   }
 
@@ -398,12 +269,16 @@
     advancedToggle.addEventListener("click", () => {
       setAdvancedOpen(advancedPanel.hidden);
     });
+
+    // Oracle search has no modes; the old advanced controls are hidden.
+    if (window.RenaissanceOracleClient && window.RenaissanceOracleClient.available()) {
+      advancedToggle.hidden = true;
+    }
   }
 
   async function init() {
     initThemeToggle();
     bindEvents();
-    searchEngine = createSearchEngine(window.RenaissanceContent);
 
     try {
       const essays = await loadEssays();

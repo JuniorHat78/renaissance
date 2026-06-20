@@ -41,6 +41,12 @@ function buildManifest() {
         assets.add(sourceDir + "/" + String(parsed) + ".txt");
       }
     });
+    // Precache the compiled content AST so offline reading uses the same
+    // hydration fast path as online (scripts/content.js loadCompiledEssay).
+    // Scope matches the compiler: published essays only.
+    if (essay && essay.published !== false && essay.slug) {
+      assets.add("data/compiled/" + String(essay.slug) + ".json");
+    }
   });
 
   return {
