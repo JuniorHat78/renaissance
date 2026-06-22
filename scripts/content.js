@@ -2,22 +2,18 @@
   const ESSAYS_PATH = "data/essays.json";
   const DEFAULT_FALLBACK_SLUG = "default-essay";
   const DEFAULT_FALLBACK_SOURCE_DIR = "raw";
-  const EMBEDDED_CHAPTERS_PATH = "scripts/chapters-data.js";
   const AST = window.RenaissanceAst;
   if (!AST) {
-    throw new Error("scripts/ast/index.js must load before scripts/content.js");
+    throw new Error("scripts/ast/core.js and scripts/ast/render.js must load before scripts/content.js");
   }
 
   const EMBEDDED_ESSAYS = Array.isArray(window.RENAISSANCE_EMBEDDED_ESSAYS)
     ? window.RENAISSANCE_EMBEDDED_ESSAYS
     : [];
 
-  const EMBEDDED_MAP = new Map();
-  const SECTION_TEXT_CACHE = new Map();
   const COMPILED_PATH_PREFIX = "data/compiled/";
   const COMPILED_ESSAY_CACHE = new Map();
   let essayCache = null;
-  let embeddedChaptersPromise = null;
 
   function embeddedEssaySlugFallback() {
     for (const entry of EMBEDDED_ESSAYS) {
@@ -48,75 +44,6 @@
       .join(" ")
       || "Renaissance Essay";
   }
-
-  function embeddedChapters() {
-    return Array.isArray(window.RENAISSANCE_EMBEDDED_CHAPTERS)
-      ? window.RENAISSANCE_EMBEDDED_CHAPTERS
-      : [];
-  }
-
-  function embeddedKey(essaySlug, sectionNumber) {
-    return String(essaySlug) + ":" + String(sectionNumber);
-  }
-
-  function refreshEmbeddedMap() {
-    EMBEDDED_MAP.clear();
-    for (const entry of embeddedChapters()) {
-      const sectionNumber = parseNumber(
-        entry && (entry.sectionNumber !== undefined ? entry.sectionNumber : entry.chapterNumber)
-      );
-      if (sectionNumber === null) {
-        continue;
-      }
-      const essaySlug = String((entry && entry.essaySlug) || embeddedEssaySlugFallback()).trim();
-      if (!essaySlug) {
-        continue;
-      }
-      EMBEDDED_MAP.set(embeddedKey(essaySlug, sectionNumber), String(entry.rawText || ""));
-    }
-  }
-
-  async function ensureEmbeddedChaptersLoaded() {
-    if (EMBEDDED_MAP.size > 0) {
-      return;
-    }
-
-    if (embeddedChaptersPromise) {
-      return embeddedChaptersPromise;
-    }
-
-    if (typeof document !== "object" || !document.createElement) {
-      throw new Error("Embedded chapter loader unavailable");
-    }
-
-    embeddedChaptersPromise = new Promise((resolve, reject) => {
-      const existing = embeddedChapters();
-      if (existing.length > 0) {
-        refreshEmbeddedMap();
-        resolve();
-        return;
-      }
-
-      const script = document.createElement("script");
-      script.src = EMBEDDED_CHAPTERS_PATH;
-      script.async = true;
-      script.onload = () => {
-        refreshEmbeddedMap();
-        resolve();
-      };
-      script.onerror = () => {
-        reject(new Error("Failed to load embedded chapter fallback"));
-      };
-      document.head.appendChild(script);
-    }).catch((error) => {
-      embeddedChaptersPromise = null;
-      throw error;
-    });
-
-    return embeddedChaptersPromise;
-  }
-
-  refreshEmbeddedMap();
 
   async function fetchAsText(path) {
     const response = await fetch(path);
@@ -188,53 +115,13 @@
     };
   }
 
-  function embeddedManifestNumbers(essaySlug) {
-    const fallbackSlug = embeddedEssaySlugFallback();
-    const targetSlug = String(essaySlug || fallbackSlug).trim() || fallbackSlug;
-    const numbers = new Set();
-    for (const entry of embeddedChapters()) {
-      const sectionNumber = parseNumber(
-        entry && (entry.sectionNumber !== undefined ? entry.sectionNumber : entry.chapterNumber)
-      );
-      if (sectionNumber === null) {
-        continue;
-      }
-
-      const entrySlug = String((entry && entry.essaySlug) || fallbackSlug).trim();
-      if (entrySlug === targetSlug) {
-        numbers.add(sectionNumber);
-      }
-    }
-
-    return Array.from(numbers).sort((a, b) => a - b);
-  }
-
-  async function fallbackManifestNumbers(essaySlug) {
-    const fromMap = embeddedManifestNumbers(essaySlug);
-    if (fromMap.length > 0) {
-      return fromMap;
-    }
-
-    try {
-      await ensureEmbeddedChaptersLoaded();
-    } catch (error) {
-      return fromMap;
-    }
-
-    return embeddedManifestNumbers(essaySlug);
-  }
-
-  async function loadEssayManifestNumbers(sourceDir, essaySlug) {
+  async function loadEssayManifestNumbers(sourceDir) {
     const manifestPath = String(sourceDir || embeddedSourceDirFallback()).replace(/\/+$/, "") + "/manifest.json";
     try {
       const manifest = JSON.parse(await fetchAsText(manifestPath));
-      const numbers = normalizeSectionOrder(manifest.chapters);
-      if (numbers.length > 0) {
-        return numbers;
-      }
-      return fallbackManifestNumbers(essaySlug);
+      return normalizeSectionOrder(manifest.chapters);
     } catch (error) {
-      return fallbackManifestNumbers(essaySlug);
+      return [];
     }
   }
 
@@ -250,7 +137,7 @@
 
     const fallbackSlug = embeddedEssaySlugFallback();
     const fallbackSourceDir = embeddedSourceDirFallback();
-    const sectionOrder = await loadEssayManifestNumbers(fallbackSourceDir, fallbackSlug);
+    const sectionOrder = await loadEssayManifestNumbers(fallbackSourceDir);
     return [
       {
         id: fallbackSlug,
@@ -342,10 +229,6 @@
   async function loadEssay(slug) {
     const essays = await loadEssays();
     return essays.find((essay) => essay.slug === slug) || null;
-  }
-
-  function parseBlocks(rawText) {
-    return AST.astToLegacyBlocks(AST.parseDocument(rawText));
   }
 
   function firstParagraph(input) {
@@ -457,47 +340,12 @@
     return formatReadMinutes(minutes) + " read";
   }
 
-  async function loadSectionText(essay, sectionNumber) {
-    const cacheKey = essay.slug + ":" + String(sectionNumber);
-    if (SECTION_TEXT_CACHE.has(cacheKey)) {
-      return SECTION_TEXT_CACHE.get(cacheKey);
-    }
-
-    const relativePath = essay.source_dir + "/" + String(sectionNumber) + ".txt";
-
-    try {
-      const loaded = await fetchAsText(relativePath);
-      SECTION_TEXT_CACHE.set(cacheKey, loaded);
-      return loaded;
-    } catch (error) {
-      const entryKey = embeddedKey(essay.slug, sectionNumber);
-      if (EMBEDDED_MAP.has(entryKey)) {
-        const embedded = EMBEDDED_MAP.get(entryKey);
-        SECTION_TEXT_CACHE.set(cacheKey, embedded);
-        return embedded;
-      }
-
-      try {
-        await ensureEmbeddedChaptersLoaded();
-      } catch (fallbackError) {
-        // Keep original error as the source failure.
-      }
-
-      if (EMBEDDED_MAP.has(entryKey)) {
-        const embedded = EMBEDDED_MAP.get(entryKey);
-        SECTION_TEXT_CACHE.set(cacheKey, embedded);
-        return embedded;
-      }
-      throw error;
-    }
-  }
-
   // The compiler (scripts/generate-content-ast.js) emits one artifact per
   // published essay holding each section's content AST exactly as the reader
-  // renders it. We hydrate that here instead of re-parsing raw .txt on every
-  // load. Returns null — never throws — so loadSection can fall through to the
-  // live parser whenever the artifact is missing, offline-uncached, malformed,
-  // or built against an older AST grammar.
+  // renders it. We hydrate that here — the reader never parses. Returns null
+  // (never throws) when the artifact is missing, offline-uncached, malformed, or
+  // built against an older AST grammar; loadSection turns that into a clean error
+  // since there is no client parser to fall back to.
   async function loadCompiledEssay(slug) {
     if (COMPILED_ESSAY_CACHE.has(slug)) {
       return COMPILED_ESSAY_CACHE.get(slug);
@@ -516,8 +364,9 @@
       }
 
       // Grammar-drift guard: a compiled artifact from an older AST version must
-      // not be trusted to render. Falling back to a fresh parse with the live
-      // parser keeps the AST the single source of truth even mid-deploy.
+      // not be trusted to render. Returning null surfaces a clean reload error
+      // rather than rendering against a grammar the reader no longer speaks; the
+      // next deploy rebuilds the artifact at the current version.
       if (String(artifact.astVersion || "") !== String(AST.VERSION)) {
         return null;
       }
@@ -587,43 +436,19 @@
       throw new Error("Section not found for essay");
     }
 
-    // Fast path: hydrate the precompiled content AST. CI's --check gate keeps the
-    // artifact fresh and the equivalence harness proves it matches a live parse,
-    // so this renders byte-for-byte what the parser would. Falls through below
-    // when the artifact is unavailable or stale.
+    // The reader hydrates the precompiled content AST — it never parses. The
+    // artifact is the deploy contract: build:artifacts emits one per published
+    // essay and the equivalence oracle proves it matches a live parse, so a
+    // hydrated section renders byte-for-byte what the parser would. A missing or
+    // stale artifact is a deploy bug, surfaced as a clean error rather than a
+    // silent reparse — there is no client parser to fall back to.
     const artifact = await loadCompiledEssay(essay.slug);
     const hydrated = hydrateSectionFromArtifact(essay, section, artifact);
     if (hydrated) {
       return hydrated;
     }
 
-    const rawText = await loadSectionText(essay, section);
-    const ast = AST.parseDocument(rawText, { sourceName: essay.source_dir + "/" + String(section) + ".txt" });
-    const contentAst = AST.withoutLeadingHeadings(ast);
-    const blocks = AST.astToLegacyBlocks(ast);
-    const contentBlocks = AST.astToLegacyBlocks(contentAst);
-    const searchableText = AST.toSearchableText(contentAst);
-    const passages = AST.passagesFromDocument(contentAst);
-    const firstParagraphText = AST.firstParagraphText(contentAst);
-    const wordCount = AST.wordCount(searchableText);
-    const readMinutes = estimateReadMinutes(wordCount);
-
-    return {
-      essay,
-      sectionNumber: section,
-      display: sectionDisplay(essay, section),
-      rawText,
-      ast,
-      contentAst,
-      blocks,
-      contentBlocks,
-      passages,
-      searchableText,
-      firstParagraphText,
-      wordCount,
-      readMinutes,
-      source: "parsed"
-    };
+    throw new Error("Unable to load this section.");
   }
 
   async function loadEssaySections(essaySlug) {
@@ -662,7 +487,6 @@
     loadEssays,
     loadEssaySections,
     loadSection,
-    parseBlocks,
     renderBlocks,
     sectionDisplay,
     sectionLabel,

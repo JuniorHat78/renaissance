@@ -18,19 +18,22 @@ const PAGE_BUDGET_BYTES = {
   // cross-page Spotlight launcher, oracle, continuity transition, and the
   // reading-attention core + heartbeat. Real history: 264 -> 304 (Spotlight) ->
   // 320 (oracle) -> 336 (continuity) -> 352 (reading attention).
-  // TEMPORARILY parked at an absurd ceiling so the budget stops gating sprint
-  // work. This is NOT the real number — the booked section.js split is the fix,
-  // and when it lands this drops back to a real, disciplined budget (~256-300).
-  // Until then, treat section.html weight as unguarded.
-  "section.html": 1024 * 1024,
+  // Pulled down 1024 -> 384 by AST P5: dropping the client parser (index.js ~48KB
+  // -> core+render ~21KB) cut every shell ~27KB and this locks that win in. Still
+  // generous — section.html stays effectively unguarded until the booked
+  // section.js split lands and this drops to a real ~256-300 budget.
+  "section.html": 384 * 1024,
   // essay.html carries the motif card + oracle client/engine on top of the
   // essay view. Raised 256 -> 272 (oracle-native search) -> 280 (the composed-
   // arrival veil CSS) -> 288 (advanced-search) -> 296 (reading-shell.js adds
-  // soft-navigation support to both essay and section pages).
-  "essay.html": 296 * 1024,
+  // soft-navigation support). Ratcheted 296 -> 264 by the AST P5 parser drop.
+  "essay.html": 264 * 1024,
   // index.html crossed the default ceiling when the continuity transition
-  // (capture side) joined the home archive. Raised 256 -> 272.
-  "index.html": 272 * 1024
+  // (capture side) joined the home archive. Raised 256 -> 272, then ratcheted
+  // 272 -> 232 by the AST P5 parser drop.
+  "index.html": 232 * 1024,
+  // search.html: ratcheted off the 256 default to 224 by the AST P5 parser drop.
+  "search.html": 224 * 1024
 };
 
 function localAssets(html) {
