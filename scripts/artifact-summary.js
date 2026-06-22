@@ -70,7 +70,6 @@ function main() {
     ["service worker precache", precache.length ? String(precache.length) + " entries / " + kb(assetBytes(precache)) : "missing precache"],
     ["offline asset payload", offlineAssets.length ? String(offlineAssets.length) + " entries / " + kb(assetBytes(offlineAssets)) : "missing manifest"],
     ["recovery catalogue", recovery ? String(recoveryEssays.length) + " essays / " + String(recoverySections) + " sections / " + kb(recoveryBytes) : "missing catalogue"],
-    ["scripts/chapters-data.js", kb(bytes(path.join(site.root, "scripts", "chapters-data.js")))],
     ["scripts/essays-data.js", kb(bytes(path.join(site.root, "scripts", "essays-data.js")))],
     ["data/site-registry.json", kb(bytes(registryPath))],
     ["data/offline-assets.json", kb(bytes(offlinePath))],

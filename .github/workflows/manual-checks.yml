@@ -50,6 +50,11 @@ jobs:
       - name: Install Node Dependencies
         run: npm ci
 
+      - name: Build derived artifacts
+        # Net-off (AST P5): derived artifacts are built from source, not committed,
+        # so every selectable suite that serves the site has them on disk.
+        run: npm run build:artifacts
+
       - name: Install Playwright Chromium
         if: >-
           ${{ github.event_name == 'pull_request' ||
