@@ -49,58 +49,29 @@ The current grammar is a tiny literary document language, not full Markdown.
 The dialect contract lives in `docs/specs/AST-DIALECT.md`; future syntax ideas
 are tracked in `docs/IDEAS.md`.
 
-## Embedded And Offline Data
+## Derived Artifacts (net-off)
 
-The site supports degraded fetch contexts with generated fallback data:
-
-- `scripts/essays-data.js`
-- `scripts/chapters-data.js`
-
-Regenerate after content changes:
+There is one human source of truth — the prose under `raw/` plus
+`data/essays.json` — and a single command turns it into every derived artifact:
 
 ```powershell
-node scripts/generate-embedded-data.js
+npm run build:artifacts
 ```
 
-Check freshness:
+These outputs are **build output, not committed** (gitignored): `scripts/essays-data.js`,
+`data/compiled/<slug>.json` (the hydration source), `data/search-index.json`,
+`data/offline-assets.json`, `data/site-registry.json`, `sitemap.xml`, `feed.xml`,
+and `rss.xml`. Two files stay committed because they hold a generated *region*
+inside a hand-authored file: `sw.js` (its cache `VERSION`, hashed from the
+precached assets) and `404.html` (its inline recovery catalogue).
 
-```powershell
-npm run validate:embedded:check
-```
-
-Offline reading is handled by `sw.js`, `site.webmanifest`, and the generated
-offline asset manifest:
-
-- `data/offline-assets.json`
-
-Refresh the offline manifest after content/static asset changes:
-
-```powershell
-node scripts/generate-offline-assets.js
-```
-
-Check freshness:
-
-```powershell
-npm run validate:offline-assets:check
-```
-
-Other generated deployment artifacts:
-
-- `data/site-registry.json`: canonical published routes and recovery metadata.
-- Inline 404 recovery catalogue in `404.html`.
-- `sitemap.xml`, `robots.txt`, and feed outputs from discoverability metadata.
-- `sw.js` cache `VERSION`, generated from the contents of precached assets.
-
-Refresh/check commands:
-
-```powershell
-npm run site-registry:generate
-npm run 404-catalogue:generate
-npm run discover:generate
-npm run cache-version:generate
-npm run check
-```
+The deploy (`.github/workflows/pages.yml`) and the local `predev` hook both run
+`build:artifacts`, so the artifacts never need to live in git. Correctness is
+gated by `npm run ci:build-verify`, which builds, asserts the committed in-place
+files are fresh, then builds again and asserts byte-identical output
+(determinism). Content correctness is proven by the regression suite running
+against the freshly built artifacts. The full design — including why dropping
+the committed copies is safe — lives in `docs/specs/AST-COMPILER.md` (Net-off).
 
 `scripts/artifact-summary.js` gives a compact count/size report for generated
 route, cache, content, and recovery artifacts, including service-worker

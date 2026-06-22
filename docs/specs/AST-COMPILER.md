@@ -147,8 +147,10 @@ The whole safety story should be a few green checks away:
   `2096a47`.
 - **P4** — `build:artifacts` + `pages.yml`; Pages cut over `legacy → workflow`
   (live, proven). `2287629`, `6f696d5`, `5e62e05`.
-- **P5** — module split (parser stops shipping) + drop the fallbacks + net off.
-  *(this change)*
+- **P5** — module split (`ast/` → core + render + parse, parser stops shipping)
+  + drop the client fallbacks + net off. `0c29b99` (split/parser-drop),
+  `54d5ff0` (net-off). Shipped: browser AST weight ~48KB → ~21KB per shell;
+  derived artifacts are build output; `ci:build-verify` gates determinism.
 
 ## Revert runbook
 
