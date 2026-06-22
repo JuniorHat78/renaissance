@@ -98,28 +98,27 @@ parser (P5), both gated on a post-merge production proof.
   Commit `36b63ac`. Parked follow-ups: scope/section filters in advanced mode;
   URL-persist the mode.
 
-**Working on now:** merge train — PR #13 (AST compiler) → oracle, then PR #12
-(the whole sprint) → `main`, plus the dependabot bumps. AST compiler P0–4 has
-landed; the **section.js split** remains the most durable structural win
-(budget parked at 1024KB as a sprint-gate bypass — the split is the real fix).
+**AST compiler — DONE (P0–P5, live).** The runtime parser is now a build-time
+compiler; the reader hydrates a precompiled AST and never parses. Derive-at-deploy
+is the live deploy (`pages.yml`, GitHub Actions Pages). P5 split `ast/` into
+core + render + parse so the tokenizer stops shipping (~48KB → ~21KB per shell),
+dropped the client fallbacks, and netted off the derived artifacts (build output,
+gitignored). The durable record is `docs/specs/AST-COMPILER.md`; this dashboard no
+longer tracks it.
+
+**Working on now:** the **section.js split** is the most durable remaining
+structural win — section.html is parked at 384KB (was 1024KB; AST P5 pulled it
+down); the split returns the budget to a real ceiling.
 
 **Up next (in order):**
-1. **Derive-at-deploy live cutover (P4)** — after PR #12 lands on `main`,
-   dispatch `pages.yml` once; `configure-pages` enablement flips the Pages
-   source from legacy branch-deploy to GitHub Actions. Verify the live site
-   serves identical bytes. Reversible via the Pages API.
-2. **AST compiler P5 — drop the client parser + net off** — remove
-   `parseDocument` from shipped JS (asset + speed win) and gitignore the
-   compiled blobs. Gated on the cutover proving out in production, because
-   dropping the parser removes the hydration fallback.
-3. **`section.js` split** — section.html is unguarded at 1024KB; the split earns
-   the room back and returns the budget to a real ceiling. See A-Phase note.
-4. **A-phase checkpoint 4: magic texture polish** — spring easing, veil dissolve,
+1. **`section.js` split** — section.html is parked at 384KB; the split earns the
+   room back and returns the budget to a real ~256–300KB ceiling. See A-Phase note.
+2. **A-phase checkpoint 4: magic texture polish** — spring easing, veil dissolve,
    arriving-words shimmer. Unblocks ungating the soft-nav shell. High visual-
    review risk: do not ship without a motion-artifact pass.
-5. Reading-attention **feel pass** — tune `WPM`/`READ_FRACTION`/velocity in the
+3. Reading-attention **feel pass** — tune `WPM`/`READ_FRACTION`/velocity in the
    live reader; math is proven, constants are taste calls.
-6. Then bespoke typesetting (B-feel) and literary apparatus/concordance (C). See
+4. Then bespoke typesetting (B-feel) and literary apparatus/concordance (C). See
    **Sprint Direction: The Reading Instrument**.
 
 **Known cuts / decisions:** editorial apparatus (footnotes/sidenotes) is OUT

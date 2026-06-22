@@ -737,6 +737,14 @@ npm run ci:regression
 
 ### 5. AST Promotion / Build Compiler
 
+> ✅ **DONE (P0–P5, live).** Delivered: the runtime parser became a build-time
+> compiler, the reader hydrates a precompiled AST and never parses, derive-at-deploy
+> is the live deploy, the tokenizer no longer ships to the browser, and the derived
+> artifacts are net-off (build output, gitignored). The brief below is preserved as
+> the original intent; the **durable design of record is `docs/specs/AST-COMPILER.md`**.
+> Note two facts here are now superseded: `scripts/chapters-data.js` was removed
+> outright, and generated data is no longer committed fallback — it is built at deploy.
+
 This is the first truly large "reading instrument" project. Do not start it
 until A-phase is stable and the section split / search cleanup state is clear.
 If you start it, first write a short plan into

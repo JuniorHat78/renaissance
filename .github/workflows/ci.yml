@@ -130,6 +130,11 @@ jobs:
       - name: Install Node Dependencies
         run: npm ci
 
+      - name: Build derived artifacts
+        # Net-off (AST P5): derived artifacts are no longer committed, so this
+        # job builds them from source before serving the site.
+        run: npm run build:artifacts
+
       - name: Install Playwright ${{ matrix.browser }}
         run: npx playwright install --with-deps ${{ matrix.browser }}
 

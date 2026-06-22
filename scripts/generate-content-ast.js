@@ -57,6 +57,16 @@ function publishedEssays(essays) {
   return essays.filter((essay) => essay && essay.published !== false && essay.slug);
 }
 
+// Everything the compiler can turn into a hydration artifact. Publication gates
+// *listing* (home, search, sitemap, registry, offline precache) — not the
+// ability to hydrate. The reader has no client parser since P5, so a draft
+// (published: false) opened by direct URL must still have a compiled artifact to
+// render; otherwise loadSection has nothing to hydrate and fails. So we compile
+// every essay with a slug, and let the published-only generators do the gating.
+function compilableEssays(essays) {
+  return essays.filter((essay) => essay && essay.slug);
+}
+
 function sectionMeta(essay, sectionNumber) {
   const meta = essay && essay.section_meta && typeof essay.section_meta === "object"
     ? essay.section_meta[String(sectionNumber)]
@@ -132,9 +142,10 @@ function artifactPath(slug) {
   return path.join(outDir, slug + ".json");
 }
 
-// Returns [{ slug, content }] for every published essay, deterministically.
+// Returns [{ slug, content }] for every compilable essay (published or draft),
+// deterministically. Drafts get an artifact too so direct-URL viewing hydrates.
 function build(essays) {
-  return publishedEssays(essays).map((essay) => ({
+  return compilableEssays(essays).map((essay) => ({
     slug: String(essay.slug),
     content: stableJson(essayArtifact(essay)),
   }));
@@ -163,7 +174,7 @@ function main() {
       }
     }
     for (const orphan of orphans) {
-      problems.push("orphaned (essay unpublished/removed): data/compiled/" + orphan);
+      problems.push("orphaned (essay removed): data/compiled/" + orphan);
     }
     if (problems.length) {
       console.error("Compiled content AST is stale:");
@@ -195,4 +206,4 @@ if (require.main === module) {
   main();
 }
 
-module.exports = { essayArtifact, build, stableJson, loadEssays, publishedEssays, sectionRecord, contentAstFor };
+module.exports = { essayArtifact, build, stableJson, loadEssays, publishedEssays, compilableEssays, sectionRecord, contentAstFor };

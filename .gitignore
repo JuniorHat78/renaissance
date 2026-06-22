@@ -38,3 +38,19 @@ qa/transition-evidence/
 
 node_modules/
 tmp/
+
+# Derived artifacts (AST P5 net-off). One human source of truth — the prose under
+# raw/ plus data/essays.json — produces these at deploy via `npm run build:artifacts`
+# (and locally via the `predev` hook). They are build output, not committed: no
+# blobs to drift, no --check freshness nag. The deploy rebuilds them from source and
+# the regression suite proves them correct. See docs/specs/AST-COMPILER.md (Net-off).
+# (sw.js and 404.html stay committed — they hold a generated *region*, not a whole
+# generated file — and their freshness is gated by the post-build git-diff check.)
+data/compiled/
+data/search-index.json
+data/offline-assets.json
+data/site-registry.json
+scripts/essays-data.js
+sitemap.xml
+feed.xml
+rss.xml

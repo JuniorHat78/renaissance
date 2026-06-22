@@ -1,15 +1,15 @@
 name: Deploy (Pages, derive-at-deploy)
 
-# Derive-at-deploy pipeline (AST compiler P4). Regenerates every derived
-# artifact from source with `npm run build:artifacts`, then publishes the site
-# through GitHub Actions Pages instead of the legacy "deploy from branch" mode.
+# Derive-at-deploy pipeline (AST compiler P4 + P5 net-off). The derived
+# artifacts are not committed (see docs/specs/AST-COMPILER.md → Net-off): one
+# human source of truth (raw/ + data/essays.json) is rebuilt into every artifact
+# here and published through GitHub Actions Pages.
 #
-# This is the active deploy for `main` (the legacy branch-deploy was cut over to
-# GitHub Actions). Every push to main rebuilds artifacts and republishes; the
-# build fails closed if regeneration is not deterministic. The committed
-# artifacts stay the net until this pipeline is proven in production (then P5
-# nets off and drops the client parser). build:artifacts is proven zero-delta
-# against the committed tree, so the deploy serves byte-identical content.
+# This is the active deploy for `main`. Every push rebuilds and republishes.
+# `ci:build-verify` fails closed if the build is non-deterministic or if a
+# committed in-place file (sw.js / 404.html) is stale, so the deploy never
+# publishes something no test saw; GitHub Pages keeps serving the last good
+# deploy until a clean build succeeds (stale-but-working, never broken).
 
 on:
   push:
@@ -42,20 +42,13 @@ jobs:
       - name: Install Node Dependencies
         run: npm ci
 
-      - name: Regenerate all derived artifacts from source
-        run: npm run build:artifacts
-
-      - name: Fail if the build is not deterministic
-        # build:artifacts must be a pure function of source. If regenerating
-        # dirtied the tree, the artifact set is non-deterministic and the deploy
-        # would publish something no test ever saw — stop instead.
-        run: |
-          if ! git diff --quiet; then
-            echo "::error::build:artifacts produced a non-deterministic tree:"
-            git --no-pager diff --stat
-            exit 1
-          fi
-          echo "build:artifacts is deterministic (clean tree)."
+      - name: Build & verify derived artifacts (deterministic, in-place fresh)
+        # Builds every artifact from source and fails closed unless the build is
+        # deterministic (built twice, byte-identical) and the committed in-place
+        # files (sw.js, 404.html) are fresh. Leaves the artifacts on disk for the
+        # staging step below. Net-off: the wholly-generated artifacts are
+        # gitignored, so a plain `git diff` no longer covers them — this does.
+        run: npm run ci:build-verify
 
       - name: Configure Pages (enable GitHub Actions as the Pages source)
         uses: actions/configure-pages@v5

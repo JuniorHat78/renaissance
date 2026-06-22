@@ -31,8 +31,12 @@ function main() {
     "Expected generic fallback title generation helper"
   );
   assert.ok(
-    source.includes("scripts/ast/index.js must load before scripts/content.js"),
-    "Content runtime should require the AST parser before section rendering"
+    source.includes("scripts/ast/core.js and scripts/ast/render.js must load before scripts/content.js"),
+    "Content runtime should require the shipped AST modules before section rendering"
+  );
+  assert.ok(
+    !source.includes("AST.parseDocument"),
+    "Content runtime must not parse on the client — it hydrates the compiled AST"
   );
   assert.ok(
     !source.includes("function formatInlineMarkdown"),

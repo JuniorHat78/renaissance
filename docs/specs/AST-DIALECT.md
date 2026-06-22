@@ -59,15 +59,16 @@ blocks.
 ## Legacy Bridge Boundary
 
 `scripts/content.js` still exposes legacy `blocks` and `contentBlocks` for old
-callers and embedded fallback compatibility, but page rendering now prefers
-`contentAst`. The remaining bridge calls are isolated at the content loading
+callers, but page rendering now prefers `contentAst`. Since AST P5 the reader
+hydrates the precompiled AST and never parses on the client, so these legacy
+arrays are projected *from the hydrated AST* (`Ast.astToLegacyBlocks`), not from
+a raw-text parse. The remaining bridge calls are isolated at the content loading
 boundary:
 
-- `parseBlocks(rawText)` for compatibility callers;
-- `loadSection()` legacy `blocks`;
-- `loadSection()` legacy `contentBlocks`;
+- `loadSection()` legacy `blocks` (from the hydrated content AST);
+- `loadSection()` legacy `contentBlocks` (from the hydrated content AST);
 - `Ast.renderBlocks()` normalization for callers that still pass legacy arrays.
 
-The bridge should stay until fallback data and scratch tooling no longer need
-legacy arrays. New rendering/search/excerpt work should use AST nodes or AST text
-projections directly.
+The bridge should stay until scratch tooling no longer needs legacy arrays. New
+rendering/search/excerpt work should use AST nodes or AST text projections
+directly.

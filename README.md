@@ -51,13 +51,14 @@ Edit:
 Then run:
 
 ```powershell
-node scripts/generate-embedded-data.js
+npm run build:artifacts
 npm run check
 ```
 
-Generated fallback data lives in:
-- `scripts/essays-data.js`
-- `scripts/chapters-data.js`
+Derived artifacts (search index, compiled AST, essay metadata, feeds, sitemap,
+the service-worker version) are **build output, not committed** — `build:artifacts`
+regenerates them from source, and the deploy does the same. See
+[AST compiler design](docs/specs/AST-COMPILER.md) → Net-off.
 
 ## Docs
 
