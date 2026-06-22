@@ -119,14 +119,15 @@
 
   function withoutLeadingHeadings(input) {
     const ast = normalizeAstInput(input);
+    const children = getBlockChildren(ast);
     let firstContentIndex = 0;
 
-    while (firstContentIndex < ast.children.length && ast.children[firstContentIndex].type === BLOCK_TYPES.HEADING) {
+    while (firstContentIndex < children.length && children[firstContentIndex].type === BLOCK_TYPES.HEADING) {
       firstContentIndex += 1;
     }
 
     return Object.assign({}, ast, {
-      children: ast.children.slice(firstContentIndex),
+      children: children.slice(firstContentIndex),
     });
   }
 
@@ -226,7 +227,7 @@
 
   function firstParagraphText(input) {
     const ast = normalizeAstInput(input);
-    const paragraph = ast.children.find(function findParagraph(block) {
+    const paragraph = getBlockChildren(ast).find(function findParagraph(block) {
       return block.type === BLOCK_TYPES.PARAGRAPH || block.type === BLOCK_TYPES.PULL_QUOTE;
     });
 
@@ -237,7 +238,7 @@
     const ast = normalizeAstInput(input);
     const blocks = [];
 
-    ast.children.forEach(function convert(block) {
+    getBlockChildren(ast).forEach(function convert(block) {
       appendLegacyBlock(blocks, block);
     });
 
