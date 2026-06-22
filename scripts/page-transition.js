@@ -4,7 +4,6 @@
   // rule sweep), short enough to stay responsive. The old 16ms guillotined the
   // exit animation, which read as a freeze on click.
   const OUT_DURATION_MS = 120;
-  const CONTENT_READY_FALLBACK_MS = 1200;
   // Cap on how long the composed arrival holds the paper veil waiting for
   // content. A slow load reveals anyway rather than stranding the veil.
   const REVEAL_CAP_MS = 700;

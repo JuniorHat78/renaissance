@@ -41,40 +41,12 @@
     return value === "1" || value === "true";
   }
 
-  function normalizePassageId(value) {
-    const raw = String(value || "").trim().toLowerCase();
-    if (!raw) {
-      return "";
-    }
-    const number = raw.startsWith("p") ? raw.slice(1) : raw;
-    const parsed = Number.parseInt(number, 10);
-    return Number.isFinite(parsed) && parsed > 0 ? "p" + String(parsed) : "";
-  }
-
-  function normalizeRangeOffset(value) {
-    const parsed = Number.parseInt(value, 10);
-    return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
-  }
-
   function normalizeScope(value, allowedScopes) {
     if (!value || value === "all") {
       return "all";
     }
 
     return allowedScopes.includes(value) ? value : "all";
-  }
-
-  function normalizeState(rawState, allowedScopes) {
-    const source = rawState || {};
-    return {
-      query: String(source.query || "").trim(),
-      mode: normalizeMode(source.mode),
-      sort: normalizeSort(source.sort),
-      scope: normalizeScope(source.scope, allowedScopes || []),
-      caseSensitive: Boolean(source.caseSensitive),
-      page: normalizePage(source.page),
-      pageSize: normalizePageSize(source.pageSize)
-    };
   }
 
   function tokenizeWordSpans(text) {
@@ -301,21 +273,6 @@
       }));
   }
 
-  function makeSnippet(text, startIndex, length) {
-    const lead = 90;
-    const tail = 130;
-    const safeStart = Math.max(0, startIndex - lead);
-    const safeEnd = Math.min(text.length, startIndex + length + tail);
-    let snippet = text.slice(safeStart, safeEnd).trim();
-    if (safeStart > 0) {
-      snippet = "... " + snippet;
-    }
-    if (safeEnd < text.length) {
-      snippet += " ...";
-    }
-    return snippet;
-  }
-
   function highlightSnippet(snippet, term) {
     if (!term) {
       return escapeHtml(snippet);
@@ -332,13 +289,6 @@
       return left.sectionOrder - right.sectionOrder;
     }
     return left.index - right.index;
-  }
-
-  function sortRelevance(left, right) {
-    if (left.score !== right.score) {
-      return right.score - left.score;
-    }
-    return sortReadingOrder(left, right);
   }
 
   function paginate(items, page, pageSize) {
