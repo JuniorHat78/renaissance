@@ -2212,7 +2212,9 @@
   }
 
   function highlightPassageRangeAnchor(anchor, rangeOffsets) {
-    if (!anchor || !rangeOffsets || anchor.start !== anchor.end) {
+    // Single-passage anchors only; the sole caller already guards anchor and
+    // rangeOffsets truthy, so the meaningful check is start === end.
+    if (anchor.start !== anchor.end) {
       return false;
     }
 

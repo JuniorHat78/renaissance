@@ -58,11 +58,22 @@ async function assertPageVisible(page, label) {
       lastError = null;
       break;
     } catch (error) {
-      if (!/Execution context was destroyed/.test(String(error && error.message))) {
+      const message = error?.message || String(error);
+      if (!/Execution context was destroyed/.test(message)) {
         throw error;
       }
       lastError = error;
-      await waitForReady(page);
+      // Re-settling can itself race a follow-up navigation and throw the same
+      // context-destroyed error; swallow that so the retry loop continues.
+      try {
+        await waitForReady(page);
+      } catch (readyError) {
+        const readyMessage = readyError?.message || String(readyError);
+        if (!/Execution context was destroyed/.test(readyMessage)) {
+          throw readyError;
+        }
+        lastError = readyError;
+      }
     }
   }
   if (lastError) {

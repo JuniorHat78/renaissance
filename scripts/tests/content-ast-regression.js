@@ -22,9 +22,16 @@ function sourceName(essay, sectionNumber) {
   return (String((essay && essay.source_dir) || "").trim() || "raw") + "/" + String(sectionNumber) + ".txt";
 }
 
+const astCache = new Map();
 function freshAst(essay, sectionNumber) {
+  const key = essay.slug + ":" + sectionNumber;
+  if (astCache.has(key)) {
+    return astCache.get(key);
+  }
   const raw = fs.readFileSync(path.join(root, sourceName(essay, sectionNumber)), "utf8").replace(/\r\n/g, "\n");
-  return ast.withoutLeadingHeadings(ast.parseDocument(raw, { sourceName: sourceName(essay, sectionNumber) }));
+  const parsed = ast.withoutLeadingHeadings(ast.parseDocument(raw, { sourceName: sourceName(essay, sectionNumber) }));
+  astCache.set(key, parsed);
+  return parsed;
 }
 
 let passed = 0;

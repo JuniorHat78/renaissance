@@ -142,13 +142,19 @@ function artifactPath(slug) {
   return path.join(outDir, slug + ".json");
 }
 
-// Returns [{ slug, content }] for every compilable essay (published or draft),
-// deterministically. Drafts get an artifact too so direct-URL viewing hydrates.
+// Returns [{ slug, content, sectionCount }] for every compilable essay
+// (published or draft), deterministically. Drafts get an artifact too so
+// direct-URL viewing hydrates. sectionCount is carried through so the summary
+// doesn't re-parse each artifact's JSON.
 function build(essays) {
-  return compilableEssays(essays).map((essay) => ({
-    slug: String(essay.slug),
-    content: stableJson(essayArtifact(essay)),
-  }));
+  return compilableEssays(essays).map((essay) => {
+    const artifact = essayArtifact(essay);
+    return {
+      slug: String(essay.slug),
+      content: stableJson(artifact),
+      sectionCount: artifact.sectionCount,
+    };
+  });
 }
 
 function listCompiledFiles() {
@@ -194,7 +200,7 @@ function main() {
     fs.rmSync(path.join(outDir, orphan));
   }
 
-  const sections = artifacts.reduce((sum, entry) => sum + JSON.parse(entry.content).sectionCount, 0);
+  const sections = artifacts.reduce((sum, entry) => sum + entry.sectionCount, 0);
   console.log(
     "Wrote " + artifacts.length + " compiled essay artifact(s) to data/compiled/ (" +
     sections + " sections, ast " + String(ast.VERSION) + ")" +
