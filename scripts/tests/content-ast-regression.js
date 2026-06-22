@@ -2,8 +2,8 @@
 "use strict";
 
 // Equivalence harness for the build-time AST compiler (data/compiled/<slug>.json).
-// The compiler's whole safety story is one property: the committed, compiled AST
-// must be byte-for-byte what a runtime parse of the same source produces — so
+// The compiler's whole safety story is one property: the compiled AST must be
+// byte-for-byte what a runtime parse of the same source produces — so
 // hydrating it renders the identical DOM, passages, and anchors the live parser
 // would, and the "does the client parse match the index?" bug class cannot
 // exist. This test is the oracle: the existing runtime parser is the reference
@@ -41,10 +41,13 @@ function check(name, fn) {
   }
 }
 
-const essays = compiler.publishedEssays(compiler.loadEssays());
+// Every compilable essay (published + drafts) — since P5 dropped the client
+// parser, a draft opened by direct URL also hydrates a compiled artifact, so the
+// oracle must prove that artifact equals a fresh parse too.
+const essays = compiler.compilableEssays(compiler.loadEssays());
 
-check("a compiled artifact exists for every published essay", () => {
-  assert.ok(essays.length > 0, "no published essays found");
+check("a compiled artifact exists for every compiled essay", () => {
+  assert.ok(essays.length > 0, "no compilable essays found");
   for (const essay of essays) {
     assert.ok(
       fs.existsSync(path.join(compiledDir, essay.slug + ".json")),
