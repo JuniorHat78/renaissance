@@ -1,0 +1,55 @@
+name: scriptorium-quarantine
+
+# Proves the §6 quarantine the hard way: delete scriptorium/ entirely, then run
+# the real deploy build. If build:artifacts still succeeds, the shipped site has
+# no dependency on the author tooling — the one-way arrow holds. This is the
+# enforcer SCRIPTORIUM.md §12 asked for (the asset-budget regex was not it).
+#
+# Deterministic correctness gate → allowed to hard-fail.
+
+on:
+  push:
+    branches: [main, feat/scriptorium]
+    paths:
+      - "scriptorium/**"
+      - "scripts/**"
+      - "*.html"
+      - "sw.js"
+      - "package.json"
+      - ".github/workflows/scriptorium-quarantine.yml"
+  pull_request:
+    paths:
+      - "scriptorium/**"
+      - "scripts/**"
+      - "*.html"
+      - "sw.js"
+      - "package.json"
+      - ".github/workflows/scriptorium-quarantine.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-without-scriptorium:
+    name: build:artifacts with scriptorium/ deleted
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Delete the author tooling
+        run: rm -rf scriptorium
+
+      - name: Build the shipped artifacts without it
+        run: npm run build:artifacts
+
+      - name: Quarantine holds
+        run: echo "build:artifacts succeeded with scriptorium/ deleted — the shipped site has no dependency on the author tooling."

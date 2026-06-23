@@ -239,10 +239,14 @@ status.
    the browser modules (Playwright — already a dep) against a fresh Node compile.
    Also add `scriptorium/editor.html` to the `ast doctor` load-order check
    (`scripts/ast-tools/doctor.js` `SHELLS` only lists the four reader shells).
-   — *Status: open for the interim JS guard. The **real** fix is designed in
-   `SCRIPTORIUM-RUST-PARSER.md` §6: the WASM build runs the same parser in the
-   browser and is diffed against Node, which closes this vector for good. The
-   `ast doctor` `SHELLS` addition is still a small open task.*
+   — *Status: largely **resolved**. The **real** fix shipped (R1a): the WASM build
+   runs the same parser the browser loads and is diffed against Node by the
+   equivalence oracle (`scripts/tests/rust-wasm-oracle.js`, green in CI) — closing
+   the browser-vs-Node vector via the shipped artifact. Editor load order is now
+   guarded too, in `scripts/tests/scriptorium-regression.js` (its own suite — NOT
+   the `ast doctor` `SHELLS` list, whose checks correctly reject `editor.html` for
+   legitimately loading `parse.js` and `editor.js`). Remaining: a Playwright
+   in-browser parity check for the final mile.*
 2. **§4's "AST carries source positions for this use" is only partly true.**
    `render.js` stamps `data-source-start/end` only on heading/paragraph/
    pull_quote/list_item — **blockquote, list, and divider containers are
@@ -273,9 +277,12 @@ status.
 - **Normalization is applied at three sites with two regexes** (`normalizeSource`
   strips `\r\n?`; the compiler strips only `\r\n`; `content.js` strips `\r\n?`).
   Decide where the editor normalizes (on load / save / never) and name it, or a
-  lone `\r` breaks byte-identity. — *Status: **decided** for the editor —
-  `SCRIPTORIUM-EDITOR.md` §3.1 normalizes `\r\n?`→`\n` once on load, never again.
-  The save-side regex-consistency cleanup across the three sites is still open.*
+  lone `\r` breaks byte-identity. — *Status: **resolved for the editor** — load
+  side: `SCRIPTORIUM-EDITOR.md` §3.1 normalizes `\r\n?`→`\n` once on load; save
+  side: `server.js` `handlePutSection` now normalizes `\r\n?`→`\n` before the
+  atomic write, so the editor never writes a stray `\r`. The broader
+  regex-consistency across the shipped compiler/`content.js` is a separate
+  pipeline cleanup, untouched here.*
 - **Node-aware commands break native undo.** `setRangeText`/value surgery
   fragments the textarea undo stack, so "native undo for v1" silently fails once
   P3 lands. Decide `execCommand('insertText')` vs a snapshot stack *before* P3.
@@ -290,9 +297,11 @@ status.
   `scripts/`/`styles/`, so it is *not* the enforcer. Add a dedicated grep over
   shipped HTML/JS + `sw.js` PRECACHE for the literal `scriptorium` path, and a CI
   job proving `build:artifacts` runs with `scriptorium/` deleted. — *Status:
-  **partial** — `doctor.js` `runQuarantineCheck` greps shipped HTML + `scripts/`
-  for `scriptorium/` references (a CRITICAL on any hit). Still open: covering the
-  `sw.js` PRECACHE list and a CI job that builds with `scriptorium/` deleted.*
+  **resolved** — two enforcers now: `doctor.js` `runQuarantineCheck` greps shipped
+  HTML + `scripts/` for `scriptorium/` references (CRITICAL on any hit), and the
+  new `.github/workflows/scriptorium-quarantine.yml` deletes `scriptorium/` and
+  proves `build:artifacts` still succeeds. (Extending the grep to the `sw.js`
+  PRECACHE list specifically remains a minor nicety.)*
 - **Doctor drift gaps:** draft (`published:false`) artifact handling; "authored
   subtitle that can never render" when `show_subtitles:false`; `section_meta` key
   type (string vs number) normalization; stale-artifact-with-no-source. —

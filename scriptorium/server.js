@@ -464,8 +464,12 @@ async function handlePutSection(req) {
     throw new BadRequestError("Field 'text' must be a string.");
   }
 
+  // Normalize line endings on SAVE so the file on disk is always \n-canonical
+  // (SCRIPTORIUM-EDITOR.md §3.1 normalizes on load; this closes the save side, so
+  // a stray \r — e.g. from a mid-session paste — never reaches disk and can never
+  // skew the parser's offsets vs the textarea's). \r\n? covers CRLF and lone CR.
   const filePath = safeSectionPath(slug, n);
-  atomicWrite(filePath, body.text);
+  atomicWrite(filePath, body.text.replace(/\r\n?/g, "\n"));
   return { ok: true };
 }
 

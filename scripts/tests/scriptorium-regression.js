@@ -708,6 +708,54 @@ if (!haveCompiledDir) {
 })();
 
 // ---------------------------------------------------------------------------
+// 6. EDITOR LOAD ORDER — the shell wires the AST modules in the right sequence.
+//
+// SCRIPTORIUM.md §12 blocker 1 asked for editor.html to be load-order-checked.
+// It does NOT belong in `ast doctor`'s reader-shell checks: those assert a shell
+// must NOT load parse.js and MUST load content.js, but the editor legitimately
+// loads parse.js (it authors through the one parser) and loads editor.js, not
+// content.js. So the editor's load order is verified HERE, in its own suite.
+// core must precede render must precede parse (parse.js registers its tokenizer
+// INTO core at load); editor.js loads last (it consumes everything). The opt-in
+// wasm-parser.js must load before editor.js so the engine swap can find it.
+// ---------------------------------------------------------------------------
+
+(function editorLoadOrder() {
+  const label = "editor: editor.html loads the AST + editor modules in order";
+  const htmlPath = path.join(root, "scriptorium", "editor.html");
+  let html;
+  try {
+    html = fs.readFileSync(htmlPath, "utf8");
+  } catch (error) {
+    skip(label, "scriptorium/editor.html not readable: " + (error && error.message ? error.message : String(error)));
+    return;
+  }
+
+  check(label, () => {
+    const at = (needle) => html.indexOf(needle);
+    const core = at('src="../scripts/ast/core.js"');
+    const render = at('src="../scripts/ast/render.js"');
+    const parse = at('src="../scripts/ast/parse.js"');
+    const mapping = at('src="mapping.js"');
+    const commands = at('src="commands.js"');
+    const wasm = at('src="wasm-parser.js"');
+    const editor = at('src="editor.js"');
+
+    assert.ok(core !== -1, "editor.html does not load core.js");
+    assert.ok(render !== -1, "editor.html does not load render.js");
+    assert.ok(parse !== -1, "editor.html does not load parse.js (the editor authors through the one parser)");
+    assert.ok(editor !== -1, "editor.html does not load editor.js");
+
+    assert.ok(core < render, "editor.html must load core before render");
+    assert.ok(render < parse, "editor.html must load render before parse");
+    assert.ok(parse < editor, "editor.html must load parse before editor.js");
+    if (mapping !== -1) assert.ok(mapping < editor, "mapping.js must load before editor.js");
+    if (commands !== -1) assert.ok(commands < editor, "commands.js must load before editor.js");
+    if (wasm !== -1) assert.ok(wasm < editor, "wasm-parser.js must load before editor.js (engine swap)");
+  });
+})();
+
+// ---------------------------------------------------------------------------
 // Summary.
 // ---------------------------------------------------------------------------
 
