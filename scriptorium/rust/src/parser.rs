@@ -478,22 +478,27 @@ fn parse_heading_line(
     if marker_len < 1 || marker_len > 6 {
         return None;
     }
-    // \s+ : require at least one whitespace, then consume the run.
-    if i >= len || !is_ws(line[i]) {
+    // /^(#{1,6})\s+(.+?)\s*$/ : the char after the marker must be whitespace
+    // (\s+ ≥1) and the line must extend ≥2 past the marker (\s+ plus content ≥1).
+    // (.+?) is lazy, so when the tail is ALL whitespace it collapses (via regex
+    // backtracking) to the LAST whitespace char — not "no match".
+    if marker_len >= len || !is_ws(line[marker_len]) || len - marker_len < 2 {
         return None;
     }
-    while i < len && is_ws(line[i]) {
-        i += 1;
+    let mut cstart = marker_len;
+    while cstart < len && is_ws(line[cstart]) {
+        cstart += 1;
     }
-    // (.+?)\s*$ : trim trailing whitespace; require >= 1 char.
-    let mut end = len;
-    while end > i && is_ws(line[end - 1]) {
-        end -= 1;
+    let mut cend = len;
+    while cend > marker_len && is_ws(line[cend - 1]) {
+        cend -= 1;
     }
-    if end <= i {
-        return None;
-    }
-    let text = &line[i..end];
+    let text: Vec<u16> = if cstart < cend {
+        line[cstart..cend].to_vec()
+    } else {
+        vec![line[len - 1]]
+    };
+    let text = &text[..];
 
     let mut level = marker_len as i64;
     if level > 3 {
@@ -557,29 +562,33 @@ fn parse_list_line(line: &[u16], line_number: u32, offset: usize) -> Option<List
         return None;
     }
 
-    // \s+ : require at least one whitespace, then consume the run.
-    if i >= len || !is_ws(line[i]) {
+    // \s+(.+?)\s*$ : the char after the glyph must be whitespace and the line
+    // must extend ≥2 past it. As with headings, an all-whitespace tail collapses
+    // (regex backtracking) to the LAST whitespace char rather than failing.
+    let gstart = i;
+    if gstart >= len || !is_ws(line[gstart]) || len - gstart < 2 {
         return None;
     }
-    while i < len && is_ws(line[i]) {
-        i += 1;
+    let mut cstart = gstart;
+    while cstart < len && is_ws(line[cstart]) {
+        cstart += 1;
     }
-
-    // (.+?)\s*$ : trim trailing whitespace; require >= 1 char.
-    let mut end = len;
-    while end > i && is_ws(line[end - 1]) {
-        end -= 1;
+    let mut cend = len;
+    while cend > gstart && is_ws(line[cend - 1]) {
+        cend -= 1;
     }
-    if end <= i {
-        return None;
-    }
+    let (text, text_offset) = if cstart < cend {
+        (line[cstart..cend].to_vec(), offset + cstart) // = offset + markerStart + marker.length
+    } else {
+        (vec![line[len - 1]], offset + (len - 1))
+    };
 
     let _ = marker_start;
     Some(ListLine {
         ordered,
-        text: line[i..end].to_vec(),
+        text,
         line_number,
-        offset: offset + i, // = offset + markerStart + marker.length
+        offset: text_offset,
         source_offset: offset,
         source_length: len,
     })
