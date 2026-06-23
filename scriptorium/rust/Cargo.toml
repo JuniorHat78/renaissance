@@ -17,6 +17,11 @@ crate-type = ["cdylib", "rlib"]
 name = "scriptorium-parser"
 path = "src/main.rs"
 
+# The native author server (R2) — std-only HTTP, the Node-killer.
+[[bin]]
+name = "scriptorium-server"
+path = "src/bin/server.rs"
+
 [profile.release]
 opt-level = 2
 # Abort on panic — no unwinding tables, and a clean import-free wasm module.

@@ -495,10 +495,20 @@ PWA or native. R4–R5 are the shell, decided in §8.
   glue* (via a fetch shim in Node) over the full set — 565 byte-identical, in CI.
   Remaining: a Playwright in-browser parity check (closes `SCRIPTORIUM.md` §12
   blocker 1 fully) and the eventual `parse.js` retirement at R3.
-- **R2 — the Rust server.** Port `server.js`'s contract (read/write, atomic
-  writes, path safety, `--open`) to the binary; the binary embeds/serves the
-  editor assets + `parser.wasm`. Node is no longer required to *run* Scriptorium.
-  Done = `scriptorium(.exe)` boots the editor end-to-end with no Node installed.
+- **R2 — the Rust server. [core DONE; differential-tested in CI]** A std-only
+  HTTP server (`scriptorium/rust/src/bin/server.rs`, no crates) replicates
+  `server.js`: static serving, `GET/PUT /api/section`, `GET/PUT /api/essays`,
+  atomic writes, path safety, per-essay `source_dir` + slug-uniqueness, save-side
+  newline normalization. JSON read/write uses `json_value` — **verified
+  byte-identical to `JSON.stringify` locally via wasm** (compact + 2-space, incl.
+  the real `essays.json` + 400 fuzz). A differential oracle
+  (`scripts/tests/rust-server-oracle.js`) boots node + rust against isolated
+  content and compares status + JSON bodies + bytes-written (15 cases; node-vs-node
+  green locally, node-vs-rust in CI). **Deferred:** `/api/doctor` (JS-only, not
+  re-implemented — the route returns a placeholder and is not compared); embedding
+  the editor assets / `parser.wasm` into the binary (R2 ships file-served);
+  `--open`/`--app` launch parity (the native binary is a server, the launchers
+  stay on node for now). Node is no longer required to *serve* the editor.
 - **R3 — the cutover (retire `parse.js`).** After the oracle has been green long
   enough to trust, make the WASM parser the only browser parser and the Rust
   parser the one authority; `parse.js` is retired from the Scriptorium runtime

@@ -5,9 +5,26 @@
 
 mod ast;
 mod json;
+pub mod json_value;
 mod parser;
 
 pub use ast::Document;
+
+/// Reformat a JSON document (parse + re-serialize). `pretty` → 2-space like
+/// `JSON.stringify(v, null, 2)`; otherwise compact like `JSON.stringify(v)`.
+/// Used to verify the json_value module byte-for-byte against Node (R2).
+pub fn json_reformat(units: &[u16], pretty: bool) -> String {
+    match json_value::parse(units) {
+        Ok(v) => {
+            if pretty {
+                json_value::to_pretty(&v, 2)
+            } else {
+                json_value::to_compact(&v)
+            }
+        }
+        Err(e) => format!("__parse_error__: {}", e.0),
+    }
+}
 
 /// Parse a buffer of UTF-16 code units into the content AST.
 pub fn parse_document(units: &[u16]) -> Document {
@@ -61,12 +78,34 @@ mod wasm_abi {
     /// `ptr`/`byte_len` must describe a readable UTF-16LE buffer.
     #[no_mangle]
     pub unsafe extern "C" fn parse_utf16(ptr: *const u8, byte_len: usize) -> u64 {
-        let bytes = std::slice::from_raw_parts(ptr, byte_len);
-        let units: Vec<u16> = bytes
+        let units = utf16le_units(ptr, byte_len);
+        pack(crate::parse_to_json(&units))
+    }
+
+    /// Reformat UTF-16LE JSON as 2-space-pretty (for verifying json_value).
+    /// # Safety: see `parse_utf16`.
+    #[no_mangle]
+    pub unsafe extern "C" fn json_pretty2(ptr: *const u8, byte_len: usize) -> u64 {
+        let units = utf16le_units(ptr, byte_len);
+        pack(crate::json_reformat(&units, true))
+    }
+
+    /// Reformat UTF-16LE JSON as compact (for verifying json_value).
+    /// # Safety: see `parse_utf16`.
+    #[no_mangle]
+    pub unsafe extern "C" fn json_compact(ptr: *const u8, byte_len: usize) -> u64 {
+        let units = utf16le_units(ptr, byte_len);
+        pack(crate::json_reformat(&units, false))
+    }
+
+    unsafe fn utf16le_units(ptr: *const u8, byte_len: usize) -> Vec<u16> {
+        std::slice::from_raw_parts(ptr, byte_len)
             .chunks_exact(2)
             .map(|c| u16::from_le_bytes([c[0], c[1]]))
-            .collect();
-        let json = crate::parse_to_json(&units);
+            .collect()
+    }
+
+    fn pack(json: String) -> u64 {
         let out = json.into_bytes().into_boxed_slice();
         let out_len = out.len();
         let out_ptr = std::boxed::Box::into_raw(out) as *mut u8 as usize;

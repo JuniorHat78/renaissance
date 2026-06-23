@@ -17,18 +17,24 @@ on:
     paths:
       - "scriptorium/rust/**"
       - "scriptorium/wasm-parser.js"
+      - "scriptorium/server.js"
       - "scripts/ast/**"
       - "scripts/tests/rust-parser-oracle.js"
       - "scripts/tests/rust-wasm-oracle.js"
+      - "scripts/tests/rust-json-roundtrip.js"
+      - "scripts/tests/rust-server-oracle.js"
       - "scripts/tests/lib/parser-oracle-corpus.js"
       - ".github/workflows/scriptorium-rust-oracle.yml"
   pull_request:
     paths:
       - "scriptorium/rust/**"
       - "scriptorium/wasm-parser.js"
+      - "scriptorium/server.js"
       - "scripts/ast/**"
       - "scripts/tests/rust-parser-oracle.js"
       - "scripts/tests/rust-wasm-oracle.js"
+      - "scripts/tests/rust-json-roundtrip.js"
+      - "scripts/tests/rust-server-oracle.js"
       - "scripts/tests/lib/parser-oracle-corpus.js"
       - ".github/workflows/scriptorium-rust-oracle.yml"
   workflow_dispatch:
@@ -105,3 +111,38 @@ jobs:
 
       - name: Run the wasm equivalence oracle
         run: npm run oracle:rust-wasm
+
+      - name: Run the JSON round-trip oracle (json_value ≡ JSON.stringify)
+        run: npm run oracle:rust-json
+
+  server-oracle:
+    name: server oracle (rust ≡ node)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            scriptorium/rust/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('scriptorium/rust/**/*.rs', 'scriptorium/rust/Cargo.toml') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Build the native server
+        run: npm run build:rust-server
+
+      - name: Run the differential server oracle (rust vs node)
+        env:
+          SCRIPTORIUM_SERVER_BIN: scriptorium/rust/target/release/scriptorium-server
+        run: npm run oracle:rust-server
