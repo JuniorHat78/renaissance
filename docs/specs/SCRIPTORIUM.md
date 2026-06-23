@@ -211,3 +211,60 @@ Each phase is shippable and leaves the tool usable. Per-checkpoint commits.
   the caret→node mapping (§4) possible.
 - `docs/PROJECT-STATE.md` — overall orientation; add Scriptorium to §9 once P0
   lands.
+
+## 12. Review findings — to resolve before P1 hardens (2026-06-23)
+
+An adversarial design review against the real AST surfaced blockers the P0–P2
+scaffold does not yet address. Recorded here so they're not lost; resolve in
+priority order.
+
+**BLOCKERS**
+1. **The §2 byte-identical guard tests a tautology, not the real risk.** It
+   compares `contentAstFor(disk)` to the compiled artifact — both the *same Node
+   path* — so it can't catch the actual divergence vector: the **browser**
+   `core/render/parse.js` (mutating a shared global, load-order dependent) vs
+   **Node** `ast/index.js` (frozen merged surface). Rewrite the guard to drive
+   the browser modules (Playwright — already a dep) against a fresh Node compile.
+   Also add `scriptorium/editor.html` to the `ast doctor` load-order check
+   (`scripts/ast-tools/doctor.js` `SHELLS` only lists the four reader shells).
+2. **§4's "AST carries source positions for this use" is only partly true.**
+   `render.js` stamps `data-source-start/end` only on heading/paragraph/
+   pull_quote/list_item — **blockquote, list, and divider containers are
+   unaddressable**, so "select this node" / node-aware commands silently exclude
+   them. Worse: the shipped AST is `withoutLeadingHeadings`, but offsets are in
+   **full-raw-file** coordinates — the editor must preview the *full* parse (it
+   does), and the outline must mark leading headings as "stripped from the
+   published page." Pin the coordinate space in the spec and enumerate which
+   blocks are addressable.
+3. **The `raw/<slug>/<n>.txt` path model is `source_dir`-blind.** Paths are
+   per-essay `source_dir`-relative (today `raw/<slug>/`, which *happens* to equal
+   `raw/<slug>`); the server keys off `slug`. Resolve `source_dir` in the server
+   and doctor before this diverges. Add a **slug-uniqueness** check — duplicate
+   slugs collide on `data/compiled/<slug>.json` (compiler last-wins, reader
+   first-wins → guaranteed divergence).
+
+**SHOULD-FIX**
+- **Normalization is applied at three sites with two regexes** (`normalizeSource`
+  strips `\r\n?`; the compiler strips only `\r\n`; `content.js` strips `\r\n?`).
+  Decide where the editor normalizes (on load / save / never) and name it, or a
+  lone `\r` breaks byte-identity.
+- **Node-aware commands break native undo.** `setRangeText`/value surgery
+  fragments the textarea undo stack, so "native undo for v1" silently fails once
+  P3 lands. Decide `execCommand('insertText')` vs a snapshot stack *before* P3.
+- **Command correctness must be parser-defined, not naive string wrapping.**
+  Emphasis open/close is boundary-sensitive; wrapping `*…*` next to alphanumerics
+  won't parse. Each command should re-parse and assert the intended node now
+  exists, else revert (a per-command oracle).
+- **Quarantine needs a real check.** The asset-budget regex only matches
+  `scripts/`/`styles/`, so it is *not* the enforcer. Add a dedicated grep over
+  shipped HTML/JS + `sw.js` PRECACHE for the literal `scriptorium` path, and a CI
+  job proving `build:artifacts` runs with `scriptorium/` deleted.
+- **Doctor drift gaps:** draft (`published:false`) artifact handling; "authored
+  subtitle that can never render" when `show_subtitles:false`; `section_meta` key
+  type (string vs number) normalization; stale-artifact-with-no-source.
+
+**DECIDE NOW (§10 answered by reality):** `source_dir` is per-essay and two
+essays already exist (Q4 is not deferrable — it's the server's path contract).
+And the **title's single home** must be decided before P1: the leading `#`/`##`
+in each `.txt` is stripped by `withoutLeadingHeadings` and never reaches the
+reader, while `section_meta.title` does — they currently coexist and disagree.
