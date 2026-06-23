@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Scriptorium — Renaissance authoring</title>
+  <link rel="stylesheet" href="editor.css">
+  <!--
+    THE SPINE (SCRIPTORIUM.md §2): author through the ONE parse authority.
+    core.js  -> the shared AST surface + normalizeAstInput (no parser of its own)
+    render.js -> the real consume-side DOM renderer the deploy uses
+    parse.js  -> registers the string parser into core; allowed here because this
+                 is local author tooling, NOT the shipped site (quarantine §6
+                 forbids the site importing scriptorium, not the reverse).
+    These are the site's OWN modules. There is no editor-private parser.
+  -->
+  <script src="../scripts/ast/core.js" defer></script>
+  <script src="../scripts/ast/render.js" defer></script>
+  <script src="../scripts/ast/parse.js" defer></script>
+  <script src="editor.js" defer></script>
+</head>
+<body>
+  <header class="app-header">
+    <div class="app-brand">
+      <span class="app-title">Scriptorium</span>
+      <span class="app-sub">local authoring · Renaissance</span>
+    </div>
+    <div class="picker" role="group" aria-label="Section picker">
+      <label class="field">
+        <span class="field-label">Essay</span>
+        <select id="essay-select" aria-label="Choose essay">
+          <option value="">Loading…</option>
+        </select>
+      </label>
+      <label class="field">
+        <span class="field-label">Section</span>
+        <select id="section-select" aria-label="Choose section" disabled>
+          <option value="">—</option>
+        </select>
+      </label>
+      <button id="save-button" class="button button-primary" type="button" disabled>Save</button>
+      <span id="save-status" class="save-status" role="status" aria-live="polite"></span>
+    </div>
+  </header>
+
+  <main class="workbench">
+    <section class="pane pane-edit" aria-label="Editor">
+      <div class="pane-head">
+        <span class="pane-title">Source</span>
+        <span id="doc-stats" class="pane-note muted" aria-live="polite"></span>
+      </div>
+      <textarea
+        id="editor"
+        class="editor-textarea"
+        spellcheck="true"
+        autocomplete="off"
+        autocapitalize="off"
+        autocorrect="off"
+        wrap="soft"
+        aria-label="Section source text"
+        placeholder="Choose an essay and section to begin, or start typing…"
+      ></textarea>
+    </section>
+
+    <section class="pane pane-preview" aria-label="Live preview">
+      <div class="pane-head">
+        <span class="pane-title">Preview</span>
+        <span class="pane-note muted">render(parse(buffer)) · the shipped DOM</span>
+      </div>
+      <article id="preview" class="preview chapter-content" aria-live="polite"></article>
+    </section>
+
+    <aside class="pane pane-side" aria-label="Workbench">
+      <div class="side-block">
+        <div class="pane-head">
+          <span class="pane-title">Diagnostics</span>
+          <span id="diag-count" class="badge" aria-live="polite">0</span>
+        </div>
+        <ul id="diagnostics" class="diagnostics" aria-live="polite">
+          <li class="diag-empty muted">Clean — no diagnostics.</li>
+        </ul>
+      </div>
+
+      <div class="side-block">
+        <div class="pane-head">
+          <span class="pane-title">Outline</span>
+        </div>
+        <ul id="outline" class="outline" aria-label="Heading outline">
+          <li class="outline-empty muted">No headings.</li>
+        </ul>
+      </div>
+    </aside>
+  </main>
+</body>
+</html>

@@ -1,0 +1,513 @@
+/* Scriptorium editor — local author tooling, never shipped.
+ *
+ * A small, self-contained stylesheet. It echoes the site's warm-book palette
+ * (styles/site.css) for tonal continuity but does NOT import it — Scriptorium
+ * keeps its own restrained surface (quarantine §6: the site never depends on
+ * scriptorium; scriptorium keeps its weight off the shipped budget too). */
+
+:root {
+  --font-title: "Garamond", "Palatino Linotype", "Book Antiqua", serif;
+  --font-body: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", serif;
+  --font-ui: "Optima", "Gill Sans MT", "Trebuchet MS", sans-serif;
+  --font-mono: "SF Mono", "Cascadia Mono", "Consolas", "Liberation Mono", monospace;
+
+  --canvas: #efe5d6;
+  --paper: #f8f2e7;
+  --paper-edit: #fbf6ed;
+  --text: #2a2018;
+  --muted: #6d5d4a;
+  --line: #cdbba3;
+  --accent: #a34f2a;
+  --accent-hover: #8f4322;
+  --accent-ink: #fff7ef;
+  --accent-wash: rgba(163, 79, 42, 0.08);
+
+  --ok: #4a6b3a;
+  --warn: #9a6a1c;
+  --error: #9a2f23;
+
+  --radius: 6px;
+  --gap: 14px;
+  --header-h: 58px;
+}
+
+:root[data-theme="dark"] {
+  --canvas: #18130f;
+  --paper: #211a14;
+  --paper-edit: #1c1611;
+  --text: #f0e2d1;
+  --muted: #b69f84;
+  --line: #534233;
+  --accent: #c96d3e;
+  --accent-hover: #dd8050;
+  --accent-ink: #1f160f;
+  --accent-wash: rgba(201, 109, 62, 0.14);
+
+  --ok: #8fb073;
+  --warn: #d8a64e;
+  --error: #e08070;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+body {
+  background-color: var(--canvas);
+  background-image:
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.18), transparent 200px),
+    radial-gradient(circle at 88% -12%, var(--accent-wash), transparent 46%);
+  color: var(--text);
+  font-family: var(--font-body);
+  line-height: 1.7;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* ---- header / picker --------------------------------------------------- */
+.app-header {
+  flex: 0 0 auto;
+  min-height: var(--header-h);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap);
+  padding: 8px 18px;
+  background: var(--paper);
+  border-bottom: 1px solid var(--line);
+}
+
+.app-brand {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+}
+
+.app-title {
+  font-family: var(--font-title);
+  font-size: 1.32rem;
+  letter-spacing: 0.01em;
+}
+
+.app-sub {
+  font-family: var(--font-ui);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--muted);
+}
+
+.picker {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.field-label {
+  font-family: var(--font-ui);
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+}
+
+select {
+  font-family: var(--font-ui);
+  font-size: 0.86rem;
+  color: var(--text);
+  background: var(--paper-edit);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 6px 9px;
+  min-width: 150px;
+  max-width: 260px;
+}
+
+select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+select:disabled {
+  opacity: 0.55;
+}
+
+.button {
+  font-family: var(--font-ui);
+  font-size: 0.84rem;
+  letter-spacing: 0.02em;
+  color: var(--text);
+  background: var(--paper-edit);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 7px 16px;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.button:hover {
+  border-color: var(--accent);
+}
+
+.button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.button-primary {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: var(--accent);
+}
+
+.button-primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+.save-status {
+  font-family: var(--font-ui);
+  font-size: 0.74rem;
+  color: var(--muted);
+  min-width: 90px;
+}
+
+.status-ok { color: var(--ok); }
+.status-dirty { color: var(--warn); }
+.status-busy { color: var(--muted); }
+.status-error { color: var(--error); }
+
+/* ---- workbench layout (3 panes) ---------------------------------------- */
+.workbench {
+  flex: 1 1 auto;
+  display: grid;
+  grid-template-columns: 1fr 1fr 300px;
+  gap: var(--gap);
+  padding: var(--gap);
+  min-height: 0; /* let children scroll instead of overflowing the grid */
+}
+
+.pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.pane-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--paper);
+}
+
+.pane-title {
+  font-family: var(--font-ui);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--muted);
+}
+
+.pane-note {
+  font-family: var(--font-ui);
+  font-size: 0.68rem;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+/* ---- editing surface (the textarea — the ONLY caret) ------------------- */
+.editor-textarea {
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 0;
+  resize: none;
+  border: 0;
+  outline: none;
+  padding: 18px 20px;
+  background: var(--paper-edit);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.92rem;
+  line-height: 1.65;
+  tab-size: 2;
+}
+
+.editor-textarea::placeholder {
+  color: var(--muted);
+  opacity: 0.8;
+}
+
+.editor-textarea:disabled {
+  opacity: 0.6;
+}
+
+/* ---- preview (the real shipped DOM) ----------------------------------- */
+.preview {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 22px 26px;
+  font-family: var(--font-body);
+  font-size: 1.02rem;
+}
+
+.preview h1,
+.preview h2,
+.preview h3 {
+  font-family: var(--font-title);
+  line-height: 1.25;
+  color: var(--text);
+  margin: 1.2em 0 0.5em;
+}
+
+.preview h1 { font-size: 1.7rem; }
+.preview h2 { font-size: 1.4rem; }
+.preview h3 { font-size: 1.15rem; }
+
+.preview p {
+  margin: 0 0 1em;
+}
+
+.preview a {
+  color: var(--accent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+.preview code {
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+  background: var(--accent-wash);
+  border-radius: 3px;
+  padding: 0.1em 0.35em;
+}
+
+.preview blockquote {
+  margin: 1em 0;
+  padding-left: 1em;
+  border-left: 3px solid var(--accent-soft, var(--line));
+  color: var(--muted);
+}
+
+.preview .pull-quote {
+  font-family: var(--font-title);
+  font-size: 1.3rem;
+  font-style: italic;
+  line-height: 1.4;
+  color: var(--accent);
+  margin: 1.2em 0;
+}
+
+.preview hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 1.8em auto;
+  width: 42%;
+}
+
+.preview ul,
+.preview ol {
+  margin: 0 0 1em;
+  padding-left: 1.4em;
+}
+
+.preview-error {
+  font-family: var(--font-ui);
+  font-size: 0.86rem;
+  color: var(--error);
+  background: rgba(154, 47, 35, 0.08);
+  border: 1px solid var(--error);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+}
+
+/* ---- side rail (diagnostics + outline) -------------------------------- */
+.pane-side {
+  gap: 0;
+}
+
+.side-block {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1 1 50%;
+}
+
+.side-block + .side-block {
+  border-top: 1px solid var(--line);
+}
+
+.badge {
+  font-family: var(--font-ui);
+  font-size: 0.72rem;
+  min-width: 1.5em;
+  text-align: center;
+  border-radius: 999px;
+  padding: 1px 7px;
+  background: var(--line);
+  color: var(--text);
+}
+
+.badge-clean {
+  background: color-mix(in srgb, var(--ok) 28%, transparent);
+  color: var(--ok);
+}
+
+.badge-flag {
+  background: color-mix(in srgb, var(--warn) 30%, transparent);
+  color: var(--warn);
+}
+
+.diagnostics,
+.outline {
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.diag {
+  border: 1px solid var(--line);
+  border-left-width: 3px;
+  border-radius: var(--radius);
+  padding: 7px 9px;
+  margin-bottom: 6px;
+  background: var(--paper-edit);
+}
+
+.diag-error { border-left-color: var(--error); }
+.diag-warning { border-left-color: var(--warn); }
+.diag-info { border-left-color: var(--accent); }
+
+.diag-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.diag-label {
+  font-family: var(--font-ui);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.diag-loc {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--accent);
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.diag-loc:hover {
+  text-decoration: underline;
+}
+
+.diag-message {
+  font-family: var(--font-ui);
+  font-size: 0.74rem;
+  margin-top: 3px;
+}
+
+.diag-empty,
+.outline-empty {
+  font-family: var(--font-ui);
+  font-size: 0.78rem;
+  padding: 8px 6px;
+}
+
+.outline-item {
+  margin: 1px 0;
+}
+
+.outline-link {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font-family: var(--font-ui);
+  font-size: 0.82rem;
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  padding: 4px 6px;
+  cursor: pointer;
+}
+
+.outline-link:hover {
+  background: var(--accent-wash);
+  color: var(--accent);
+}
+
+.outline-h1 .outline-link { padding-left: 6px; font-weight: 600; }
+.outline-h2 .outline-link { padding-left: 18px; }
+.outline-h3 .outline-link { padding-left: 30px; color: var(--muted); }
+
+.doc-stats {
+  white-space: nowrap;
+}
+
+/* ---- responsive: stack panes on narrow viewports ---------------------- */
+@media (max-width: 900px) {
+  body {
+    overflow: auto;
+    height: auto;
+    min-height: 100vh;
+  }
+
+  .workbench {
+    grid-template-columns: 1fr;
+    height: auto;
+  }
+
+  .editor-textarea {
+    min-height: 320px;
+  }
+
+  .preview {
+    min-height: 320px;
+  }
+
+  .pane-side {
+    min-height: 400px;
+  }
+}
