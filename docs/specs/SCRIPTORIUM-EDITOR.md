@@ -12,7 +12,7 @@
 > guard. Read `SCRIPTORIUM.md` first; this assumes its spine invariant (§2) and
 > caret boundary (§4) as settled law.
 >
-> Last refreshed: 2026-06-23.
+> Last refreshed: 2026-06-24.
 
 ---
 
@@ -329,3 +329,7 @@ Each is a per-checkpoint commit and leaves the editor usable.
   containers (§3) are feedback *to* this doc.
 - `docs/specs/AST-ANCHORS-SPEC.md` — the source-position / passage-anchor
   machinery the mapping rides.
+- `docs/specs/SCRIPTORIUM-RUST-PARSER.md` — the crate-free Rust port of the parser
+  that must satisfy this layer's coordinate contract (§3.1) byte-for-byte; its
+  §4.2 is the UTF-16 offset reconciliation that keeps the caret↔node mapping
+  exact.

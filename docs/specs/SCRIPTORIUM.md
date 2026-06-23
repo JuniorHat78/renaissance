@@ -9,7 +9,7 @@
 > we build to it, and the planning prose retires when it ships (the convention
 > established by the AST compiler).
 >
-> Last refreshed: 2026-06-23.
+> Last refreshed: 2026-06-24.
 
 ---
 
@@ -211,6 +211,12 @@ Each phase is shippable and leaves the tool usable. Per-checkpoint commits.
 
 - `docs/specs/SCRIPTORIUM-EDITOR.md` — the living editor: the §8 P3 structural
   layer (two-way source↔preview sync + AST-aware commands), deepened.
+- `docs/specs/SCRIPTORIUM-RUST-PARSER.md` — the §7 server + the parser ported to
+  a single crate-free Rust binary (WASM in the browser, native in the binary),
+  killing the last runtime dependency (Node). The second parser is permitted
+  only because the equivalence oracle proves it byte-identical, and is retired
+  back to one parser at cutover. The "actual zero-dep desktop app" beyond the §8
+  PWA.
 - `docs/specs/AST-COMPILER.md` — the parse/consume authority Scriptorium rides.
 - `docs/specs/AST-DIALECT.md` — the grammar the editor authors in (and stresses).
 - `docs/specs/AST-ANCHORS-SPEC.md` — source positions / passage anchors that make
