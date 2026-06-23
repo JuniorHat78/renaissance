@@ -9,9 +9,13 @@
 > second implementation exist without violating the spine.
 >
 > This is the answer to "an *actual* zero-dependency desktop app, not just a PWA"
-> (`docs/specs/SCRIPTORIUM.md` §8 P3's PWA capstone, taken to the metal). Read
-> `SCRIPTORIUM.md` first; this assumes its spine invariant (§2), caret boundary
-> (§4), and quarantine (§6) as settled law.
+> (`docs/specs/SCRIPTORIUM.md` §8 P3's PWA capstone, taken to the metal). The
+> shell is a separate axis from the parser (§8): the PWA is the *interim* shell,
+> and the **destination is a true native app — Windows-first, hand-rolled Win32 +
+> RichEdit, zero crate** — where the OS text control owns the caret, so going
+> native *honors* the §4 boundary rather than breaching it. Read `SCRIPTORIUM.md`
+> first; this assumes its spine invariant (§2), caret boundary (§4), and
+> quarantine (§6) as settled law.
 >
 > Status: **spec / not started.** Doc-driven — written first, built against, and
 > retired into the parent specs when it ships (the AST-compiler convention).
@@ -380,7 +384,10 @@ The point is purity, so the rules are strict and each is achievable in `std`:
   `(ptr, len)`; `editor.js` `JSON.parse`s that string. Manual marshalling, but
   truly crate-free. (`wasm-bindgen` would be ergonomic but is a build-time dep
   and we are spending effort precisely to avoid that class.)
-- **No webview crate, no FFI to a system webview.** The window is the PWA (§3, §8).
+- **No webview crate, ever.** The interim shell is the PWA/`--app` window (§8.1);
+  the destination shell is a hand-rolled native window, *not* an embedded webview
+  (§8.2). Binding crates like `windows-rs` are a separate, weaker question
+  answered in §8.2 (decision: hand-roll the `extern` blocks).
 - **HTTP/atomic-writes/launch** are `std::net`, `std::fs`, `std::process` — the
   Node `server.js` is already small and hand-rolled, so this is a direct port of
   a known-good contract, not new surface.
@@ -389,19 +396,92 @@ The one honest concession: a build now needs the Rust toolchain + the `wasm32`
 target, where today the editor is *zero-build* (open the HTML, the parser is
 view-source JS). That trade is real and is in §10.
 
-## 8. The window — PWA now, native frame deferred
+## 8. The window — the shell is a separate axis, and a true native app is the destination
 
-- **v1 shell = the OS browser as an installed PWA.** The Rust binary serves and
-  opens it; the manifest/SW from the P3 capstone are unchanged. This is the
-  lowest-coupling "real app" available and it already works.
-- **Deferred: a native chromeless frame.** This is the *only* part of the whole
-  ambition that cannot be crate-free — it needs a webview binding (`wry`/`tao` or
-  hand-rolled per-OS FFI). It is documented here as a known, deliberate
-  non-goal for v1, to be revisited only if the PWA frame proves insufficient.
-  When/if taken, it is a *shell* decision and does not touch the parser or the
-  oracle.
+**The parser and server (R0–R3) are shell-agnostic.** The same zero-crate Rust
+core backs *any* frame — a PWA, a Chromium `--app` window, or a true native
+window. So the shell decision is genuinely independent of the parser work and
+can be made later without changing it. That independence is the whole reason the
+parser is the right first move regardless of where the shell lands.
+
+There are three tiers, and the honest sequencing is **interim PWA now, true
+native Windows-first as the destination, cross-platform only if it's ever
+actually needed.**
+
+### 8.1 Interim shell — the PWA / Chromium `--app` window (R4)
+
+The way-station, not the summit. Zero dependency, ships today, lets authoring
+continue while the parser lands:
+
+- **Installed PWA (`display: standalone`)** — own window, own icon, no browser
+  chrome; the Rust binary serves it and opens it (the existing `--open`).
+- **`--app=URL` Chromium window** — the binary can launch a *chromeless*
+  single-purpose window with no install required, falling back to PWA/tab if no
+  Chromium browser is found. Zero crates.
+- **`window-controls-overlay`** — draw the toolbar into the title bar for a more
+  bespoke, less-browsery frame. A polish lever, still zero dep.
+
+This tier is honest about what it is: a browser engine in a chrome-less window.
+It looks like a real app at a glance, but it is not the destination.
+
+### 8.2 Destination — a true native app, Windows-first, zero crate (R5)
+
+The real goal: an *actual* native desktop application, not a browser engine in a
+frame. The key unlock that makes this finite instead of scope-exploding:
+
+> **Going native does NOT mean re-solving the editing surface.** `SCRIPTORIUM.md`
+> §4 forbids hand-building a caret — and a native app honors that, because the
+> **OS hands you a mature multiline text control** (Win32 RichEdit, macOS
+> `NSTextView`, GTK `GtkSourceView`) that owns caret, selection, IME, and undo
+> natively, often better than a `<textarea>`. The OS owns the caret, not us. A
+> native text control *satisfies* the §4 boundary; it does not breach it.
+
+It also does not threaten the spine (`SCRIPTORIUM.md` §2): the spine is "author
+through the one parse authority," and the **native Rust parser already is that.**
+A native GUI calling the native parser is *more* spine-coherent than
+WASM-in-a-browser, not less. Everything above the caret (mapping, commands, the
+per-command oracle) is the platform-agnostic Rust core, written once.
+
+**The decision: Windows-only first, with a hand-rolled `extern "system"` Win32 +
+RichEdit shell — truly zero crate.** This is the *only* combination consistent
+with everything held above: absolute zero-dependency **and** actually-native
+**and** a great text surface (the OS control gives caret/IME/undo for free). The
+surface is small — `CreateWindowExW`, the message loop, `DefWindowProcW`,
+RichEdit via `LoadLibraryW` + `SendMessageW`/`EM_*`, and a handful of structs and
+constants — a few hundred lines of declarations, not a framework.
+
+The price of purity here is **single-platform-first**, and it is the right price:
+for a personal authoring tool run on a Windows machine, macOS/Linux backends are
+YAGNI. Only the *shell* is per-OS; the parser, document model, commands, and
+oracle are shared, so a future port re-implements the window layer only.
+
+> **On `windows-rs` (and "morally zero-dep").** A *binding* crate (`windows-rs`,
+> `objc2`, `gtk-rs`) adds no third-party *behaviour* — the behaviour is the OS
+> you call anyway; it ships only typed signatures/structs/constants. That is a
+> real category difference from a *logic* crate (`serde`, `regex`, a GUI
+> framework). But it is **still a crate** — in the lockfile, the supply chain,
+> `cargo audit`, and large — so by this spec's literal "zero crates" rule it does
+> *not* qualify as zero-dep. The genuinely zero-crate path is hand-written
+> `extern` blocks; the only thing `windows-rs` buys is eliminating
+> transcription/UB risk (a wrong struct layout or constant is undefined
+> behaviour, not a compile error). **Decision: hand-roll the `extern` blocks**
+> for true zero-crate purity, accepting the transcription-care burden. Reach for
+> `windows-rs` only if that burden proves to bite.
+
+### 8.3 Cross-platform — only if *other people* need it
+
+A fat cross-platform path (`gpui` — Zed's editor framework, the one place
+"native + great text editing in Rust" exists ready-made — or per-OS bindings) is
+the **only** point at which a real dependency earns its place. For a personal
+tool it is pure YAGNI and a betrayal of the zero-dep line. **It becomes the job
+only if the goal changes to "other people run this on Macs and Linux boxes."**
+Named here so the trigger is explicit, not so it's planned.
 
 ## 9. Phasing (each phase shippable; per-checkpoint commits)
+
+**R0–R3 are shell-agnostic** — they produce the one zero-crate core that any
+shell (§8) consumes, so they are the right first move whether the frame ends up
+PWA or native. R4–R5 are the shell, decided in §8.
 
 - **R0 — the parser, behind the oracle.** Port the full §5 grammar to a crate-
   free Rust library + the §4 canonical serializer. Stand up the §6 harness
@@ -422,7 +502,20 @@ view-source JS). That trade is real and is in §10.
   (it may remain in the wider repo for the reader pipeline — scope that
   separately). The second parser ceases to exist; one parser remains. This
   mirrors the AST-compiler P5 drop-parser.
-- **R4 (deferred) — native frame.** Only if §8 is ever taken.
+- **R4 — interim shell polish (§8.1).** The zero-dep "looks native" middle rungs
+  on the existing PWA: the binary launches a chromeless `--app` window (fallback
+  to PWA/tab), and `window-controls-overlay` for a bespoke title bar. Keeps
+  authoring pleasant *while* R5 is built; not the destination.
+- **R5 — the true native app, Windows-first, zero crate (§8.2).** A hand-rolled
+  `extern "system"` Win32 + RichEdit shell hosting the platform-agnostic Rust
+  core (parser, document model, commands, oracle). The OS text control owns the
+  caret (honors `SCRIPTORIUM.md` §4); the spine is satisfied by the native parser
+  it already calls. Single-platform on purpose — only the window layer is per-OS.
+  This is the destination, not a deferral.
+- **R6 (only if the goal changes) — cross-platform (§8.3).** A second/third OS
+  backend, and the one point a real dependency (`gpui` or per-OS bindings) earns
+  its place. Triggered solely by "other people run this on macOS/Linux," never by
+  default.
 
 ## 10. Risks & honest notes
 
@@ -449,6 +542,16 @@ view-source JS). That trade is real and is in §10.
   pulls focus the same way Scriptorium itself does (`SCRIPTORIUM.md` §9). Worth
   it only if "an actual zero-dep native runtime" is a goal we are choosing on
   purpose — name it, don't drift into it.
+- **The native shell (R5) is its own large effort *on top of* the parser.** R0–R3
+  is the parser/server; R5 is a hand-rolled Win32 + RichEdit application, which is
+  a second substantial undertaking (window, message loop, text-control wiring,
+  menus, dialogs, clipboard). Sequenced deliberately *after* the shell-agnostic
+  core so it is never on the critical path and the PWA (R4) keeps authoring alive
+  meanwhile. Don't conflate "the parser is done" with "the native app is done."
+- **Hand-rolled FFI carries UB risk (R5).** A mis-transcribed struct layout,
+  constant, or calling convention is undefined behaviour, not a compile error
+  (§8.2). Mitigate with a thin, tested FFI layer and small reviewable surface; if
+  it bites, `windows-rs` is the typed-but-crate fallback.
 
 ## 11. Decisions made here (call out / override me)
 
@@ -458,11 +561,17 @@ view-source JS). That trade is real and is in §10.
    hand-rolled serializer, matchers, and WASM marshalling. §7.
 3. **The parser operates over UTF-16 code units**, not `char`s or bytes, to match
    JS offset semantics exactly. §4.2.
-4. **The window stays the OS browser (PWA);** a native frame is deferred and is
-   the only crate-bearing piece. §8.
-5. **`stats` is replicated in Rust** (port `toSearchableText`/`wordCount`) rather
+4. **The shell is a separate axis; the parser (R0–R3) is shell-agnostic.** Interim
+   shell = PWA/`--app` (R4); **destination = a true native app, Windows-first,
+   hand-rolled `extern` Win32 + RichEdit, zero crate (R5)** — not a deferral, the
+   goal. The OS text control owns the caret, so native *honors* §4 rather than
+   breaching it. Cross-platform (R6) only if other people need macOS/Linux. §8.
+5. **No webview, ever; and `windows-rs` is not zero-dep.** A binding crate adds no
+   third-party *logic* but is still a crate (lockfile, supply chain, size), so we
+   hand-roll the `extern` blocks for true zero-crate purity. §8.2.
+6. **`stats` is replicated in Rust** (port `toSearchableText`/`wordCount`) rather
    than excluded from the canonical form. §4.3 — *weakest decision; see §12.*
-6. **Byte-identity is a hard CI gate** (deterministic correctness), unlike the
+7. **Byte-identity is a hard CI gate** (deterministic correctness), unlike the
    project's advisory metrics. §6.
 
 ## 12. Open questions
