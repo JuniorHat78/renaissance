@@ -756,6 +756,156 @@ if (!haveCompiledDir) {
 })();
 
 // ---------------------------------------------------------------------------
+// 7. FIND & REPLACE — the pure text-surgery engine (above the caret, §4).
+//
+// All matching goes through one compiled RegExp (literal queries escaped), so
+// case-insensitive search can't desync offsets. We assert match spans, options
+// (case / whole-word / regex), invalid-regex handling, zero-width safety, and
+// the replace surface. skip-with-warning if the module isn't present.
+// ---------------------------------------------------------------------------
+
+(function findReplaceUnit() {
+  const label = "find-replace: matches, options, replace, and regex safety";
+  let fr;
+  try {
+    fr = require("../../scriptorium/find-replace.js");
+  } catch (error) {
+    const reason =
+      error && error.code === "MODULE_NOT_FOUND"
+        ? "scriptorium/find-replace.js not present yet"
+        : "require threw: " + (error && error.message ? error.message : String(error));
+    skip(label, reason);
+    return;
+  }
+
+  if (typeof fr.findMatches !== "function" || typeof fr.replaceAll !== "function") {
+    skip(label, "find-replace interface differs");
+    return;
+  }
+
+  check(label, () => {
+    // Literal, case-insensitive by default. (Note: substring match — "other"
+    // would contain "the", so the fixture avoids that.)
+    let m = fr.findMatches("the The THE done", "the");
+    assert.strictEqual(m.length, 3, "case-insensitive literal should find 3");
+    assert.deepStrictEqual(m[0], { start: 0, end: 3 }, "first match span wrong");
+    assert.deepStrictEqual(m[1], { start: 4, end: 7 }, "second match span wrong");
+
+    // Case-sensitive narrows it.
+    assert.strictEqual(fr.findMatches("the The THE", "the", { caseSensitive: true }).length, 1, "case-sensitive should find 1");
+
+    // Whole-word: "cat" does not match inside "category".
+    assert.strictEqual(fr.findMatches("cat category cat.", "cat", { wholeWord: true }).length, 2, "whole-word count wrong");
+
+    // Offsets stay correct under case-insensitivity (no toLowerCase desync).
+    m = fr.findMatches("aXbXc", "x");
+    assert.deepStrictEqual(m, [{ start: 1, end: 2 }, { start: 3, end: 4 }], "ci offsets desynced");
+
+    // Empty query → no matches; invalid regex → no matches + isValid false.
+    assert.deepStrictEqual(fr.findMatches("abc", ""), [], "empty query should match nothing");
+    assert.strictEqual(fr.isValid("[", { regex: true }), false, "invalid regex should be invalid");
+    assert.deepStrictEqual(fr.findMatches("abc", "[", { regex: true }), [], "invalid regex should match nothing");
+
+    // Regex mode + zero-width safety (a* must terminate).
+    assert.strictEqual(fr.findMatches("abc", "a.c", { regex: true }).length, 1, "regex a.c should match once");
+    const zw = fr.findMatches("aaa", "a*", { regex: true });
+    assert.ok(zw.length >= 1 && zw.length < 100, "zero-width regex should terminate finitely");
+
+    // nextMatchIndex forward/backward with wrap.
+    const ms = [{ start: 2, end: 3 }, { start: 8, end: 9 }];
+    assert.strictEqual(fr.nextMatchIndex(ms, 0, true), 0, "forward from 0 → first");
+    assert.strictEqual(fr.nextMatchIndex(ms, 5, true), 1, "forward from 5 → second");
+    assert.strictEqual(fr.nextMatchIndex(ms, 9, true), 0, "forward past end wraps to first");
+    assert.strictEqual(fr.nextMatchIndex(ms, 5, false), 0, "backward from 5 → first");
+    assert.strictEqual(fr.nextMatchIndex(ms, 0, false), 1, "backward past start wraps to last");
+
+    // replaceRange splices + reports the inserted selection.
+    const rr = fr.replaceRange("hello world", 6, 11, "there");
+    assert.strictEqual(rr.text, "hello there", "replaceRange text wrong");
+    assert.deepStrictEqual([rr.selectionStart, rr.selectionEnd], [6, 11], "replaceRange selection wrong");
+
+    // replaceAll literal: count + verbatim replacement ($ is NOT a backref).
+    let ra = fr.replaceAll("foo foo foo", "foo", "bar");
+    assert.ok(ra.text === "bar bar bar" && ra.count === 3, "literal replaceAll wrong: " + JSON.stringify(ra));
+    ra = fr.replaceAll("x", "x", "$&");
+    assert.strictEqual(ra.text, "$&", "literal replacement must treat $ literally");
+
+    // replaceAll regex: $1/$2 backrefs honored.
+    ra = fr.replaceAll("ab cd", "(\\w)(\\w)", "$2$1", { regex: true });
+    assert.strictEqual(ra.text, "ba dc", "regex backref replacement wrong: " + ra.text);
+  });
+})();
+
+// ---------------------------------------------------------------------------
+// 8. PALETTE — fuzzy ranking + the slash trigger (pure command-surface brains).
+// ---------------------------------------------------------------------------
+
+(function paletteUnit() {
+  const label = "palette: fuzzy ranking + slash-trigger detection";
+  let pal;
+  try {
+    pal = require("../../scriptorium/palette.js");
+  } catch (error) {
+    const reason =
+      error && error.code === "MODULE_NOT_FOUND"
+        ? "scriptorium/palette.js not present yet"
+        : "require threw: " + (error && error.message ? error.message : String(error));
+    skip(label, reason);
+    return;
+  }
+
+  if (typeof pal.filter !== "function" || typeof pal.slashContext !== "function") {
+    skip(label, "palette interface differs");
+    return;
+  }
+
+  check(label, () => {
+    // fuzzyMatch: subsequence hit vs miss; empty query.
+    assert.ok(pal.fuzzyMatch("hd", "Heading") !== null, "'hd' should fuzzy-match 'Heading'");
+    assert.strictEqual(pal.fuzzyMatch("zzz", "Heading"), null, "non-subsequence should be null");
+    assert.deepStrictEqual(pal.fuzzyMatch("", "Heading").positions, [], "empty query → empty positions");
+
+    const items = [
+      { id: "strong", label: "Toggle bold" },
+      { id: "link", label: "Insert link" },
+      { id: "divider", label: "Insert divider", keywords: "hr rule horizontal line" },
+      { id: "heading-1", label: "Heading 1" },
+    ];
+
+    // Empty query → all items in order.
+    const all = pal.filter("", items);
+    assert.strictEqual(all.length, 4, "empty query should return all items");
+    assert.strictEqual(all[0].id, "strong", "empty query should preserve order");
+
+    // "bold" ranks the bold command first.
+    let r = pal.filter("bold", items);
+    assert.ok(r.length >= 1 && r[0].id === "strong", "'bold' should rank Toggle bold first: " + JSON.stringify(r.map((x) => x.id)));
+
+    // Keyword fallback: "rule" finds the divider via its keywords.
+    r = pal.filter("rule", items);
+    assert.ok(r.some((x) => x.id === "divider"), "'rule' should match divider via keywords");
+
+    // An exact prefix ranks ahead of a scattered match.
+    r = pal.filter("head", items);
+    assert.strictEqual(r[0].id, "heading-1", "'head' should rank Heading 1 first");
+
+    // slashContext: triggers at line/text start or after whitespace; never mid-word.
+    let s = pal.slashContext("/", 1);
+    assert.ok(s.active && s.start === 0 && s.query === "", "'/' at start should be active");
+    s = pal.slashContext("/he", 3);
+    assert.ok(s.active && s.start === 0 && s.query === "he", "'/he' should be active with query 'he'");
+    s = pal.slashContext("write /q", 8);
+    assert.ok(s.active && s.start === 6 && s.query === "q", "'/q' after space should be active");
+    s = pal.slashContext("\n/h", 3);
+    assert.ok(s.active && s.query === "h", "'/' at line start should be active");
+    assert.strictEqual(pal.slashContext("http://x", 8).active, false, "'http://' must NOT trigger");
+    assert.strictEqual(pal.slashContext("a/b", 3).active, false, "mid-word 'a/b' must NOT trigger");
+    assert.strictEqual(pal.slashContext("/he ", 4).active, false, "a space after the query deactivates");
+    assert.strictEqual(pal.slashContext("", 0).active, false, "empty buffer is inactive");
+  });
+})();
+
+// ---------------------------------------------------------------------------
 // Summary.
 // ---------------------------------------------------------------------------
 
