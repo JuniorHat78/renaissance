@@ -1,6 +1,7 @@
 @echo off
 REM Scriptorium launcher (Windows) — boots the local author server and opens the
-REM editor in your default browser. Zero dependencies: just Node. From there,
-REM use the browser's "Install app" to get a standalone desktop window (PWA).
+REM editor in a chromeless app window (--app) via Chrome/Edge if present, else a
+REM normal tab. Zero dependencies: just Node. You can also "Install app" from the
+REM browser for a standalone PWA window.
 cd /d "%~dp0"
-node server.js --open
+node server.js --app

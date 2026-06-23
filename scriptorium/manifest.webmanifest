@@ -5,6 +5,7 @@
   "start_url": "/scriptorium/editor.html",
   "scope": "/scriptorium/",
   "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone"],
   "orientation": "any",
   "background_color": "#efe5d6",
   "theme_color": "#a34f2a",

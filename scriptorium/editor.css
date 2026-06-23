@@ -421,6 +421,25 @@ select:disabled {
   box-shadow: inset 2px 0 0 var(--accent);
 }
 
+/* Parse-engine badge — shown only when the opt-in wasm engine is involved
+ * (?engine=wasm). The default JS path stays chrome-free. editor.js sets
+ * data-parse-engine on <body>; this is CSS-only (SCRIPTORIUM-RUST-PARSER.md R4). */
+body[data-parse-engine*="wasm"]::after {
+  content: "parse: " attr(data-parse-engine);
+  position: fixed;
+  right: 10px;
+  bottom: 10px;
+  font: 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--accent);
+  background: var(--accent-wash);
+  border: 1px solid var(--accent);
+  padding: 4px 8px;
+  border-radius: 6px;
+  pointer-events: none;
+  opacity: 0.85;
+  z-index: 50;
+}
+
 /* ---- side rail (diagnostics + outline) -------------------------------- */
 .pane-side {
   gap: 0;

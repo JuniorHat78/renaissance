@@ -700,6 +700,65 @@ function openInBrowser(url) {
   }
 }
 
+// Candidate Chromium executables for an --app (chromeless) window, by platform.
+// SCRIPTORIUM-RUST-PARSER.md §8.1: the zero-dep "looks native" rung — a real app
+// window with no tabs/address bar, using a browser the OS already has.
+function chromiumCandidates() {
+  if (process.platform === "win32") {
+    const pf = process.env["ProgramFiles"] || "C:\\Program Files";
+    const pf86 = process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)";
+    const local = process.env["LOCALAPPDATA"] || "";
+    return [
+      pf + "\\Google\\Chrome\\Application\\chrome.exe",
+      pf86 + "\\Google\\Chrome\\Application\\chrome.exe",
+      local + "\\Google\\Chrome\\Application\\chrome.exe",
+      pf + "\\Microsoft\\Edge\\Application\\msedge.exe",
+      pf86 + "\\Microsoft\\Edge\\Application\\msedge.exe",
+    ];
+  }
+  if (process.platform === "darwin") {
+    return [
+      "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+      "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+      "/Applications/Chromium.app/Contents/MacOS/Chromium",
+    ];
+  }
+  // linux: rely on PATH lookup (spawn errors → next candidate → fallback).
+  return ["google-chrome", "chromium", "chromium-browser", "microsoft-edge"];
+}
+
+// Launch a chromeless single-purpose window via a Chromium browser (--app=URL).
+// Falls back to the OS default browser (a normal tab) if none is found, so this
+// is never worse than --open. Best-effort; never fatal.
+function launchAppWindow(url) {
+  const cp = require("child_process");
+  const candidates = chromiumCandidates();
+  const lookByPath = process.platform !== "win32" && process.platform !== "darwin";
+
+  for (const exe of candidates) {
+    if (!lookByPath && !fs.existsSync(exe)) {
+      continue;
+    }
+    try {
+      const child = cp.spawn(exe, ["--app=" + url, "--new-window"], {
+        detached: true,
+        stdio: "ignore",
+      });
+      let failed = false;
+      child.on("error", () => { failed = true; });
+      child.unref();
+      if (!failed) {
+        return true;
+      }
+    } catch (error) {
+      /* try the next candidate */
+    }
+  }
+  // No Chromium found / all failed — a normal browser tab is still a fine result.
+  openInBrowser(url);
+  return false;
+}
+
 // ---------------------------------------------------------------------------
 // Entry point — only listen when run directly (`node scriptorium/server.js`).
 // ---------------------------------------------------------------------------
@@ -707,7 +766,9 @@ function openInBrowser(url) {
 if (require.main === module) {
   const port = resolvePort();
   const server = createServer();
-  const shouldOpen = process.argv.slice(2).indexOf("--open") !== -1;
+  const argv = process.argv.slice(2);
+  const shouldOpen = argv.indexOf("--open") !== -1;
+  const shouldApp = argv.indexOf("--app") !== -1;
   server.listen(port, () => {
     const editorUrl = "http://localhost:" + port + DEFAULT_ROUTE;
     // eslint-disable-next-line no-console
@@ -716,7 +777,10 @@ if (require.main === module) {
     console.log("  Project root: " + PROJECT_ROOT);
     // eslint-disable-next-line no-console
     console.log("  Open the editor: " + editorUrl);
-    if (shouldOpen) {
+    // --app launches a chromeless window (falls back to a tab); --open is a tab.
+    if (shouldApp) {
+      launchAppWindow(editorUrl);
+    } else if (shouldOpen) {
       openInBrowser(editorUrl);
     }
   });
