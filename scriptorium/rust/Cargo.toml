@@ -10,6 +10,8 @@ description = "Crate-free Rust port of the Renaissance AST parser, oracle-valida
 [lib]
 name = "scriptorium_parser"
 path = "src/lib.rs"
+# cdylib → the .wasm the browser editor loads (R1); rlib → the native bin + tests.
+crate-type = ["cdylib", "rlib"]
 
 [[bin]]
 name = "scriptorium-parser"
@@ -17,3 +19,5 @@ path = "src/main.rs"
 
 [profile.release]
 opt-level = 2
+# Abort on panic — no unwinding tables, and a clean import-free wasm module.
+panic = "abort"

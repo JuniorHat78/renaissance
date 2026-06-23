@@ -23,3 +23,53 @@ pub fn to_json(doc: &Document) -> String {
 pub fn parse_to_json(units: &[u16]) -> String {
     json::to_json(&parser::parse_document(units))
 }
+
+// --- wasm ABI (R1) — crate-free, no wasm-bindgen (§7) -----------------------
+//
+// The browser/Node glue: allocate a buffer, write the source as UTF-16LE, call
+// parse_utf16, read the returned (ptr,len) of UTF-8 canonical JSON, then free
+// both buffers. Buffers are Box<[u8]> so capacity == len exactly, making dealloc
+// (reconstruct + drop the boxed slice) sound.
+#[cfg(target_arch = "wasm32")]
+mod wasm_abi {
+    /// Allocate `len` bytes and return a pointer the caller fills / reads.
+    #[no_mangle]
+    pub extern "C" fn alloc(len: usize) -> *mut u8 {
+        let buf = vec![0u8; len].into_boxed_slice();
+        std::boxed::Box::into_raw(buf) as *mut u8
+    }
+
+    /// Free a buffer previously returned by `alloc` or `parse_utf16`.
+    ///
+    /// # Safety
+    /// `ptr`/`len` must be a buffer this module handed out and not yet freed.
+    #[no_mangle]
+    pub unsafe extern "C" fn dealloc(ptr: *mut u8, len: usize) {
+        if ptr.is_null() {
+            return;
+        }
+        let slice = std::slice::from_raw_parts_mut(ptr, len) as *mut [u8];
+        drop(std::boxed::Box::from_raw(slice));
+    }
+
+    /// Parse `byte_len` bytes of UTF-16LE at `ptr` into canonical JSON.
+    /// Returns the result packed as `(out_ptr << 32) | out_len`. The caller
+    /// reads `out_len` UTF-8 bytes at `out_ptr`, then `dealloc(out_ptr, out_len)`
+    /// (and frees its own input buffer).
+    ///
+    /// # Safety
+    /// `ptr`/`byte_len` must describe a readable UTF-16LE buffer.
+    #[no_mangle]
+    pub unsafe extern "C" fn parse_utf16(ptr: *const u8, byte_len: usize) -> u64 {
+        let bytes = std::slice::from_raw_parts(ptr, byte_len);
+        let units: Vec<u16> = bytes
+            .chunks_exact(2)
+            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .collect();
+        let json = crate::parse_to_json(&units);
+        let out = json.into_bytes().into_boxed_slice();
+        let out_len = out.len();
+        let out_ptr = std::boxed::Box::into_raw(out) as *mut u8 as usize;
+        ((out_ptr as u64) << 32) | (out_len as u64)
+    }
+}

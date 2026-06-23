@@ -57,7 +57,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Build the parser (release)
         run: npm run build:rust
@@ -65,8 +65,8 @@ jobs:
       - name: Run the equivalence oracle
         run: npm run oracle:rust
 
-  wasm-build:
-    name: wasm32 target builds (R1 readiness)
+  wasm-oracle:
+    name: wasm oracle (the artifact the editor loads)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -86,7 +86,16 @@ jobs:
           key: wasm-cargo-${{ hashFiles('scriptorium/rust/**/*.rs', 'scriptorium/rust/Cargo.toml') }}
           restore-keys: wasm-cargo-
 
-      # The library is the parser the browser editor will load (R1). Proving it
-      # compiles to wasm32 now keeps that path from rotting before it is wired in.
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # The .wasm is the parser the browser editor loads (R1). Build it, then run
+      # the same equivalence oracle against it via Node (which runs wasm natively)
+      # — proving the shipped artifact is byte-identical to the JS authority.
       - name: Build lib for wasm32-unknown-unknown
-        run: cargo build --release --lib --target wasm32-unknown-unknown --manifest-path scriptorium/rust/Cargo.toml
+        run: npm run build:rust-wasm
+
+      - name: Run the wasm equivalence oracle
+        run: npm run oracle:rust-wasm
