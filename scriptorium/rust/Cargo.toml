@@ -1,0 +1,19 @@
+[package]
+name = "scriptorium-parser"
+version = "0.2.0"
+edition = "2021"
+description = "Crate-free Rust port of the Renaissance AST parser, oracle-validated byte-identical against scripts/ast/parse.js (docs/specs/SCRIPTORIUM-RUST-PARSER.md)."
+
+# ZERO third-party dependencies — std only (SCRIPTORIUM-RUST-PARSER.md §7).
+# Do not add a [dependencies] section. No serde, no regex, no wasm-bindgen.
+
+[lib]
+name = "scriptorium_parser"
+path = "src/lib.rs"
+
+[[bin]]
+name = "scriptorium-parser"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = 2

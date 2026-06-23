@@ -1,0 +1,92 @@
+name: scriptorium-rust-oracle
+
+# The equivalence oracle for the crate-free Rust parser
+# (docs/specs/SCRIPTORIUM-RUST-PARSER.md §6): build the parser and assert it is
+# byte-identical (structurally) to the ONE JS parse authority over the corpus +
+# an adversarial set + seeded fuzz. This is a DETERMINISTIC-CORRECTNESS gate, so
+# it is allowed to hard-fail (unlike the project's advisory metric jobs).
+#
+# The OS matrix is deliberate: the same source compiled on three platforms must
+# produce identical ASTs, which also proves native-vs-native determinism for free
+# (§10). Quarantine is unaffected — this lives in .github and only ever builds
+# scriptorium/rust against scripts/ast; nothing ships.
+
+on:
+  push:
+    branches: [main, feat/scriptorium]
+    paths:
+      - "scriptorium/rust/**"
+      - "scripts/ast/**"
+      - "scripts/tests/rust-parser-oracle.js"
+      - ".github/workflows/scriptorium-rust-oracle.yml"
+  pull_request:
+    paths:
+      - "scriptorium/rust/**"
+      - "scripts/ast/**"
+      - "scripts/tests/rust-parser-oracle.js"
+      - ".github/workflows/scriptorium-rust-oracle.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  oracle:
+    name: oracle (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            scriptorium/rust/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('scriptorium/rust/**/*.rs', 'scriptorium/rust/Cargo.toml') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build the parser (release)
+        run: npm run build:rust
+
+      - name: Run the equivalence oracle
+        run: npm run oracle:rust
+
+  wasm-build:
+    name: wasm32 target builds (R1 readiness)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust (stable) + wasm32 target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            scriptorium/rust/target
+          key: wasm-cargo-${{ hashFiles('scriptorium/rust/**/*.rs', 'scriptorium/rust/Cargo.toml') }}
+          restore-keys: wasm-cargo-
+
+      # The library is the parser the browser editor will load (R1). Proving it
+      # compiles to wasm32 now keeps that path from rotting before it is wired in.
+      - name: Build lib for wasm32-unknown-unknown
+        run: cargo build --release --lib --target wasm32-unknown-unknown --manifest-path scriptorium/rust/Cargo.toml
