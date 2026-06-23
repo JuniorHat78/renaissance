@@ -963,6 +963,54 @@ if (!haveCompiledDir) {
 })();
 
 // ---------------------------------------------------------------------------
+// 10. LIST CONTINUE — Enter inside a list item (explicit edit, not reflow).
+// ---------------------------------------------------------------------------
+
+(function listContinueUnit() {
+  const label = "list-continue: continue / end a list on Enter";
+  let lc;
+  try {
+    lc = require("../../scriptorium/list-continue.js");
+  } catch (error) {
+    const reason =
+      error && error.code === "MODULE_NOT_FOUND"
+        ? "scriptorium/list-continue.js not present yet"
+        : "require threw: " + (error && error.message ? error.message : String(error));
+    skip(label, reason);
+    return;
+  }
+
+  if (typeof lc.enterEdit !== "function") {
+    skip(label, "list-continue interface differs");
+    return;
+  }
+
+  check(label, () => {
+    // Bullet continuation at end of line.
+    let r = lc.enterEdit("- one", 5);
+    assert.ok(r && r.text === "- one\n- " && r.caret === 8, "bullet continue wrong: " + JSON.stringify(r));
+
+    // Ordered increments the number, keeps the delimiter.
+    r = lc.enterEdit("3) item", 7);
+    assert.ok(r && r.text === "3) item\n4) " && r.caret === 11, "ordered continue wrong: " + JSON.stringify(r));
+    r = lc.enterEdit("1. first", 8);
+    assert.ok(r && r.text === "1. first\n2. ", "ordered '.' continue wrong: " + JSON.stringify(r));
+
+    // Empty item ends the list (clears the marker line).
+    r = lc.enterEdit("- ", 2);
+    assert.ok(r && r.text === "" && r.caret === 0, "empty item should end list: " + JSON.stringify(r));
+
+    // Indented bullet keeps its indent.
+    r = lc.enterEdit("  - nested", 10);
+    assert.ok(r && r.text === "  - nested\n  - ", "indented continue wrong: " + JSON.stringify(r));
+
+    // Not a list, or caret mid-line → null (normal Enter).
+    assert.strictEqual(lc.enterEdit("plain paragraph", 15), null, "non-list should return null");
+    assert.strictEqual(lc.enterEdit("- one", 3), null, "mid-line should return null");
+  });
+})();
+
+// ---------------------------------------------------------------------------
 // Summary.
 // ---------------------------------------------------------------------------
 

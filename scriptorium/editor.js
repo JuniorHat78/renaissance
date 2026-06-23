@@ -807,6 +807,7 @@
     const palette = window.ScriptoriumPalette || null;
     const findReplace = window.ScriptoriumFindReplace || null;
     const blockOps = window.ScriptoriumBlockOps || null;
+    const listContinue = window.ScriptoriumListContinue || null;
 
     // Block operations (move / duplicate / delete) parse the buffer fresh for an
     // exact top-level block list, then apply the pure transform from block-ops.js.
@@ -983,6 +984,26 @@
       add("act:autosave", "Toggle autosave", "", "autosave auto save idle", toggleAutosave);
       add("act:prev-section", "Previous section", "", "previous prev section navigate", function run() { gotoAdjacentSection(-1); });
       add("act:next-section", "Next section", "", "next section navigate", function run() { gotoAdjacentSection(1); });
+      add("act:copy", "Copy section text", "", "copy clipboard export", function run() {
+        if (navigator.clipboard) {
+          navigator.clipboard.writeText(els.editor.value).then(function ok() {
+            setStatus("Section text copied to clipboard.", "ok");
+          }, function fail() {
+            setStatus("Could not copy.", "error");
+          });
+        }
+      });
+      add("act:trim", "Trim trailing whitespace", "", "trim cleanup whitespace", function run() {
+        const cleaned = els.editor.value.replace(/[ \t]+$/gm, "");
+        if (cleaned !== els.editor.value) {
+          const c = Math.min(els.editor.selectionStart, cleaned.length);
+          applyBufferEdit(cleaned, c, c);
+          refreshFromBuffer();
+          setStatus("Trimmed trailing whitespace.", "ok");
+        } else {
+          setStatus("No trailing whitespace.", "");
+        }
+      });
       const essay = state.current.slug ? state.essayBySlug[state.current.slug] : null;
       if (essay && Array.isArray(essay.section_order)) {
         essay.section_order.forEach(function eachSection(n) {
@@ -1231,19 +1252,19 @@
       }
       if (event.key === "ArrowDown") {
         event.preventDefault();
-        event.stopPropagation();
+        event.stopImmediatePropagation();
         moveSlash(1);
       } else if (event.key === "ArrowUp") {
         event.preventDefault();
-        event.stopPropagation();
+        event.stopImmediatePropagation();
         moveSlash(-1);
       } else if (event.key === "Enter" || event.key === "Tab") {
         event.preventDefault();
-        event.stopPropagation();
+        event.stopImmediatePropagation();
         acceptSlash();
       } else if (event.key === "Escape") {
         event.preventDefault();
-        event.stopPropagation();
+        event.stopImmediatePropagation();
         hideSlash();
       }
     }
@@ -1489,6 +1510,20 @@
             (event.key === "ArrowUp" || event.key === "ArrowDown")) {
           event.preventDefault();
           runBlockOp(event.key === "ArrowUp" ? "up" : "down");
+        }
+      });
+    }
+    if (listContinue) {
+      // Enter inside a list item continues the list (or ends it on an empty
+      // item). An explicit, single edit — never ambient reflow (§7).
+      els.editor.addEventListener("keydown", function onEnter(event) {
+        if (event.key === "Enter" && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey && !slashOpen()) {
+          const r = listContinue.enterEdit(els.editor.value, els.editor.selectionStart);
+          if (r) {
+            event.preventDefault();
+            applyBufferEdit(r.text, r.caret, r.caret);
+            refreshFromBuffer();
+          }
         }
       });
     }
