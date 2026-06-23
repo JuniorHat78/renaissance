@@ -4,11 +4,18 @@
 // and, later, wasm32 (the browser editor) from this one source.
 
 mod ast;
+mod consume;
 mod escape;
 mod json;
 pub mod json_value;
 mod parser;
 mod render;
+
+/// Parse UTF-16 units and project the passage records (core.passagesFromDocument)
+/// as a compact JSON array string.
+pub fn passages_json(units: &[u16]) -> String {
+    consume::passages_json(&parser::parse_document(units))
+}
 
 /// Parse UTF-16 units and render to HTML (UTF-16), byte-identical to render.js
 /// serializeBlocks. Returned as UTF-16 so lone surrogates round-trip exactly.
@@ -104,6 +111,14 @@ mod wasm_abi {
     pub unsafe extern "C" fn json_compact(ptr: *const u8, byte_len: usize) -> u64 {
         let units = utf16le_units(ptr, byte_len);
         pack(crate::json_reformat(&units, false))
+    }
+
+    /// Parse + project passage records as compact JSON (UTF-8).
+    /// # Safety: see `parse_utf16`.
+    #[no_mangle]
+    pub unsafe extern "C" fn passages_utf16(ptr: *const u8, byte_len: usize) -> u64 {
+        let units = utf16le_units(ptr, byte_len);
+        pack(crate::passages_json(&units))
     }
 
     /// Render UTF-16LE JSON-free: parse + render to HTML, returned as UTF-16LE

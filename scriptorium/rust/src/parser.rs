@@ -395,7 +395,7 @@ fn inline_to_text(nodes: &[Inline], hard_break: u16, out: &mut Vec<u16>) {
     }
 }
 
-fn block_to_searchable_text(block: &Block) -> Vec<u16> {
+pub(crate) fn block_to_searchable_text(block: &Block) -> Vec<u16> {
     match block {
         Block::Divider { .. } => Vec::new(),
         Block::BlockQuote { children, .. } | Block::List { children, .. } => {
