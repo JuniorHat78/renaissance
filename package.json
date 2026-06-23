@@ -61,6 +61,7 @@
     "oracle:rust": "node scripts/tests/rust-parser-oracle.js",
     "oracle:rust-wasm": "node scripts/tests/rust-wasm-oracle.js",
     "oracle:rust-json": "node scripts/tests/rust-json-roundtrip.js",
+    "oracle:rust-render": "node scripts/tests/rust-render-oracle.js",
     "oracle:rust-server": "node scripts/tests/rust-server-oracle.js",
     "ci:scriptorium-parity": "node scripts/ci/run-with-server.js --port 4188 -- node scripts/tests/scriptorium-wasm-browser-parity.js --base http://127.0.0.1:4188",
     "test:rust": "npm run build:rust && npm run oracle:rust",

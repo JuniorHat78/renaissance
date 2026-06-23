@@ -8,6 +8,13 @@ mod escape;
 mod json;
 pub mod json_value;
 mod parser;
+mod render;
+
+/// Parse UTF-16 units and render to HTML (UTF-16), byte-identical to render.js
+/// serializeBlocks. Returned as UTF-16 so lone surrogates round-trip exactly.
+pub fn render_to_html_units(units: &[u16]) -> Vec<u16> {
+    render::to_html_units(&parser::parse_document(units))
+}
 
 pub use ast::Document;
 
@@ -99,6 +106,15 @@ mod wasm_abi {
         pack(crate::json_reformat(&units, false))
     }
 
+    /// Render UTF-16LE JSON-free: parse + render to HTML, returned as UTF-16LE
+    /// bytes (the editor / oracle decodes with TextDecoder('utf-16le')).
+    /// # Safety: see `parse_utf16`.
+    #[no_mangle]
+    pub unsafe extern "C" fn render_utf16(ptr: *const u8, byte_len: usize) -> u64 {
+        let units = utf16le_units(ptr, byte_len);
+        pack_units(crate::render_to_html_units(&units))
+    }
+
     unsafe fn utf16le_units(ptr: *const u8, byte_len: usize) -> Vec<u16> {
         std::slice::from_raw_parts(ptr, byte_len)
             .chunks_exact(2)
@@ -107,7 +123,20 @@ mod wasm_abi {
     }
 
     fn pack(json: String) -> u64 {
-        let out = json.into_bytes().into_boxed_slice();
+        pack_bytes(json.into_bytes())
+    }
+
+    fn pack_units(units: Vec<u16>) -> u64 {
+        let mut bytes = Vec::with_capacity(units.len() * 2);
+        for u in units {
+            bytes.push((u & 0xff) as u8);
+            bytes.push((u >> 8) as u8);
+        }
+        pack_bytes(bytes)
+    }
+
+    fn pack_bytes(bytes: Vec<u8>) -> u64 {
+        let out = bytes.into_boxed_slice();
         let out_len = out.len();
         let out_ptr = std::boxed::Box::into_raw(out) as *mut u8 as usize;
         ((out_ptr as u64) << 32) | (out_len as u64)
