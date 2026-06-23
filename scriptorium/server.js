@@ -117,11 +117,72 @@ function isInsideRoot(root, child) {
   return resolvedChild.startsWith(withSep);
 }
 
+// Read data/essays.json and return its `essays` array, or [] if the file is
+// missing or corrupt. Path resolution must NOT hard-fail on a temporarily broken
+// essays.json — it degrades to the historical raw/<slug> default (see
+// resolveSourceDir) so the server keeps working while the author is mid-edit.
+function readEssaysList() {
+  let raw;
+  try {
+    raw = fs.readFileSync(ESSAYS_PATH, "utf8");
+  } catch (error) {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && Array.isArray(parsed.essays) ? parsed.essays : [];
+  } catch (error) {
+    return [];
+  }
+}
+
+// Resolve the project-root-relative source_dir for a slug, honoring the per-essay
+// `source_dir` in essays.json rather than ASSUMING raw/<slug> (SCRIPTORIUM.md §12
+// blocker 3). The rest of the pipeline (generate-content-ast.js, content.js, the
+// doctor) keys section files off source_dir; the server must agree or it
+// reads/writes the wrong file the day a source_dir stops matching its slug.
+//   - exactly one match   -> its source_dir (or raw/<slug> if the field is empty)
+//   - no match            -> raw/<slug>: a not-yet-registered essay, so a brand-
+//                            new section can still be authored (matches the
+//                            doctor's fallback and preserves the open-new-section
+//                            behavior).
+//   - more than one match -> refuse (400): duplicate slugs collide on
+//                            data/compiled/<slug>.json, so the server must never
+//                            silently pick one. This is the server-side half of
+//                            the slug-uniqueness guarantee the doctor also checks.
+// Pure core of the resolution, given an explicit essays list — so it is
+// unit-testable without touching disk. resolveSourceDir is the thin disk-reading
+// wrapper around it.
+function sourceDirForSlug(slug, essays) {
+  const matches = (Array.isArray(essays) ? essays : []).filter(function matchSlug(essay) {
+    return essay && typeof essay.slug === "string" && essay.slug.trim() === slug;
+  });
+  if (matches.length > 1) {
+    throw new BadRequestError(
+      "Ambiguous slug \"" + slug + "\": " + matches.length +
+        " essays in data/essays.json share it. Slugs must be unique."
+    );
+  }
+  if (matches.length === 1) {
+    const declared = String(matches[0].source_dir == null ? "" : matches[0].source_dir).trim();
+    if (declared) {
+      return declared;
+    }
+  }
+  return "raw/" + slug;
+}
+
+function resolveSourceDir(slug) {
+  return sourceDirForSlug(slug, readEssaysList());
+}
+
 // Resolve the on-disk path for a section's prose, refusing anything that would
-// escape RAW_ROOT. Validation is belt-and-suspenders: the slug/number are
-// already alphabet-checked, but we still resolve and re-verify containment so a
-// future caller that forgets to validate cannot punch a hole. Throws BadRequest
-// on any invalid or escaping input; the caller maps that to a 400.
+// escape PROJECT_ROOT. The directory comes from the essay's declared source_dir
+// (resolveSourceDir), which is project-root-relative — so we resolve under
+// PROJECT_ROOT and re-verify containment: a malformed source_dir that climbs out
+// of the repo (or a forgotten upstream guard) is refused loudly rather than
+// touching disk. Throws BadRequest on any invalid/escaping input or an ambiguous
+// slug; the caller maps that to a 400.
 function safeSectionPath(slug, sectionNumber) {
   const safeSlug = normalizeSlug(slug);
   if (!safeSlug) {
@@ -132,11 +193,14 @@ function safeSectionPath(slug, sectionNumber) {
     throw new BadRequestError("Invalid section number (expected a positive integer).");
   }
 
-  const candidate = path.join(RAW_ROOT, safeSlug, safeNumber + ".txt");
-  if (!isInsideRoot(RAW_ROOT, candidate)) {
-    // Should be unreachable given the alphabet checks above; if it ever fires,
-    // a guard upstream has rotted — refuse loudly rather than touch disk.
-    throw new BadRequestError("Refusing path outside the content root.");
+  const sourceDirRel = resolveSourceDir(safeSlug);
+  const candidate = path.resolve(
+    PROJECT_ROOT,
+    ...sourceDirRel.split(/[\\/]/),
+    safeNumber + ".txt"
+  );
+  if (!isInsideRoot(PROJECT_ROOT, candidate)) {
+    throw new BadRequestError("Refusing path outside the project root.");
   }
   return candidate;
 }
@@ -664,6 +728,8 @@ module.exports = {
   atomicWrite,
   safeContentPath,
   safeSectionPath,
+  resolveSourceDir,
+  sourceDirForSlug,
   serializeJson,
   isInsideRoot,
   normalizeSlug,

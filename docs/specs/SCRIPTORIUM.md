@@ -224,11 +224,11 @@ Each phase is shippable and leaves the tool usable. Per-checkpoint commits.
 - `docs/PROJECT-STATE.md` — overall orientation; add Scriptorium to §9 once P0
   lands.
 
-## 12. Review findings — to resolve before P1 hardens (2026-06-23)
+## 12. Review findings (opened 2026-06-23; status refreshed 2026-06-24)
 
 An adversarial design review against the real AST surfaced blockers the P0–P2
-scaffold does not yet address. Recorded here so they're not lost; resolve in
-priority order.
+scaffold did not address. Recorded here so they're not lost; each now carries a
+status.
 
 **BLOCKERS**
 1. **The §2 byte-identical guard tests a tautology, not the real risk.** It
@@ -239,6 +239,10 @@ priority order.
    the browser modules (Playwright — already a dep) against a fresh Node compile.
    Also add `scriptorium/editor.html` to the `ast doctor` load-order check
    (`scripts/ast-tools/doctor.js` `SHELLS` only lists the four reader shells).
+   — *Status: open for the interim JS guard. The **real** fix is designed in
+   `SCRIPTORIUM-RUST-PARSER.md` §6: the WASM build runs the same parser in the
+   browser and is diffed against Node, which closes this vector for good. The
+   `ast doctor` `SHELLS` addition is still a small open task.*
 2. **§4's "AST carries source positions for this use" is only partly true.**
    `render.js` stamps `data-source-start/end` only on heading/paragraph/
    pull_quote/list_item — **blockquote, list, and divider containers are
@@ -247,36 +251,57 @@ priority order.
    **full-raw-file** coordinates — the editor must preview the *full* parse (it
    does), and the outline must mark leading headings as "stripped from the
    published page." Pin the coordinate space in the spec and enumerate which
-   blocks are addressable.
+   blocks are addressable. — *Status: largely **resolved** — `SCRIPTORIUM-EDITOR.md`
+   §3 enumerates the addressable blocks and §3.1 pins the coordinate space
+   (full-buffer UTF-16). Remaining: the outline affordance for stripped leading
+   headings (an open question there, not a blocker).*
 3. **The `raw/<slug>/<n>.txt` path model is `source_dir`-blind.** Paths are
    per-essay `source_dir`-relative (today `raw/<slug>/`, which *happens* to equal
    `raw/<slug>`); the server keys off `slug`. Resolve `source_dir` in the server
    and doctor before this diverges. Add a **slug-uniqueness** check — duplicate
    slugs collide on `data/compiled/<slug>.json` (compiler last-wins, reader
-   first-wins → guaranteed divergence).
+   first-wins → guaranteed divergence). — *Status: **RESOLVED (2026-06-24).**
+   `server.js` now resolves the section path through `resolveSourceDir(slug)`
+   (honoring the declared `source_dir`, falling back to `raw/<slug>` for an
+   unregistered slug) and **refuses an ambiguous slug** at request time; the path
+   is containment-checked under `PROJECT_ROOT`. `doctor.js` adds
+   `checkSlugUniqueness` (a failing `slug-duplicate` issue). Both are covered by
+   new units in `scripts/tests/scriptorium-regression.js` (`sourceDirForSlug`
+   honor/fallback/duplicate + the doctor detection).*
 
 **SHOULD-FIX**
 - **Normalization is applied at three sites with two regexes** (`normalizeSource`
   strips `\r\n?`; the compiler strips only `\r\n`; `content.js` strips `\r\n?`).
   Decide where the editor normalizes (on load / save / never) and name it, or a
-  lone `\r` breaks byte-identity.
+  lone `\r` breaks byte-identity. — *Status: **decided** for the editor —
+  `SCRIPTORIUM-EDITOR.md` §3.1 normalizes `\r\n?`→`\n` once on load, never again.
+  The save-side regex-consistency cleanup across the three sites is still open.*
 - **Node-aware commands break native undo.** `setRangeText`/value surgery
   fragments the textarea undo stack, so "native undo for v1" silently fails once
   P3 lands. Decide `execCommand('insertText')` vs a snapshot stack *before* P3.
+  — *Status: **decided + shipped** — `SCRIPTORIUM-EDITOR.md` §5.4: apply via
+  `execCommand("insertText")` so `Ctrl+Z` reverses a command as one step.*
 - **Command correctness must be parser-defined, not naive string wrapping.**
   Emphasis open/close is boundary-sensitive; wrapping `*…*` next to alphanumerics
   won't parse. Each command should re-parse and assert the intended node now
-  exists, else revert (a per-command oracle).
+  exists, else revert (a per-command oracle). — *Status: **shipped** — the
+  per-command oracle in `scriptorium/commands.js` (P3b/c), unit-tested.*
 - **Quarantine needs a real check.** The asset-budget regex only matches
   `scripts/`/`styles/`, so it is *not* the enforcer. Add a dedicated grep over
   shipped HTML/JS + `sw.js` PRECACHE for the literal `scriptorium` path, and a CI
-  job proving `build:artifacts` runs with `scriptorium/` deleted.
+  job proving `build:artifacts` runs with `scriptorium/` deleted. — *Status:
+  **partial** — `doctor.js` `runQuarantineCheck` greps shipped HTML + `scripts/`
+  for `scriptorium/` references (a CRITICAL on any hit). Still open: covering the
+  `sw.js` PRECACHE list and a CI job that builds with `scriptorium/` deleted.*
 - **Doctor drift gaps:** draft (`published:false`) artifact handling; "authored
   subtitle that can never render" when `show_subtitles:false`; `section_meta` key
-  type (string vs number) normalization; stale-artifact-with-no-source.
+  type (string vs number) normalization; stale-artifact-with-no-source. —
+  *Status: open.*
 
 **DECIDE NOW (§10 answered by reality):** `source_dir` is per-essay and two
 essays already exist (Q4 is not deferrable — it's the server's path contract).
-And the **title's single home** must be decided before P1: the leading `#`/`##`
-in each `.txt` is stripped by `withoutLeadingHeadings` and never reaches the
-reader, while `section_meta.title` does — they currently coexist and disagree.
+— *Resolved 2026-06-24: the server and doctor now resolve per-essay `source_dir`
+and enforce slug-uniqueness (blocker 3 above).* The **title's single home** must
+still be decided before P1: the leading `#`/`##` in each `.txt` is stripped by
+`withoutLeadingHeadings` and never reaches the reader, while `section_meta.title`
+does — they currently coexist and disagree. *(Still open.)*

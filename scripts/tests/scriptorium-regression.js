@@ -354,6 +354,53 @@ if (!haveCompiledDir) {
       assert.ok(!server.safeContentPath("raw/\0/1.txt"), "safeContentPath accepted a NUL byte in the path");
     });
   }
+
+  // --- source_dir resolution (SCRIPTORIUM.md §12 blocker 3) --------------
+  // The server must key section files off the essay's declared source_dir, not
+  // assume raw/<slug>. sourceDirForSlug is the pure core (no disk), so we can
+  // drive the three cases — honor a declared source_dir that DIFFERS from the
+  // slug, fall back to raw/<slug> for an unregistered slug, and REFUSE a slug
+  // shared by two essays (which would collide on data/compiled/<slug>.json).
+  if (typeof server.sourceDirForSlug === "function") {
+    check("server: sourceDirForSlug honors source_dir, falls back, refuses duplicates", () => {
+      const list = [
+        { slug: "alpha", source_dir: "essays/alpha/prose" },
+        { slug: "beta", source_dir: "" },
+        { slug: "dup", source_dir: "raw/dup-a" },
+        { slug: "dup", source_dir: "raw/dup-b" },
+      ];
+
+      // 1. A declared source_dir that does NOT match the slug is honored — this
+      //    is the exact bug: the old code would have used raw/alpha.
+      assert.strictEqual(
+        server.sourceDirForSlug("alpha", list),
+        "essays/alpha/prose",
+        "sourceDirForSlug ignored a declared source_dir that differs from the slug"
+      );
+      // 2. An empty source_dir falls back to raw/<slug>.
+      assert.strictEqual(
+        server.sourceDirForSlug("beta", list),
+        "raw/beta",
+        "sourceDirForSlug did not fall back to raw/<slug> for an empty source_dir"
+      );
+      // 3. An unregistered slug falls back to raw/<slug> (new section authoring).
+      assert.strictEqual(
+        server.sourceDirForSlug("gamma", list),
+        "raw/gamma",
+        "sourceDirForSlug did not fall back to raw/<slug> for an unknown slug"
+      );
+      // 4. A duplicated slug is refused, not silently resolved to one of them.
+      assert.throws(
+        () => server.sourceDirForSlug("dup", list),
+        "sourceDirForSlug silently resolved an ambiguous (duplicated) slug"
+      );
+    });
+  } else {
+    skip(
+      "server: sourceDirForSlug honors source_dir, falls back, refuses duplicates",
+      "server.sourceDirForSlug is not exported (interface differs / not built yet)"
+    );
+  }
 })();
 
 // ---------------------------------------------------------------------------
@@ -404,6 +451,40 @@ if (!haveCompiledDir) {
 
     assert.strictEqual(report.ok, true, "project doctor is unhealthy: " + detail);
   });
+
+  // The doctor must DETECT duplicate slugs (SCRIPTORIUM.md §12 blocker 3): the
+  // live repo is clean (asserted above), so drive the pure check with a synthetic
+  // duplicate and assert it flags a failing-severity issue with the right code.
+  if (typeof doctor.checkSlugUniqueness === "function") {
+    check("doctor: checkSlugUniqueness flags two essays sharing a slug", () => {
+      const found = [];
+      const collector = { add(severity, code, message) { found.push({ severity, code, message }); } };
+      doctor.checkSlugUniqueness(
+        [{ slug: "x" }, { slug: "y" }, { slug: "x" }],
+        collector
+      );
+      const dup = found.filter((i) => i.code === "slug-duplicate");
+      assert.strictEqual(dup.length, 1, "expected exactly one slug-duplicate issue, got " + dup.length);
+      assert.notStrictEqual(dup[0].severity, "warning", "a duplicate slug must be a failing severity, not a warning");
+
+      // And a unique list produces no slug-duplicate finding.
+      const cleanFound = [];
+      doctor.checkSlugUniqueness(
+        [{ slug: "a" }, { slug: "b" }],
+        { add(severity, code, message) { cleanFound.push({ severity, code, message }); } }
+      );
+      assert.strictEqual(
+        cleanFound.filter((i) => i.code === "slug-duplicate").length,
+        0,
+        "checkSlugUniqueness flagged a duplicate on a unique list"
+      );
+    });
+  } else {
+    skip(
+      "doctor: checkSlugUniqueness flags two essays sharing a slug",
+      "doctor.checkSlugUniqueness is not exported (interface differs / not built yet)"
+    );
+  }
 })();
 
 // ---------------------------------------------------------------------------

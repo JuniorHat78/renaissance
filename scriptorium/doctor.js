@@ -363,9 +363,35 @@ function checkManifest(label, sourceDirRel, sourceDirAbs, order, collector) {
   }
 }
 
+// Slugs must be unique across essays. The compiler writes data/compiled/<slug>.json
+// keyed by slug, so two essays sharing a slug collide: the compiler is last-wins,
+// the reader is first-wins, and the two disagree forever (SCRIPTORIUM.md §12
+// blocker 3). The server refuses an ambiguous slug at request time; this catches
+// the same drift statically, before a build ever runs.
+function checkSlugUniqueness(essays, collector) {
+  const firstIndexBySlug = new Map();
+  essays.forEach((essay, index) => {
+    const slug = essay && typeof essay.slug === "string" ? essay.slug.trim() : "";
+    if (!slug) return; // a missing/empty slug is already flagged by checkEssayShape
+    if (firstIndexBySlug.has(slug)) {
+      collector.add(
+        SEVERITY.ERROR,
+        "slug-duplicate",
+        "slug \"" + slug + "\" is used by more than one essay (essays[" +
+          firstIndexBySlug.get(slug) + "] and essays[" + index + "]) — slugs must " +
+          "be unique; duplicates collide on data/compiled/" + slug + ".json " +
+          "(compiler last-wins, reader first-wins → guaranteed divergence)."
+      );
+    } else {
+      firstIndexBySlug.set(slug, index);
+    }
+  });
+}
+
 function runDriftChecks(collector) {
   const essays = loadEssays(collector);
   if (!essays) return;
+  checkSlugUniqueness(essays, collector);
   essays.forEach((essay, index) => {
     const usable = checkEssayShape(essay, index, collector);
     if (usable) checkEssayDrift(essay, collector);
@@ -446,6 +472,7 @@ const CHECK_CODES = {
     "essay-shape",
     "essay-missing-field",
     "slug-invalid",
+    "slug-duplicate",
     "section-order-missing",
     "section-meta-missing",
     "source-dir-missing",
@@ -507,4 +534,4 @@ if (require.main === module) {
   process.exit(failing ? 1 : 0);
 }
 
-module.exports = { runDoctor };
+module.exports = { runDoctor, checkSlugUniqueness };
