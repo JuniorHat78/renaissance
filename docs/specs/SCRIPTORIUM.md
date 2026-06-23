@@ -170,8 +170,10 @@ Each phase is shippable and leaves the tool usable. Per-checkpoint commits.
 - **P1 — the loop.** Split-pane: `<textarea>` + live `render.js` preview. Now it
   is an editor.
 - **P2 — live diagnostics.** Inline surfacing of `parse.js` `DIAGNOSTIC_CODES`.
-- **P3 — structural feel.** caret→node mapping via source positions: outline,
-  fold, "select this node," node-aware insert/wrap commands. The "push it" phase.
+- **P3 — structural feel.** caret↔node mapping via source positions: two-way
+  source↔preview sync, "select this node," AST-aware (oracle-verified) commands.
+  The "push it" phase. **Deepened into its own design of record:**
+  `docs/specs/SCRIPTORIUM-EDITOR.md`.
 - **P4 — kill the clunk.** Scriptorium owns `essays.json`: create / reorder /
   retitle sections from the UI, drift made unrepresentable, project doctor (§3).
 - **P5 — reunite the workbench.** Fixture capture, equivalence badge, corpus-lint
@@ -205,6 +207,8 @@ Each phase is shippable and leaves the tool usable. Per-checkpoint commits.
 
 ## 11. Map / related docs
 
+- `docs/specs/SCRIPTORIUM-EDITOR.md` — the living editor: the §8 P3 structural
+  layer (two-way source↔preview sync + AST-aware commands), deepened.
 - `docs/specs/AST-COMPILER.md` — the parse/consume authority Scriptorium rides.
 - `docs/specs/AST-DIALECT.md` — the grammar the editor authors in (and stresses).
 - `docs/specs/AST-ANCHORS-SPEC.md` — source positions / passage anchors that make
