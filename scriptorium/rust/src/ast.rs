@@ -52,6 +52,8 @@ pub struct Document {
     pub children: Vec<Block>,
     pub diagnostics: Vec<Diagnostic>,
     // version "0.2.0" and sourceName null are constant — emitted by the serializer.
-    // stats is DEFERRED (SCRIPTORIUM-RUST-PARSER.md §11 decision 6 / §12): the
-    // harness strips it from the JS side until parity is added.
+    // stats { blocks, words } is replicated (parity, not deferred): blocks is the
+    // top-level child count, words is wordCount(toSearchableText(ast)).
+    pub stats_blocks: usize,
+    pub stats_words: usize,
 }

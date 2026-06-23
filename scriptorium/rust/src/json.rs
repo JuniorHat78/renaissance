@@ -24,7 +24,11 @@ pub fn to_json(doc: &Document) -> String {
         }
         write_diag(&mut s, d);
     }
-    s.push_str("]}");
+    s.push_str("],\"stats\":{\"blocks\":");
+    s.push_str(&doc.stats_blocks.to_string());
+    s.push_str(",\"words\":");
+    s.push_str(&doc.stats_words.to_string());
+    s.push_str("}}");
     s
 }
 

@@ -341,7 +341,104 @@ pub fn parse_document(source: &[u16]) -> Document {
         d.column = c;
     }
 
-    Document { children: blocks, diagnostics }
+    // stats — blocks.length and wordCount(toSearchableText(ast)) (core.js).
+    let stats_blocks = blocks.len();
+    let searchable = searchable_text(&blocks);
+    let stats_words = word_count(&searchable);
+
+    Document { children: blocks, diagnostics, stats_blocks, stats_words }
+}
+
+// --- stats: toSearchableText + wordCount (faithful port of core.js) ---------
+
+fn join_with_space(parts: &[Vec<u16>]) -> Vec<u16> {
+    let mut out = Vec::new();
+    for (i, p) in parts.iter().enumerate() {
+        if i > 0 {
+            out.push(0x20);
+        }
+        out.extend_from_slice(p);
+    }
+    out
+}
+
+// normalizeWhitespace: replace /\s+/g with a single space, then trim.
+fn normalize_whitespace(units: &[u16]) -> Vec<u16> {
+    let mut collapsed = Vec::with_capacity(units.len());
+    let mut i = 0;
+    while i < units.len() {
+        if is_ws(units[i]) {
+            collapsed.push(0x20);
+            while i < units.len() && is_ws(units[i]) {
+                i += 1;
+            }
+        } else {
+            collapsed.push(units[i]);
+            i += 1;
+        }
+    }
+    let (s, e) = trim_range(&collapsed);
+    collapsed[s..e].to_vec()
+}
+
+// inlineToText(nodes, hardBreakValue).join(""), hardBreakValue is a single u16.
+fn inline_to_text(nodes: &[Inline], hard_break: u16, out: &mut Vec<u16>) {
+    for n in nodes {
+        match n {
+            Inline::Text(v) => out.extend_from_slice(v),
+            Inline::Emphasis(ch) => inline_to_text(ch, hard_break, out),
+            Inline::Strong(ch) => inline_to_text(ch, hard_break, out),
+            Inline::Link { children, .. } => inline_to_text(children, hard_break, out),
+            Inline::Code(v) => out.extend_from_slice(v),
+            Inline::HardBreak => out.push(hard_break),
+        }
+    }
+}
+
+fn block_to_searchable_text(block: &Block) -> Vec<u16> {
+    match block {
+        Block::Divider { .. } => Vec::new(),
+        Block::BlockQuote { children, .. } | Block::List { children, .. } => {
+            let parts: Vec<Vec<u16>> = children
+                .iter()
+                .map(block_to_searchable_text)
+                .filter(|p| !p.is_empty())
+                .collect();
+            normalize_whitespace(&join_with_space(&parts))
+        }
+        Block::Heading { children, .. }
+        | Block::Paragraph { children, .. }
+        | Block::PullQuote { children, .. }
+        | Block::ListItem { children, .. } => {
+            let mut t = Vec::new();
+            inline_to_text(children, 0x20, &mut t); // hardBreakValue = " "
+            normalize_whitespace(&t)
+        }
+    }
+}
+
+fn searchable_text(blocks: &[Block]) -> Vec<u16> {
+    let parts: Vec<Vec<u16>> = blocks
+        .iter()
+        .map(block_to_searchable_text)
+        .filter(|p| !p.is_empty())
+        .collect();
+    join_with_space(&parts)
+}
+
+// wordCount: count of /\S+/ runs (normalize-invariant, so we count runs directly).
+fn word_count(units: &[u16]) -> usize {
+    let mut count = 0;
+    let mut in_word = false;
+    for &u in units {
+        if is_ws(u) {
+            in_word = false;
+        } else if !in_word {
+            count += 1;
+            in_word = true;
+        }
+    }
+    count
 }
 
 fn flush_paragraph(

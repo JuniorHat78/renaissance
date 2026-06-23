@@ -16,8 +16,8 @@
 // are UTF-16LE (the parser's native unit; round-trips lone surrogates exactly);
 // outputs are UTF-8 canonical JSON.
 //
-// `stats` is excluded from the comparison for now (deferred — §11 decision 6):
-// the Rust side does not emit it and we strip it from the JS AST here.
+// The FULL AST is compared, including stats { blocks, words } (replicated in
+// Rust via the toSearchableText/wordCount port).
 
 const fs = require("node:fs");
 const path = require("node:path");
@@ -28,7 +28,12 @@ const ast = require("../ast/index.js");
 const ROOT = path.join(__dirname, "..", "..");
 const RAW_ROOT = path.join(ROOT, "raw");
 const EXE = process.platform === "win32" ? "scriptorium-parser.exe" : "scriptorium-parser";
-const BIN = path.join(ROOT, "scriptorium", "rust", "target", "release", EXE);
+// SCRIPTORIUM_PARSER_BIN lets a local dev point at a non-default build (e.g. a
+// windows-gnu target when the MSVC linker/SDK is unavailable). CI uses the
+// default release path.
+const BIN = process.env.SCRIPTORIUM_PARSER_BIN && process.env.SCRIPTORIUM_PARSER_BIN.trim()
+  ? path.resolve(process.env.SCRIPTORIUM_PARSER_BIN.trim())
+  : path.join(ROOT, "scriptorium", "rust", "target", "release", EXE);
 
 // ---------------------------------------------------------------------------
 // framing
@@ -230,12 +235,9 @@ function fuzzInputs(count, seed) {
 // ---------------------------------------------------------------------------
 
 function jsAst(input) {
-  const tree = ast.parseDocument(input);
-  // stats is deferred from the byte-identity contract for now.
-  if (tree && typeof tree === "object") {
-    delete tree.stats;
-  }
-  return tree;
+  // stats { blocks, words } is now replicated in Rust, so it is compared too —
+  // the full AST is in the byte-identity contract.
+  return ast.parseDocument(input);
 }
 
 function snippet(s) {

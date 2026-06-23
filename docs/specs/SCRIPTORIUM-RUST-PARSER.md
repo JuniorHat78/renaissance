@@ -570,16 +570,17 @@ PWA or native. R4–R5 are the shell, decided in §8.
    third-party *logic* but is still a crate (lockfile, supply chain, size), so we
    hand-roll the `extern` blocks for true zero-crate purity. §8.2.
 6. **`stats` is replicated in Rust** (port `toSearchableText`/`wordCount`) rather
-   than excluded from the canonical form. §4.3 — *weakest decision; see §12.*
+   than excluded from the canonical form. §4.3 — **done in R0**: the full AST
+   including `stats { blocks, words }` is in the byte-identity comparison.
 7. **Byte-identity is a hard CI gate** (deterministic correctness), unlike the
    project's advisory metrics. §6.
 
 ## 12. Open questions
 
-- **`stats` parity vs exclusion.** Replicate `toSearchableText`/`wordCount` for
-  byte-identity, or canonicalize the AST *without* `stats` and recompute it in JS
-  after parse? (Lean: replicate. Revisit if `wordCount`'s Unicode word-splitting
-  turns out to be its own minefield.)
+- **`stats` parity vs exclusion.** *Resolved (R0): replicated.* `toSearchableText`
+  (block join `" "`, inline join `""`, hard-break → `" "`, normalize `\s+`) and
+  `wordCount` (count of `\S+` runs) are ported; `stats { blocks, words }` is in
+  the oracle comparison. The fuzz set exercises the word-splitting.
 - **WASM marshalling encoding.** Pass the buffer into WASM as UTF-8 (and decode
   to `Vec<u16>` inside) or as UTF-16 directly from JS (`encode into Uint16Array`)?
   UTF-16-in avoids a decode step and a class of surrogate bugs; UTF-8-in is
