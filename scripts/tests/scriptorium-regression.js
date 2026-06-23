@@ -906,6 +906,63 @@ if (!haveCompiledDir) {
 })();
 
 // ---------------------------------------------------------------------------
+// 9. BLOCK OPS — move / duplicate / delete the caret's block (pure surgery).
+// ---------------------------------------------------------------------------
+
+(function blockOpsUnit() {
+  const label = "block-ops: move / duplicate / delete by line span";
+  let bo;
+  try {
+    bo = require("../../scriptorium/block-ops.js");
+  } catch (error) {
+    const reason =
+      error && error.code === "MODULE_NOT_FOUND"
+        ? "scriptorium/block-ops.js not present yet"
+        : "require threw: " + (error && error.message ? error.message : String(error));
+    skip(label, reason);
+    return;
+  }
+
+  if (typeof bo.move !== "function") {
+    skip(label, "block-ops interface differs");
+    return;
+  }
+
+  check(label, () => {
+    // Three paragraphs; blocks are { start, end } over the full buffer.
+    const text = "alpha\n\nbeta\n\ngamma";
+    const blocks = [
+      { start: 0, end: 5 },   // alpha
+      { start: 7, end: 11 },  // beta
+      { start: 13, end: 18 }, // gamma
+    ];
+
+    // Move "beta" (caret at 7) up → swaps with alpha, gap preserved.
+    let r = bo.move(text, blocks, 7, -1);
+    assert.strictEqual(r.text, "beta\n\nalpha\n\ngamma", "move up wrong: " + JSON.stringify(r.text));
+
+    // Move "alpha" (caret 0) down → swaps with beta.
+    r = bo.move(text, blocks, 0, 1);
+    assert.strictEqual(r.text, "beta\n\nalpha\n\ngamma", "move down wrong: " + JSON.stringify(r.text));
+
+    // Move up at the top edge is a no-op.
+    assert.strictEqual(bo.move(text, blocks, 0, -1).text, text, "move up at top should be a no-op");
+
+    // Duplicate "beta" → a copy after it, blank-line separated.
+    r = bo.duplicate(text, blocks, 7);
+    assert.strictEqual(r.text, "alpha\n\nbeta\n\nbeta\n\ngamma", "duplicate wrong: " + JSON.stringify(r.text));
+
+    // Delete "beta" → block + one separating blank line gone.
+    r = bo.remove(text, blocks, 7);
+    assert.strictEqual(r.text, "alpha\n\ngamma", "delete wrong: " + JSON.stringify(r.text));
+
+    // Delete the last block trims the preceding blank line (no trailing blank).
+    r = bo.remove(text, blocks, 13);
+    assert.strictEqual(r.text, "alpha\n\nbeta", "delete-last wrong: " + JSON.stringify(r.text));
+  });
+})();
+
+// ---------------------------------------------------------------------------
 // Summary.
 // ---------------------------------------------------------------------------
 

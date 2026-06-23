@@ -570,6 +570,13 @@ body[data-parse-engine*="wasm"]::after {
 .find-btn:hover { color: var(--text); border-color: var(--accent); }
 .find-toggle-on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 
+/* Focus mode: dim every preview block except the active one. */
+body.focus-mode .preview [data-source-start]:not(.active-block) {
+  opacity: 0.3;
+  transition: opacity 0.2s ease;
+}
+body.focus-mode .preview .active-block { opacity: 1; }
+
 /* ---- side rail (diagnostics + outline) -------------------------------- */
 .pane-side {
   gap: 0;

@@ -806,6 +806,49 @@
     // DOM and map ids to actions that ride the existing oracle-verified commands.
     const palette = window.ScriptoriumPalette || null;
     const findReplace = window.ScriptoriumFindReplace || null;
+    const blockOps = window.ScriptoriumBlockOps || null;
+
+    // Block operations (move / duplicate / delete) parse the buffer fresh for an
+    // exact top-level block list, then apply the pure transform from block-ops.js.
+    function blockOpsBlocks() {
+      try {
+        const ast2 = parse(els.editor.value);
+        return (ast2.children || [])
+          .filter(function has(b) { return b.position; })
+          .map(function span(b) { return { start: b.position.startOffset, end: b.position.endOffset }; });
+      } catch (error) {
+        return [];
+      }
+    }
+    function runBlockOp(kind) {
+      if (!blockOps || els.editor.disabled) {
+        return;
+      }
+      const blocks = blockOpsBlocks();
+      if (!blocks.length) {
+        return;
+      }
+      const caret = els.editor.selectionStart;
+      const text = els.editor.value;
+      let res;
+      if (kind === "up") {
+        res = blockOps.move(text, blocks, caret, -1);
+      } else if (kind === "down") {
+        res = blockOps.move(text, blocks, caret, 1);
+      } else if (kind === "duplicate") {
+        res = blockOps.duplicate(text, blocks, caret);
+      } else if (kind === "delete") {
+        res = blockOps.remove(text, blocks, caret);
+      } else {
+        return;
+      }
+      if (!res || res.text === text) {
+        return;
+      }
+      applyBufferEdit(res.text, res.caret, res.caret);
+      refreshFromBuffer();
+      syncActiveFromCaret(true);
+    }
 
     // Caret pixel coordinates via a hidden mirror div (the canonical textarea
     // technique) — used to anchor the slash menu at the caret. Returns viewport
@@ -926,10 +969,20 @@
       }
       add("act:save", "Save section", "Ctrl/Cmd+S", "save write disk", saveSection);
       add("act:select", "Select current block", "Ctrl/Cmd+Alt+L", "select node block", selectBlockAtCaret);
+      if (blockOps) {
+        add("blk:up", "Move block up", "Alt+↑", "move block up reorder", function run() { runBlockOp("up"); });
+        add("blk:down", "Move block down", "Alt+↓", "move block down reorder", function run() { runBlockOp("down"); });
+        add("blk:dup", "Duplicate block", "", "duplicate block copy", function run() { runBlockOp("duplicate"); });
+        add("blk:del", "Delete block", "", "delete remove block", function run() { runBlockOp("delete"); });
+      }
       if (findReplace) {
         add("act:find", "Find…", "Ctrl/Cmd+F", "find search", function run() { openFindBar(false); });
         add("act:replace", "Find & replace…", "Ctrl/Cmd+H", "replace substitute", function run() { openFindBar(true); });
       }
+      add("act:focus", "Toggle focus mode", "", "focus typewriter dim distraction", toggleFocusMode);
+      add("act:autosave", "Toggle autosave", "", "autosave auto save idle", toggleAutosave);
+      add("act:prev-section", "Previous section", "", "previous prev section navigate", function run() { gotoAdjacentSection(-1); });
+      add("act:next-section", "Next section", "", "next section navigate", function run() { gotoAdjacentSection(1); });
       const essay = state.current.slug ? state.essayBySlug[state.current.slug] : null;
       if (essay && Array.isArray(essay.section_order)) {
         essay.section_order.forEach(function eachSection(n) {
@@ -1365,12 +1418,79 @@
       }
     }
 
+    // ---- focus / typewriter mode ----
+    let focusMode = false;
+    function toggleFocusMode() {
+      focusMode = !focusMode;
+      document.body.classList.toggle("focus-mode", focusMode);
+      setStatus(focusMode ? "Focus mode on" : "Focus mode off", "");
+      if (focusMode) {
+        typewriterCenter();
+      }
+    }
+    function typewriterCenter() {
+      if (!focusMode) {
+        return;
+      }
+      const c = caretCoordinates(els.editor, els.editor.selectionStart);
+      const rect = els.editor.getBoundingClientRect();
+      const relTop = c.top - rect.top + els.editor.scrollTop;
+      els.editor.scrollTop = Math.max(0, relTop - els.editor.clientHeight / 2);
+    }
+
+    // ---- autosave (off by default) ----
+    let autosaveOn = false;
+    let autosaveTimer = null;
+    function toggleAutosave() {
+      autosaveOn = !autosaveOn;
+      setStatus(autosaveOn ? "Autosave on" : "Autosave off", "");
+    }
+    function scheduleAutosave() {
+      if (!autosaveOn) {
+        return;
+      }
+      clearTimeout(autosaveTimer);
+      autosaveTimer = setTimeout(function fire() {
+        if (autosaveOn && !state.saving && state.current.slug != null && state.current.n != null && isDirty()) {
+          saveSection();
+        }
+      }, 1500);
+    }
+
+    // ---- jump to the adjacent section in the current essay ----
+    function gotoAdjacentSection(dir) {
+      const essay = state.current.slug ? state.essayBySlug[state.current.slug] : null;
+      if (!essay || !Array.isArray(essay.section_order)) {
+        return;
+      }
+      const order = essay.section_order.map(String);
+      const idx = order.indexOf(String(state.current.n));
+      const j = idx + dir;
+      if (idx < 0 || j < 0 || j >= order.length) {
+        return;
+      }
+      loadSection(state.current.slug, order[j]);
+    }
+
     // ----- wiring ---------------------------------------------------------
     els.editor.addEventListener("input", scheduleRefresh);
+    els.editor.addEventListener("input", scheduleAutosave);
+    els.editor.addEventListener("keyup", typewriterCenter);
+    els.editor.addEventListener("click", typewriterCenter);
     if (palette) {
       els.editor.addEventListener("input", updateSlash);
       els.editor.addEventListener("keydown", onSlashKey);
       els.editor.addEventListener("blur", hideSlash);
+    }
+    if (blockOps) {
+      // Alt+↑ / Alt+↓ move the caret's block (familiar from other editors).
+      els.editor.addEventListener("keydown", function onBlockMove(event) {
+        if (event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey &&
+            (event.key === "ArrowUp" || event.key === "ArrowDown")) {
+          event.preventDefault();
+          runBlockOp(event.key === "ArrowUp" ? "up" : "down");
+        }
+      });
     }
 
     // Structural sync (§4). Caret moves (click/keyup) highlight + reveal the
