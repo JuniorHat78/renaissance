@@ -373,8 +373,11 @@
       const stats = (parsed && parsed.stats) || {};
       const blocks = Number.isFinite(Number(stats.blocks)) ? Number(stats.blocks) : 0;
       const words = Number.isFinite(Number(stats.words)) ? Number(stats.words) : 0;
+      // Reading time at a calm literary ~200 wpm; sub-minute reads round up to 1.
+      const minutes = words === 0 ? 0 : Math.max(1, Math.round(words / 200));
+      const readTime = words === 0 ? "" : " · " + minutes + " min read";
       targets.docStats.textContent = blocks + (blocks === 1 ? " block · " : " blocks · ") +
-        words + (words === 1 ? " word" : " words");
+        words + (words === 1 ? " word" : " words") + readTime;
     }
 
     function renderPreviewError(node, error) {
@@ -982,6 +985,8 @@
       }
       add("act:focus", "Toggle focus mode", "", "focus typewriter dim distraction", toggleFocusMode);
       add("act:autosave", "Toggle autosave", "", "autosave auto save idle", toggleAutosave);
+      add("act:theme", "Toggle light / dark theme", "", "theme dark light mode appearance", toggleTheme);
+      add("act:help", "Keyboard shortcuts", "?", "help shortcuts keys cheatsheet", showShortcuts);
       add("act:prev-section", "Previous section", "", "previous prev section navigate", function run() { gotoAdjacentSection(-1); });
       add("act:next-section", "Next section", "", "next section navigate", function run() { gotoAdjacentSection(1); });
       add("act:copy", "Copy section text", "", "copy clipboard export", function run() {
@@ -1478,6 +1483,75 @@
       }, 1500);
     }
 
+    // ---- keyboard shortcuts help ----
+    let helpEl = null;
+    function showShortcuts() {
+      if (!helpEl) {
+        helpEl = document.createElement("div");
+        helpEl.className = "cmd-overlay";
+        helpEl.hidden = true;
+        const panel = document.createElement("div");
+        panel.className = "cmd-panel help-panel";
+        const h = document.createElement("h2");
+        h.className = "help-title";
+        h.textContent = "Keyboard shortcuts";
+        panel.appendChild(h);
+        const ul = document.createElement("ul");
+        ul.className = "help-list";
+        [
+          ["Ctrl/Cmd+Shift+P", "Command palette"],
+          ["/", "Slash menu (block commands)"],
+          ["Ctrl/Cmd+F", "Find"],
+          ["Ctrl/Cmd+H", "Find & replace"],
+          ["Ctrl/Cmd+S", "Save section"],
+          ["Ctrl/Cmd+B / I / ` / K", "Bold / italic / code / link"],
+          ["Ctrl/Cmd+Alt+0–3", "Body / heading 1–3"],
+          ["Ctrl/Cmd+Alt+Q / B / H", "Pull-quote / blockquote / divider"],
+          ["Ctrl/Cmd+Alt+L", "Select current block"],
+          ["Alt+↑ / Alt+↓", "Move block up / down"],
+          ["Enter (in a list)", "Continue the list"],
+          ["Esc", "Close menus / find"],
+        ].forEach(function row(pair) {
+          const li = document.createElement("li");
+          li.className = "help-row";
+          const kbd = document.createElement("kbd");
+          kbd.textContent = pair[0];
+          const desc = document.createElement("span");
+          desc.textContent = pair[1];
+          li.appendChild(kbd);
+          li.appendChild(desc);
+          ul.appendChild(li);
+        });
+        panel.appendChild(ul);
+        helpEl.appendChild(panel);
+        document.body.appendChild(helpEl);
+        helpEl.addEventListener("mousedown", function close(event) {
+          if (event.target === helpEl) {
+            helpEl.hidden = true;
+          }
+        });
+        document.addEventListener("keydown", function esc(event) {
+          if (helpEl && !helpEl.hidden && event.key === "Escape") {
+            helpEl.hidden = true;
+          }
+        });
+      }
+      helpEl.hidden = false;
+    }
+
+    // ---- light / dark theme (persisted) ----
+    function toggleTheme() {
+      const cur = document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
+      const next = cur === "dark" ? "light" : "dark";
+      document.documentElement.setAttribute("data-theme", next);
+      try {
+        localStorage.setItem("scriptorium-theme", next);
+      } catch (error) {
+        /* private mode / storage disabled — theme just won't persist */
+      }
+      setStatus("Theme: " + next, "");
+    }
+
     // ---- jump to the adjacent section in the current essay ----
     function gotoAdjacentSection(dir) {
       const essay = state.current.slug ? state.essayBySlug[state.current.slug] : null;
@@ -1655,6 +1729,15 @@
     });
 
     // ----- boot -----------------------------------------------------------
+    try {
+      const savedTheme = localStorage.getItem("scriptorium-theme");
+      if (savedTheme === "dark" || savedTheme === "light") {
+        document.documentElement.setAttribute("data-theme", savedTheme);
+      }
+    } catch (error) {
+      /* storage disabled — keep the default theme */
+    }
+
     refreshFromBuffer(); // empty buffer → clean preview/diagnostics baseline
 
     // Opt-in wasm engine: load asynchronously so the editor is instantly usable

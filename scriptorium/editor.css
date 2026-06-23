@@ -577,6 +577,30 @@ body.focus-mode .preview [data-source-start]:not(.active-block) {
 }
 body.focus-mode .preview .active-block { opacity: 1; }
 
+/* Keyboard shortcuts help overlay (reuses .cmd-overlay / .cmd-panel). */
+.help-panel { padding: 18px 20px; }
+.help-title { font-family: var(--font-ui); font-size: 16px; margin: 0 0 12px; color: var(--text); }
+.help-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 7px; }
+.help-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 18px;
+  font-family: var(--font-ui);
+  font-size: 13px;
+  color: var(--text);
+}
+.help-row kbd {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  background: var(--accent-wash);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 2px 6px;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
 /* ---- side rail (diagnostics + outline) -------------------------------- */
 .pane-side {
   gap: 0;
