@@ -18,10 +18,11 @@
   <script src="../scripts/ast/core.js" defer></script>
   <script src="../scripts/ast/render.js" defer></script>
   <script src="../scripts/ast/parse.js" defer></script>
-  <!-- Structural layer (SCRIPTORIUM-EDITOR.md): pure offset↔block mapping.
-       Local author tooling, requireable in Node for tests; never forks the
-       parser. -->
+  <!-- Structural layer (SCRIPTORIUM-EDITOR.md): pure offset↔block mapping +
+       AST-aware command functions (oracle-verified). Local author tooling,
+       requireable in Node for tests; neither forks the parser. -->
   <script src="mapping.js" defer></script>
+  <script src="commands.js" defer></script>
   <script src="editor.js" defer></script>
 </head>
 <body>
@@ -53,6 +54,21 @@
       <div class="pane-head">
         <span class="pane-title">Source</span>
         <span id="doc-stats" class="pane-note muted" aria-live="polite"></span>
+      </div>
+      <!-- Formatting commands (SCRIPTORIUM-EDITOR.md §5). Each button runs an
+           AST-aware command verified through the one parser before it commits;
+           editor.js binds clicks + keys by data-cmd. Hidden if commands.js
+           didn't load. -->
+      <div id="toolbar" class="toolbar" role="toolbar" aria-label="Formatting commands" hidden>
+        <button class="tool" type="button" data-cmd="strong" title="Bold (Ctrl/Cmd+B)"><b>B</b></button>
+        <button class="tool" type="button" data-cmd="emphasis" title="Italic (Ctrl/Cmd+I)"><i>I</i></button>
+        <button class="tool tool-mono" type="button" data-cmd="code" title="Code (Ctrl/Cmd+`)">&lt;/&gt;</button>
+        <button class="tool" type="button" data-cmd="link" title="Link (Ctrl/Cmd+K)">link</button>
+        <span class="tool-sep" aria-hidden="true"></span>
+        <button class="tool" type="button" data-cmd="heading-1" title="Heading 1 (Ctrl/Cmd+Alt+1)">H1</button>
+        <button class="tool" type="button" data-cmd="heading-2" title="Heading 2 (Ctrl/Cmd+Alt+2)">H2</button>
+        <button class="tool" type="button" data-cmd="heading-3" title="Heading 3 (Ctrl/Cmd+Alt+3)">H3</button>
+        <button class="tool" type="button" data-cmd="heading-0" title="Body text (Ctrl/Cmd+Alt+0)">&para;</button>
       </div>
       <textarea
         id="editor"

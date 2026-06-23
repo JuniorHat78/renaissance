@@ -101,6 +101,9 @@
     // failed to load the editor still edits and previews; only the structural
     // feel (highlight / click-to-jump / scroll-sync) goes quiet.
     const mapping = window.ScriptoriumMapping || null;
+    // The AST-aware commands (§5). Optional in the same spirit: no commands
+    // module, no toolbar — the editor still authors by hand.
+    const commands = window.ScriptoriumCommands || null;
 
     const els = {
       essaySelect: document.getElementById("essay-select"),
@@ -113,6 +116,7 @@
       diagCount: document.getElementById("diag-count"),
       outline: document.getElementById("outline"),
       docStats: document.getElementById("doc-stats"),
+      toolbar: document.getElementById("toolbar"),
     };
 
     if (!ast) {
@@ -526,6 +530,71 @@
       return from;
     }
 
+    // ----- commands (SCRIPTORIUM-EDITOR.md §5) ----------------------------
+    // Run an AST-aware command: the pure function proposes a verified edit; we
+    // apply it to the textarea preserving the NATIVE undo stack (§5.4) and let
+    // the normal refresh repaint. If the oracle refused, we say so and touch
+    // nothing.
+    function runCommand(id) {
+      if (!commands || els.editor.disabled) {
+        return;
+      }
+      const text = els.editor.value;
+      const result = commands.apply(id, text, els.editor.selectionStart, els.editor.selectionEnd, ast.parseDocument);
+      if (!result || !result.ok) {
+        setStatus((result && result.reason) || "Command not applicable here.", "error");
+        return;
+      }
+      applyBufferEdit(result.text, result.selectionStart, result.selectionEnd);
+      refreshFromBuffer();
+      syncActiveFromCaret(true);
+    }
+
+    // Apply a new buffer as a MINIMAL diff via execCommand("insertText") so the
+    // change enters the textarea's native undo stack — one Ctrl+Z reverses a
+    // command (§5.4). Falls back to setRangeText if execCommand is unavailable
+    // (correct, but coarser undo).
+    function applyBufferEdit(newText, selectionStart, selectionEnd) {
+      const old = els.editor.value;
+      els.editor.focus();
+      if (old !== newText) {
+        const max = Math.min(old.length, newText.length);
+        let prefix = 0;
+        while (prefix < max && old[prefix] === newText[prefix]) {
+          prefix += 1;
+        }
+        let suffix = 0;
+        while (
+          suffix < max - prefix &&
+          old[old.length - 1 - suffix] === newText[newText.length - 1 - suffix]
+        ) {
+          suffix += 1;
+        }
+        const from = prefix;
+        const to = old.length - suffix;
+        const insert = newText.slice(prefix, newText.length - suffix);
+
+        els.editor.setSelectionRange(from, to);
+        let inserted = false;
+        try {
+          inserted = document.execCommand("insertText", false, insert);
+        } catch (error) {
+          inserted = false;
+        }
+        if (!inserted || els.editor.value !== newText) {
+          // execCommand unavailable / blocked: fall back (coarser undo).
+          els.editor.value = newText;
+        }
+      }
+      const bounded = Math.min(selectionStart, els.editor.value.length);
+      const boundedEnd = Math.min(selectionEnd, els.editor.value.length);
+      try {
+        els.editor.setSelectionRange(bounded, boundedEnd);
+      } catch (error) {
+        /* ignore */
+      }
+    }
+
     // ----- save state -----------------------------------------------------
     function isDirty() {
       return els.editor.value !== state.loadedText;
@@ -680,6 +749,24 @@
     });
     els.editor.addEventListener("scroll", throttleFrame(syncScrollFromSource));
 
+    // Toolbar (§5.5): reveal it only if the commands module loaded, then run a
+    // command by its data-cmd. mousedown+preventDefault keeps the textarea's
+    // selection alive across the click so the command sees what's selected.
+    if (commands && els.toolbar) {
+      els.toolbar.hidden = false;
+      els.toolbar.addEventListener("mousedown", function keepSelection(event) {
+        if (event.target.closest("[data-cmd]")) {
+          event.preventDefault();
+        }
+      });
+      els.toolbar.addEventListener("click", function onToolClick(event) {
+        const button = event.target.closest("[data-cmd]");
+        if (button) {
+          runCommand(button.getAttribute("data-cmd"));
+        }
+      });
+    }
+
     els.essaySelect.addEventListener("change", function onEssayChange() {
       const slug = els.essaySelect.value;
       const essay = state.essayBySlug[slug];
@@ -700,13 +787,43 @@
 
     els.saveButton.addEventListener("click", saveSection);
 
-    // Ctrl/Cmd+S → save (native textarea undo/redo, selection, IME are all
-    // left untouched; we only intercept the save chord).
+    // Keyboard chords. Ctrl/Cmd+S saves; the rest run AST-aware commands. We
+    // intercept ONLY these chords — native undo/redo, selection, IME, and plain
+    // typing are left entirely to the textarea (§4 caret boundary). Headings use
+    // Ctrl/Cmd+Alt+0..3 because browsers eat plain Ctrl+1..3 for tab-switching.
     document.addEventListener("keydown", function onKey(event) {
-      const isSaveChord = (event.ctrlKey || event.metaKey) && (event.key === "s" || event.key === "S");
-      if (isSaveChord) {
+      const mod = event.ctrlKey || event.metaKey;
+      if (!mod) {
+        return;
+      }
+      const key = event.key.toLowerCase();
+
+      if (key === "s") {
         event.preventDefault();
         saveSection();
+        return;
+      }
+
+      if (!commands || els.editor.disabled) {
+        return;
+      }
+
+      let commandId = null;
+      if (event.altKey && /^[0-3]$/.test(event.key)) {
+        commandId = "heading-" + event.key;
+      } else if (!event.altKey && key === "b") {
+        commandId = "strong";
+      } else if (!event.altKey && key === "i") {
+        commandId = "emphasis";
+      } else if (!event.altKey && key === "`") {
+        commandId = "code";
+      } else if (!event.altKey && key === "k") {
+        commandId = "link";
+      }
+
+      if (commandId) {
+        event.preventDefault();
+        runCommand(commandId);
       }
     });
 

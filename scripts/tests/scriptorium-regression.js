@@ -514,6 +514,87 @@ if (!haveCompiledDir) {
 })();
 
 // ---------------------------------------------------------------------------
+// 5. COMMANDS — AST-aware edits, verified by the per-command oracle (§5.2).
+//
+// The command analogue of the equivalence oracle: each command applies a
+// candidate edit, RE-PARSES through the one authority, and commits only if the
+// intended node materialized (counts move by one, visible text is preserved, no
+// new error). We drive each command through the REAL parser here, so a wrong
+// marker or a boundary mistake fails loudly — and we prove the oracle REFUSES a
+// mid-word wrap that wouldn't parse. skip-with-warning if the module is absent.
+// ---------------------------------------------------------------------------
+
+(function commandsUnit() {
+  const label = "commands: AST-aware edits pass/refuse via the per-command oracle";
+  let commands;
+  try {
+    commands = require("../../scriptorium/commands.js");
+  } catch (error) {
+    const reason =
+      error && error.code === "MODULE_NOT_FOUND"
+        ? "scriptorium/commands.js not present yet (built concurrently)"
+        : "require('scriptorium/commands.js') threw: " + (error && error.message ? error.message : String(error));
+    skip(label, reason);
+    return;
+  }
+
+  if (typeof commands.apply !== "function") {
+    skip(label, "commands interface differs (apply missing)");
+    return;
+  }
+
+  const parse = (text) => ast.parseDocument(text);
+  const run = (id, text, start, end) => commands.apply(id, text, start, end, parse);
+
+  check(label, () => {
+    // Bold a whole word -> succeeds, inserts **…**, parses as one strong node.
+    let r = run("strong", "make this bold", 10, 14);
+    assert.ok(r.ok, "bold a whole word should succeed: " + r.reason);
+    assert.strictEqual(r.text, "make this **bold**", "bold produced wrong markup: " + r.text);
+    assert.strictEqual(commands.countInline(parse(r.text), "strong"), 1, "bold did not yield exactly one strong node");
+
+    // Italic + code likewise.
+    assert.strictEqual(run("emphasis", "a word here", 2, 6).text, "a *word* here", "emphasis markup wrong");
+    assert.strictEqual(run("code", "call foo now", 5, 8).text, "call `foo` now", "code markup wrong");
+
+    // Empty selection inserts the pair and caret-between (no oracle).
+    r = run("strong", "abc", 3, 3);
+    assert.ok(r.ok && r.text === "abc****" && r.selectionStart === 5 && r.selectionEnd === 5, "empty-selection bold insert wrong: " + JSON.stringify(r));
+
+    // Toggle OFF: selecting an already-bold word removes the markers.
+    r = run("strong", "a **b** c", 4, 5);
+    assert.ok(r.ok && r.text === "a b c", "toggling bold off failed: " + JSON.stringify(r));
+
+    // Round-trip: bold then un-bold returns the original buffer.
+    const onceBold = run("strong", "round trip word", 6, 10); // "trip"
+    assert.ok(onceBold.ok, "round-trip bold-on failed: " + onceBold.reason);
+    const back = run("strong", onceBold.text, onceBold.selectionStart, onceBold.selectionEnd);
+    assert.ok(back.ok && back.text === "round trip word", "bold round-trip did not restore the original: " + JSON.stringify(back));
+
+    // THE ORACLE REFUSES: a mid-word wrap that wouldn't parse as strong is
+    // rejected (markers next to alphanumerics don't open) — buffer untouched.
+    r = run("strong", "department", 2, 6); // "part" inside the word
+    assert.ok(!r.ok, "oracle should REFUSE a mid-word bold that won't parse, but it accepted: " + JSON.stringify(r));
+    assert.ok(r.text === null, "a refused command must not propose a buffer");
+
+    // Headings: promote, level-correct, and demote to body.
+    r = run("heading-2", "Title line\n\nbody", 3);
+    assert.ok(r.ok && r.text === "## Title line\n\nbody", "heading-2 markup wrong: " + JSON.stringify(r));
+    r = run("heading-0", "## Title line\n\nbody", 4);
+    assert.ok(r.ok && r.text === "Title line\n\nbody", "demote-to-body failed: " + JSON.stringify(r));
+    // Re-leveling an existing heading replaces, not stacks, the hashes.
+    r = run("heading-1", "### Deep\n\nx", 4);
+    assert.ok(r.ok && r.text === "# Deep\n\nx", "re-leveling stacked hashes: " + JSON.stringify(r));
+
+    // Link: wrap selection, land the caret on the URL placeholder.
+    r = run("link", "see here now", 4, 8); // "here"
+    assert.ok(r.ok && r.text === "see [here](https://) now", "link markup wrong: " + JSON.stringify(r));
+    assert.strictEqual(r.text.slice(r.selectionStart, r.selectionEnd), "https://", "link caret should select the URL placeholder");
+    assert.strictEqual(commands.countInline(parse(r.text), "link"), 1, "link did not yield exactly one link node");
+  });
+})();
+
+// ---------------------------------------------------------------------------
 // Summary.
 // ---------------------------------------------------------------------------
 

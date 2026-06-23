@@ -248,6 +248,57 @@ select:disabled {
   color: var(--muted);
 }
 
+/* ---- formatting toolbar (SCRIPTORIUM-EDITOR.md §5.5) ------------------- */
+.toolbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
+  background: var(--paper);
+}
+
+.toolbar[hidden] {
+  display: none;
+}
+
+.tool {
+  font-family: var(--font-ui);
+  font-size: 0.82rem;
+  min-width: 30px;
+  height: 28px;
+  padding: 0 8px;
+  color: var(--text);
+  background: var(--paper-edit);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.tool:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.tool:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.tool-mono {
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+}
+
+.tool-sep {
+  width: 1px;
+  height: 20px;
+  margin: 0 4px;
+  background: var(--line);
+}
+
 /* ---- editing surface (the textarea — the ONLY caret) ------------------- */
 .editor-textarea {
   flex: 1 1 auto;
