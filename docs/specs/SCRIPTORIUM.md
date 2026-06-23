@@ -170,10 +170,12 @@ Each phase is shippable and leaves the tool usable. Per-checkpoint commits.
 - **P1 — the loop.** Split-pane: `<textarea>` + live `render.js` preview. Now it
   is an editor.
 - **P2 — live diagnostics.** Inline surfacing of `parse.js` `DIAGNOSTIC_CODES`.
-- **P3 — structural feel.** caret↔node mapping via source positions: two-way
-  source↔preview sync, "select this node," AST-aware (oracle-verified) commands.
-  The "push it" phase. **Deepened into its own design of record:**
-  `docs/specs/SCRIPTORIUM-EDITOR.md`.
+- **P3 — structural feel. [SHIPPED]** caret↔node mapping via source positions:
+  two-way source↔preview sync, "select this node," AST-aware (oracle-verified)
+  commands. The "push it" phase. **Deepened into its own design of record:**
+  `docs/specs/SCRIPTORIUM-EDITOR.md`. A zero-dep installable-PWA capstone
+  (manifest + `/scriptorium/`-scoped service worker + `--open` launcher) makes
+  the editor a real desktop app without Electron.
 - **P4 — kill the clunk.** Scriptorium owns `essays.json`: create / reorder /
   retitle sections from the UI, drift made unrepresentable, project doctor (§3).
 - **P5 — reunite the workbench.** Fixture capture, equivalence badge, corpus-lint

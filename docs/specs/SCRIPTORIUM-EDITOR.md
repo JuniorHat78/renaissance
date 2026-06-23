@@ -6,9 +6,11 @@
 > ("structural feel")**, deepened into its own spec — the move that turns a slick
 > *viewer with an editable pane* into an editor that feels alive.
 >
-> Status: **spec / not yet started.** Doc-driven — written first, built to,
-> retired when shipped. Read `SCRIPTORIUM.md` first; this assumes its spine
-> invariant (§2) and caret boundary (§4) as settled law.
+> Status: **P3a/b/c shipped** (two-way sync, oracle-verified commands,
+> select-node + block toggles), plus a zero-dep installable-PWA capstone. The
+> pure brain (`mapping.js`, `commands.js`) is fully unit-tested in the spine
+> guard. Read `SCRIPTORIUM.md` first; this assumes its spine invariant (§2) and
+> caret boundary (§4) as settled law.
 >
 > Last refreshed: 2026-06-23.
 
