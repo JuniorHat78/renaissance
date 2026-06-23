@@ -22,9 +22,19 @@ const ROOT = shared.ROOT;
 
 const SLUG = "etching-god-into-sand";
 const NODE_SERVER = path.join(ROOT, "scriptorium", "server.js");
-const RUST_BIN = process.env.SCRIPTORIUM_SERVER_BIN && process.env.SCRIPTORIUM_SERVER_BIN.trim()
-  ? path.resolve(process.env.SCRIPTORIUM_SERVER_BIN.trim())
-  : null;
+function resolveRustBin() {
+  const raw = process.env.SCRIPTORIUM_SERVER_BIN;
+  if (!raw || !raw.trim()) {
+    return null;
+  }
+  let p = path.resolve(raw.trim());
+  // Allow CI to pass an extension-less path; add .exe on Windows.
+  if (!fs.existsSync(p) && process.platform === "win32" && !p.endsWith(".exe") && fs.existsSync(p + ".exe")) {
+    p = p + ".exe";
+  }
+  return p;
+}
+const RUST_BIN = resolveRustBin();
 
 function makeTempRoot(tag) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "scriptorium-srv-" + tag + "-"));

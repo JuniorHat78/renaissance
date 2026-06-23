@@ -1,15 +1,11 @@
 name: scriptorium-rust-oracle
 
-# The equivalence oracle for the crate-free Rust parser
-# (docs/specs/SCRIPTORIUM-RUST-PARSER.md §6): build the parser and assert it is
-# byte-identical (structurally) to the ONE JS parse authority over the corpus +
-# an adversarial set + seeded fuzz. This is a DETERMINISTIC-CORRECTNESS gate, so
-# it is allowed to hard-fail (unlike the project's advisory metric jobs).
-#
-# The OS matrix is deliberate: the same source compiled on three platforms must
-# produce identical ASTs, which also proves native-vs-native determinism for free
-# (§10). Quarantine is unaffected — this lives in .github and only ever builds
-# scriptorium/rust against scripts/ast; nothing ships.
+# Maximal equivalence CI for the crate-free Rust core (SCRIPTORIUM-RUST-PARSER.md
+# §6). parse / render / consume / json / server are each held byte-identical (or
+# behaviourally identical) to the JS authority, across an OS × toolchain matrix,
+# with heavy seeded fuzz and three-engine in-browser parity. These are
+# DETERMINISTIC-CORRECTNESS gates (allowed to hard-fail); the hygiene + size jobs
+# are informative (continue-on-error), per the project's CI philosophy.
 
 on:
   push:
@@ -18,13 +14,15 @@ on:
       - "scriptorium/rust/**"
       - "scriptorium/wasm-parser.js"
       - "scriptorium/server.js"
+      - "scriptorium/wasm-parity.html"
       - "scripts/ast/**"
       - "scripts/tests/rust-parser-oracle.js"
       - "scripts/tests/rust-wasm-oracle.js"
       - "scripts/tests/rust-json-roundtrip.js"
+      - "scripts/tests/rust-render-oracle.js"
+      - "scripts/tests/rust-consume-oracle.js"
       - "scripts/tests/rust-server-oracle.js"
       - "scripts/tests/scriptorium-wasm-browser-parity.js"
-      - "scriptorium/wasm-parity.html"
       - "scripts/tests/lib/parser-oracle-corpus.js"
       - ".github/workflows/scriptorium-rust-oracle.yml"
   pull_request:
@@ -32,13 +30,15 @@ on:
       - "scriptorium/rust/**"
       - "scriptorium/wasm-parser.js"
       - "scriptorium/server.js"
+      - "scriptorium/wasm-parity.html"
       - "scripts/ast/**"
       - "scripts/tests/rust-parser-oracle.js"
       - "scripts/tests/rust-wasm-oracle.js"
       - "scripts/tests/rust-json-roundtrip.js"
+      - "scripts/tests/rust-render-oracle.js"
+      - "scripts/tests/rust-consume-oracle.js"
       - "scripts/tests/rust-server-oracle.js"
       - "scripts/tests/scriptorium-wasm-browser-parity.js"
-      - "scriptorium/wasm-parity.html"
       - "scripts/tests/lib/parser-oracle-corpus.js"
       - ".github/workflows/scriptorium-rust-oracle.yml"
   workflow_dispatch:
@@ -47,8 +47,73 @@ permissions:
   contents: read
 
 jobs:
-  oracle:
-    name: oracle (${{ matrix.os }})
+  # Native parser oracle across OS × toolchain (cross-platform + toolchain
+  # determinism: the same source must byte-match the JS authority everywhere).
+  native-parser:
+    name: parser ${{ matrix.os }} / ${{ matrix.toolchain }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        toolchain: [stable, beta]
+    env:
+      SCRIPTORIUM_FUZZ: "3000"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.toolchain }}
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            scriptorium/rust/target
+          key: ${{ runner.os }}-${{ matrix.toolchain }}-cargo-${{ hashFiles('scriptorium/rust/**/*.rs', 'scriptorium/rust/Cargo.toml') }}
+          restore-keys: ${{ runner.os }}-${{ matrix.toolchain }}-cargo-
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm run build:rust
+      - run: npm run oracle:rust
+
+  # All wasm-backed oracles (parser / json / render / consume) across OS — the
+  # artifact the browser loads, byte-identical everywhere.
+  wasm-oracles:
+    name: wasm oracles ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    env:
+      SCRIPTORIUM_FUZZ: "3000"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            scriptorium/rust/target
+          key: ${{ runner.os }}-wasm-cargo-${{ hashFiles('scriptorium/rust/**/*.rs', 'scriptorium/rust/Cargo.toml') }}
+          restore-keys: ${{ runner.os }}-wasm-cargo-
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm run build:rust-wasm
+      - run: npm run oracle:rust-wasm
+      - run: npm run oracle:rust-json
+      - run: npm run oracle:rust-render
+      - run: npm run oracle:rust-consume
+
+  # Differential server oracle (rust ≡ node) across OS.
+  server-oracle:
+    name: server ≡ node ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -56,125 +121,108 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install Rust (stable)
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo
-        uses: actions/cache@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             scriptorium/rust/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('scriptorium/rust/**/*.rs', 'scriptorium/rust/Cargo.toml') }}
-          restore-keys: ${{ runner.os }}-cargo-
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
+          key: ${{ runner.os }}-srv-cargo-${{ hashFiles('scriptorium/rust/**/*.rs', 'scriptorium/rust/Cargo.toml') }}
+          restore-keys: ${{ runner.os }}-srv-cargo-
+      - uses: actions/setup-node@v4
         with:
           node-version: 22
-
-      - name: Build the parser (release)
-        run: npm run build:rust
-
-      - name: Run the equivalence oracle
-        run: npm run oracle:rust
-
-  wasm-oracle:
-    name: wasm oracle (the artifact the editor loads)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust (stable) + wasm32 target
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-unknown-unknown
-
-      - name: Cache cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            scriptorium/rust/target
-          key: wasm-cargo-${{ hashFiles('scriptorium/rust/**/*.rs', 'scriptorium/rust/Cargo.toml') }}
-          restore-keys: wasm-cargo-
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      # The .wasm is the parser the browser editor loads (R1). Build it, then run
-      # the same equivalence oracle against it via Node (which runs wasm natively)
-      # — proving the shipped artifact is byte-identical to the JS authority.
-      - name: Build lib for wasm32-unknown-unknown
-        run: npm run build:rust-wasm
-
-      - name: Run the wasm equivalence oracle
-        run: npm run oracle:rust-wasm
-
-      - name: Run the JSON round-trip oracle (json_value ≡ JSON.stringify)
-        run: npm run oracle:rust-json
-
-  server-oracle:
-    name: server oracle (rust ≡ node)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust (stable)
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            scriptorium/rust/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('scriptorium/rust/**/*.rs', 'scriptorium/rust/Cargo.toml') }}
-          restore-keys: ${{ runner.os }}-cargo-
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - name: Build the native server
-        run: npm run build:rust-server
-
-      - name: Run the differential server oracle (rust vs node)
+      - run: npm run build:rust-server
+      - name: Differential server oracle
         env:
           SCRIPTORIUM_SERVER_BIN: scriptorium/rust/target/release/scriptorium-server
         run: npm run oracle:rust-server
 
-  browser-parity:
-    name: wasm parity in a real browser (R1 last mile)
+  # Heavy seeded fuzz against every wasm oracle (compute is not a constraint).
+  heavy-fuzz:
+    name: heavy fuzz (50k)
     runs-on: ubuntu-latest
+    env:
+      SCRIPTORIUM_FUZZ: "50000"
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install Rust (stable) + wasm32 target
-        uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            scriptorium/rust/target
+          key: ubuntu-wasm-cargo-${{ hashFiles('scriptorium/rust/**/*.rs', 'scriptorium/rust/Cargo.toml') }}
+          restore-keys: ubuntu-wasm-cargo-
+      - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - run: npm run build:rust-wasm
+      - run: npm run oracle:rust-wasm
+      - run: npm run oracle:rust-render
+      - run: npm run oracle:rust-consume
+      - run: npm run oracle:rust-json
 
-      - name: Install dependencies
-        run: npm ci
+  # In-browser parity across all three Playwright engines.
+  browser-parity:
+    name: browser parity ${{ matrix.browser }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+    env:
+      RENAISSANCE_BROWSER: ${{ matrix.browser }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npx playwright install --with-deps ${{ matrix.browser }}
+      - run: npm run wasm:editor
+      - run: npm run ci:scriptorium-parity
 
-      - name: Install Playwright Chromium
-        run: npx playwright install --with-deps chromium
+  # Rust hygiene — informative only (style is not a deterministic gate).
+  hygiene:
+    name: rust hygiene (informative)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: cargo fmt --check
+        continue-on-error: true
+        run: cargo fmt --manifest-path scriptorium/rust/Cargo.toml --all -- --check
+      - name: cargo clippy
+        continue-on-error: true
+        run: cargo clippy --manifest-path scriptorium/rust/Cargo.toml --all-targets
+      - name: cargo test
+        continue-on-error: true
+        run: cargo test --manifest-path scriptorium/rust/Cargo.toml
 
-      - name: Build + stage the wasm next to the editor
-        run: npm run wasm:editor
-
-      - name: Browser parity (browser-JS ≡ wasm-in-browser ≡ Node-JS)
-        run: npm run ci:scriptorium-parity
+  # wasm artifact size report — informative.
+  wasm-size:
+    name: wasm size (informative)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - run: npm run build:rust-wasm
+      - name: Report .wasm size
+        run: |
+          f=scriptorium/rust/target/wasm32-unknown-unknown/release/scriptorium_parser.wasm
+          ls -la "$f"
+          echo "wasm size: $(wc -c < "$f") bytes"
