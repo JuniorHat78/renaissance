@@ -16,14 +16,20 @@ on:
     branches: [main, feat/scriptorium]
     paths:
       - "scriptorium/rust/**"
+      - "scriptorium/wasm-parser.js"
       - "scripts/ast/**"
       - "scripts/tests/rust-parser-oracle.js"
+      - "scripts/tests/rust-wasm-oracle.js"
+      - "scripts/tests/lib/parser-oracle-corpus.js"
       - ".github/workflows/scriptorium-rust-oracle.yml"
   pull_request:
     paths:
       - "scriptorium/rust/**"
+      - "scriptorium/wasm-parser.js"
       - "scripts/ast/**"
       - "scripts/tests/rust-parser-oracle.js"
+      - "scripts/tests/rust-wasm-oracle.js"
+      - "scripts/tests/lib/parser-oracle-corpus.js"
       - ".github/workflows/scriptorium-rust-oracle.yml"
   workflow_dispatch:
 
