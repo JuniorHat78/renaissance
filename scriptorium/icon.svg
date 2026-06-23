@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Scriptorium">
+  <!-- Maskable-safe: art kept within the central ~80% safe zone on a full-bleed
+       warm field, echoing the site palette. A quill over an open leaf. -->
+  <rect width="512" height="512" fill="#efe5d6"/>
+  <rect width="512" height="512" fill="url(#wash)"/>
+  <!-- open manuscript leaf -->
+  <g stroke="#a34f2a" stroke-width="10" fill="#f8f2e7" stroke-linejoin="round">
+    <path d="M256 150 C 210 126, 150 124, 116 140 L 116 372 C 150 356, 210 358, 256 382 Z"/>
+    <path d="M256 150 C 302 126, 362 124, 396 140 L 396 372 C 362 356, 302 358, 256 382 Z"/>
+  </g>
+  <!-- ruled lines -->
+  <g stroke="#cdbba3" stroke-width="6" stroke-linecap="round">
+    <line x1="150" y1="190" x2="232" y2="198"/>
+    <line x1="150" y1="226" x2="232" y2="234"/>
+    <line x1="150" y1="262" x2="232" y2="270"/>
+    <line x1="280" y1="198" x2="362" y2="190"/>
+    <line x1="280" y1="234" x2="362" y2="226"/>
+  </g>
+  <!-- quill -->
+  <g stroke="#2a2018" stroke-width="12" stroke-linecap="round" fill="none">
+    <path d="M300 360 L 392 250"/>
+  </g>
+  <path d="M392 250 l 28 -34 -6 40 -34 14 z" fill="#a34f2a"/>
+  <defs>
+    <radialGradient id="wash" cx="82%" cy="-8%" r="70%">
+      <stop offset="0%" stop-color="#a34f2a" stop-opacity="0.16"/>
+      <stop offset="60%" stop-color="#a34f2a" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+</svg>

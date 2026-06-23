@@ -1,0 +1,19 @@
+{
+  "name": "Scriptorium — Renaissance authoring",
+  "short_name": "Scriptorium",
+  "description": "Local authoring instrument for the Renaissance essays — write through the one AST.",
+  "start_url": "/scriptorium/editor.html",
+  "scope": "/scriptorium/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#efe5d6",
+  "theme_color": "#a34f2a",
+  "icons": [
+    {
+      "src": "/scriptorium/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

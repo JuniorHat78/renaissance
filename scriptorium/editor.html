@@ -6,6 +6,12 @@
   <meta name="robots" content="noindex, nofollow">
   <title>Scriptorium — Renaissance authoring</title>
   <link rel="stylesheet" href="editor.css">
+  <!-- Installable PWA (local only): the editor can be installed as a standalone
+       desktop window with zero dependencies — just a manifest + a /scriptorium/
+       -scoped service worker (quarantine §6: isolated from the site's own SW). -->
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <meta name="theme-color" content="#a34f2a">
   <!--
     THE SPINE (SCRIPTORIUM.md §2): author through the ONE parse authority.
     core.js  -> the shared AST surface + normalizeAstInput (no parser of its own)
@@ -116,5 +122,15 @@
       </div>
     </aside>
   </main>
+
+  <!-- Register the scoped service worker so the editor is installable and
+       loads offline. Failure is silent — the editor works without it. -->
+  <script>
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", function registerScriptoriumSW() {
+        navigator.serviceWorker.register("sw.js", { scope: "./" }).catch(function ignore() {});
+      });
+    }
+  </script>
 </body>
 </html>

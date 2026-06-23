@@ -59,6 +59,7 @@ const CONTENT_TYPES = {
   ".html": "text/html; charset=utf-8",
   ".htm": "text/html; charset=utf-8",
   ".json": "application/json; charset=utf-8",
+  ".webmanifest": "application/manifest+json; charset=utf-8",
   ".txt": "text/plain; charset=utf-8",
   ".svg": "image/svg+xml",
   ".png": "image/png",
@@ -608,6 +609,32 @@ function resolvePort() {
   return Number.isInteger(fromEnv) && fromEnv > 0 ? fromEnv : DEFAULT_PORT;
 }
 
+// Open a URL in the OS default browser (zero-dep, built-in child_process only).
+// Best-effort: a failure to launch never takes the server down. Used by --open
+// so the launcher (scriptorium.cmd / .sh) boots the server AND the app in one
+// step; the installable PWA (manifest + sw.js) then upgrades it to a real window.
+function openInBrowser(url) {
+  let command;
+  let args;
+  if (process.platform === "win32") {
+    command = "cmd";
+    args = ["/c", "start", "", url]; // empty title arg keeps URLs with & intact
+  } else if (process.platform === "darwin") {
+    command = "open";
+    args = [url];
+  } else {
+    command = "xdg-open";
+    args = [url];
+  }
+  try {
+    const child = require("child_process").spawn(command, args, { detached: true, stdio: "ignore" });
+    child.on("error", () => {});
+    child.unref();
+  } catch (error) {
+    /* launching is a convenience; never fatal */
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Entry point — only listen when run directly (`node scriptorium/server.js`).
 // ---------------------------------------------------------------------------
@@ -615,6 +642,7 @@ function resolvePort() {
 if (require.main === module) {
   const port = resolvePort();
   const server = createServer();
+  const shouldOpen = process.argv.slice(2).indexOf("--open") !== -1;
   server.listen(port, () => {
     const editorUrl = "http://localhost:" + port + DEFAULT_ROUTE;
     // eslint-disable-next-line no-console
@@ -623,6 +651,9 @@ if (require.main === module) {
     console.log("  Project root: " + PROJECT_ROOT);
     // eslint-disable-next-line no-console
     console.log("  Open the editor: " + editorUrl);
+    if (shouldOpen) {
+      openInBrowser(editorUrl);
+    }
   });
 }
 
