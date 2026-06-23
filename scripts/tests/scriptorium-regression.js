@@ -407,6 +407,113 @@ if (!haveCompiledDir) {
 })();
 
 // ---------------------------------------------------------------------------
+// 4. MAPPING — the pure offset↔block index (SCRIPTORIUM-EDITOR.md §2/§4).
+//
+// The structural layer rests on ONE mapping read both ways. It is pure (no DOM),
+// so it is fully Node-testable here: parse a fixture through the one authority,
+// build the index, and assert offset→block resolves correctly across starts,
+// interiors, gaps, the before-first edge, and past-end — and that the top-level
+// (command) index carries the unaddressable containers the passage index omits.
+// skip-with-warning if the module isn't present yet.
+// ---------------------------------------------------------------------------
+
+(function mappingUnit() {
+  const label = "mapping: offset↔block index matches the parse (caret↔preview)";
+  let mapping;
+  try {
+    mapping = require("../../scriptorium/mapping.js");
+  } catch (error) {
+    const reason =
+      error && error.code === "MODULE_NOT_FOUND"
+        ? "scriptorium/mapping.js not present yet (built concurrently)"
+        : "require('scriptorium/mapping.js') threw: " + (error && error.message ? error.message : String(error));
+    skip(label, reason);
+    return;
+  }
+
+  if (typeof mapping.indexDocument !== "function" || typeof mapping.blockAtOffset !== "function") {
+    skip(label, "mapping interface differs (indexDocument / blockAtOffset missing)");
+    return;
+  }
+
+  const text = [
+    "# Title",
+    "",
+    "First paragraph here.",
+    "",
+    "> A quoted line.",
+    "",
+    "- one",
+    "- two",
+    "",
+    "---",
+    "",
+    "Closing paragraph.",
+  ].join("\n");
+
+  check(label, () => {
+    const parsed = ast.parseDocument(text);
+    const index = mapping.indexDocument(parsed);
+    const passages = index.passages;
+    const blocks = index.blocks;
+
+    // Passages are exactly the addressable types, in source order.
+    assert.ok(passages.length >= 5, "expected >=5 passages, got " + passages.length);
+    for (const p of passages) {
+      assert.ok(mapping.PASSAGE_TYPES[p.type], "passage of non-addressable type: " + p.type);
+    }
+    for (let i = 1; i < passages.length; i++) {
+      assert.ok(passages[i].start >= passages[i - 1].start, "passages not sorted by start");
+    }
+
+    // Each passage resolves to itself at its own start and at an interior offset.
+    for (const p of passages) {
+      assert.strictEqual(mapping.blockAtOffset(passages, p.start), p, "start offset did not resolve to its own passage");
+      if (p.end > p.start) {
+        assert.strictEqual(mapping.blockAtOffset(passages, p.end - 1), p, "interior offset did not resolve to its own passage");
+      }
+    }
+
+    // Before the first passage -> null (heading starts at 0, so probe negative).
+    assert.strictEqual(mapping.blockAtOffset(passages, -1), null, "negative offset should resolve to null");
+
+    // A gap (blank line) between two passages resolves to the PRECEDING one (§4.5).
+    let gapTested = false;
+    for (let i = 0; i < passages.length - 1; i++) {
+      const gap = passages[i].end;
+      if (gap < passages[i + 1].start) {
+        assert.strictEqual(mapping.blockAtOffset(passages, gap), passages[i], "gap offset did not resolve to the preceding passage");
+        gapTested = true;
+        break;
+      }
+    }
+    assert.ok(gapTested, "fixture produced no inter-passage gap to test");
+
+    // Past the very end -> the last passage (nearest preceding).
+    assert.strictEqual(
+      mapping.blockAtOffset(passages, text.length + 50),
+      passages[passages.length - 1],
+      "past-end offset should resolve to the last passage"
+    );
+
+    // The top-level (command) index carries the UNADDRESSABLE containers the
+    // passage index omits: a blockquote, a list, and a divider are all present
+    // even though render.js gives them no preview element.
+    const topTypes = blocks.map((b) => b.type);
+    assert.ok(topTypes.indexOf("blockquote") !== -1, "top-level index missing blockquote");
+    assert.ok(topTypes.indexOf("list") !== -1, "top-level index missing list");
+    assert.ok(topTypes.indexOf("divider") !== -1, "top-level index missing divider");
+
+    // A caret inside the quoted line lands in the blockquote at top level, but in
+    // a paragraph (the quote's inner passage) in the passage index — the two
+    // indices serve their two jobs (§5.3).
+    const quoteOffset = text.indexOf("A quoted line");
+    assert.strictEqual(mapping.blockAtOffset(blocks, quoteOffset).type, "blockquote", "top-level lookup in quote should be blockquote");
+    assert.strictEqual(mapping.blockAtOffset(passages, quoteOffset).type, "paragraph", "passage lookup in quote should be the inner paragraph");
+  });
+})();
+
+// ---------------------------------------------------------------------------
 // Summary.
 // ---------------------------------------------------------------------------
 

@@ -18,6 +18,10 @@
   <script src="../scripts/ast/core.js" defer></script>
   <script src="../scripts/ast/render.js" defer></script>
   <script src="../scripts/ast/parse.js" defer></script>
+  <!-- Structural layer (SCRIPTORIUM-EDITOR.md): pure offset↔block mapping.
+       Local author tooling, requireable in Node for tests; never forks the
+       parser. -->
+  <script src="mapping.js" defer></script>
   <script src="editor.js" defer></script>
 </head>
 <body>

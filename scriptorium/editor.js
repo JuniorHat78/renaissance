@@ -60,6 +60,21 @@
     };
   }
 
+  // Coalesce bursty events (scroll) to one call per animation frame.
+  function throttleFrame(fn) {
+    let scheduled = false;
+    return function throttled() {
+      if (scheduled) {
+        return;
+      }
+      scheduled = true;
+      window.requestAnimationFrame(function run() {
+        scheduled = false;
+        fn();
+      });
+    };
+  }
+
   function clearChildren(node) {
     if (!node) {
       return;
@@ -82,6 +97,10 @@
 
   ready(function start() {
     const ast = getAstApi();
+    // The pure offset↔block mapping (SCRIPTORIUM-EDITOR.md §2). Optional: if it
+    // failed to load the editor still edits and previews; only the structural
+    // feel (highlight / click-to-jump / scroll-sync) goes quiet.
+    const mapping = window.ScriptoriumMapping || null;
 
     const els = {
       essaySelect: document.getElementById("essay-select"),
@@ -109,6 +128,10 @@
       current: { slug: null, n: null },
       loadedText: "",        // last text we put INTO the textarea (for dirty check)
       saving: false,
+      passages: [],          // flattened addressable blocks (caret↔preview, §4)
+      blocks: [],            // top-level blocks (command targeting, §5.3)
+      previewByStart: {},    // source-start offset -> rendered preview element
+      activeEl: null,        // currently highlighted preview element
     };
 
     // ----- the spine: parse + render --------------------------------------
@@ -130,6 +153,7 @@
           position: null,
         }]);
         clearOutline(els.outline);
+        clearStructure();
         return;
       }
 
@@ -141,6 +165,10 @@
       } catch (error) {
         renderPreviewError(els.preview, error);
       }
+
+      // Structural index from the SAME parse — one parse feeds preview,
+      // diagnostics, outline, AND the source↔preview mapping (§2).
+      rebuildStructure(parsed);
 
       renderDiagnostics(els, (parsed && parsed.diagnostics) || []);
       renderOutline(els, parsed);
@@ -336,6 +364,168 @@
       node.appendChild(box);
     }
 
+    // ----- structural layer: source <-> preview (SCRIPTORIUM-EDITOR.md §4) -
+    // ONE mapping per parse, read both ways. render.js already stamps
+    // data-source-start on every passage element; we index the parse (mapping.js,
+    // pure) and bind those offsets to the elements so the caret can light up a
+    // block and a click can move the caret. The caret stays the browser's — we
+    // only ever MOVE the native selection, never install our own (§7).
+    function rebuildStructure(parsed) {
+      if (!mapping) {
+        return;
+      }
+      const index = mapping.indexDocument(parsed);
+      state.passages = index.passages;
+      state.blocks = index.blocks;
+      state.previewByStart = bindPreviewElements();
+      state.activeEl = null;
+      syncActiveFromCaret(false); // highlight, but don't yank the preview around
+    }
+
+    function clearStructure() {
+      state.passages = [];
+      state.blocks = [];
+      state.previewByStart = {};
+      if (state.activeEl) {
+        state.activeEl.classList.remove("active-block");
+      }
+      state.activeEl = null;
+    }
+
+    // Bind each passage's source-start offset to its rendered preview element.
+    // render.js stamps data-source-start with the same full-buffer offset the
+    // mapping holds, so the join is by value (first element wins on a collision).
+    function bindPreviewElements() {
+      const map = {};
+      const nodes = els.preview.querySelectorAll("[data-source-start]");
+      for (let i = 0; i < nodes.length; i++) {
+        const start = nodes[i].getAttribute("data-source-start");
+        if (start != null && map[start] === undefined) {
+          map[start] = nodes[i];
+        }
+      }
+      return map;
+    }
+
+    function elementForEntry(entry) {
+      if (!entry) {
+        return null;
+      }
+      return state.previewByStart[String(entry.start)] || null;
+    }
+
+    function setActiveElement(el) {
+      if (state.activeEl === el) {
+        return;
+      }
+      if (state.activeEl) {
+        state.activeEl.classList.remove("active-block");
+      }
+      state.activeEl = el || null;
+      if (state.activeEl) {
+        state.activeEl.classList.add("active-block");
+      }
+    }
+
+    // caret -> preview. Highlight the passage the caret sits in (nearest
+    // preceding in a gap, §4.5). `reveal` scrolls it into view, but only on an
+    // explicit caret move and only when it isn't already visible — never on
+    // every keystroke (§4.2), which would make the preview twitch.
+    function syncActiveFromCaret(reveal) {
+      if (!mapping || !state.passages.length) {
+        setActiveElement(null);
+        return;
+      }
+      const entry = mapping.blockAtOffset(state.passages, els.editor.selectionStart);
+      const el = elementForEntry(entry);
+      setActiveElement(el);
+      if (reveal && el && !isInPreviewViewport(el)) {
+        el.scrollIntoView({ block: "nearest" });
+      }
+    }
+
+    function isInPreviewViewport(el) {
+      const box = els.preview.getBoundingClientRect();
+      const rect = el.getBoundingClientRect();
+      return rect.bottom > box.top && rect.top < box.bottom;
+    }
+
+    // preview -> caret. Click a preview block: move the NATIVE caret to that
+    // block's source start. Clicking a gap / unaddressable region is a no-op.
+    function jumpFromPreviewClick(event) {
+      let node = event.target;
+      while (node && node !== els.preview &&
+             !(node.getAttribute && node.getAttribute("data-source-start") != null)) {
+        node = node.parentNode;
+      }
+      if (!node || node === els.preview) {
+        return;
+      }
+      const start = Number(node.getAttribute("data-source-start"));
+      if (!Number.isFinite(start)) {
+        return;
+      }
+      const bounded = Math.max(0, Math.min(start, els.editor.value.length));
+      els.editor.focus();
+      try {
+        els.editor.setSelectionRange(bounded, bounded);
+      } catch (error) {
+        /* detached node; ignore */
+      }
+      syncActiveFromCaret(true);
+    }
+
+    // source scroll -> preview scroll (one-way, §4.4). Estimate the first visible
+    // source line from the textarea's scrollTop and line height, find the passage
+    // there, and align its preview element to the preview's top. Anchored to a
+    // real element, so uneven block heights don't drift; one-way, so no feedback
+    // latch is needed.
+    function syncScrollFromSource() {
+      if (!mapping || !state.passages.length) {
+        return;
+      }
+      const lineHeight = measuredLineHeight();
+      if (!lineHeight) {
+        return;
+      }
+      const topLine = Math.floor(els.editor.scrollTop / lineHeight);
+      const offset = offsetOfLine(els.editor.value, topLine);
+      const el = elementForEntry(mapping.blockAtOffset(state.passages, offset));
+      if (!el) {
+        return;
+      }
+      const box = els.preview.getBoundingClientRect();
+      const rect = el.getBoundingClientRect();
+      els.preview.scrollTop += rect.top - box.top;
+    }
+
+    function measuredLineHeight() {
+      const computed = window.getComputedStyle(els.editor);
+      const fromLine = parseFloat(computed.lineHeight);
+      if (Number.isFinite(fromLine) && fromLine > 0) {
+        return fromLine;
+      }
+      const fromSize = parseFloat(computed.fontSize);
+      return Number.isFinite(fromSize) && fromSize > 0 ? fromSize * 1.65 : 0;
+    }
+
+    function offsetOfLine(text, lineIndex) {
+      if (lineIndex <= 0) {
+        return 0;
+      }
+      let seen = 0;
+      let from = 0;
+      while (seen < lineIndex) {
+        const nl = text.indexOf("\n", from);
+        if (nl === -1) {
+          return text.length;
+        }
+        from = nl + 1;
+        seen += 1;
+      }
+      return from;
+    }
+
     // ----- save state -----------------------------------------------------
     function isDirty() {
       return els.editor.value !== state.loadedText;
@@ -477,6 +667,18 @@
 
     // ----- wiring ---------------------------------------------------------
     els.editor.addEventListener("input", scheduleRefresh);
+
+    // Structural sync (§4). Caret moves (click/keyup) highlight + reveal the
+    // active block; clicking the preview moves the native caret; scrolling the
+    // source drives the preview. All native-caret-only.
+    els.preview.addEventListener("click", jumpFromPreviewClick);
+    els.editor.addEventListener("click", function onEditorClick() {
+      syncActiveFromCaret(true);
+    });
+    els.editor.addEventListener("keyup", function onEditorKeyup() {
+      syncActiveFromCaret(true);
+    });
+    els.editor.addEventListener("scroll", throttleFrame(syncScrollFromSource));
 
     els.essaySelect.addEventListener("change", function onEssayChange() {
       const slug = els.essaySelect.value;

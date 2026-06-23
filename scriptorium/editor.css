@@ -354,6 +354,22 @@ select:disabled {
   padding: 10px 12px;
 }
 
+/* ---- structural layer: clickable passages + active block -------------- */
+/* Every passage element carries data-source-start (render.js); clicking it
+ * moves the native caret (SCRIPTORIUM-EDITOR.md §4.3). The active-block mark
+ * uses background + an inset bar so it never shifts layout when it toggles. */
+.preview [data-source-start] {
+  cursor: pointer;
+  border-radius: 3px;
+  scroll-margin: 12px;
+  transition: background 120ms ease, box-shadow 120ms ease;
+}
+
+.preview .active-block {
+  background: var(--accent-wash);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
 /* ---- side rail (diagnostics + outline) -------------------------------- */
 .pane-side {
   gap: 0;
