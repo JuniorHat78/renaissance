@@ -7,6 +7,7 @@
 // does). Key order here follows SCRIPTORIUM-RUST-PARSER.md §4.1 for readability.
 
 use crate::ast::*;
+use crate::escape::write_json_string;
 
 pub fn to_json(doc: &Document) -> String {
     let mut s = String::new();
@@ -197,45 +198,5 @@ fn write_ascii_string(s: &mut String, value: &str) {
     s.push('"');
 }
 
-// Write a JSON string from UTF-16 code units, matching JSON.stringify escaping:
-// named escapes for \b \f \n \r \t, \uXXXX for other controls, valid surrogate
-// pairs decoded to UTF-8, lone surrogates emitted as \uXXXX (lower-case).
-fn write_json_string(s: &mut String, units: &[u16]) {
-    s.push('"');
-    let mut i = 0;
-    while i < units.len() {
-        let u = units[i];
-        match u {
-            0x22 => s.push_str("\\\""),
-            0x5C => s.push_str("\\\\"),
-            0x08 => s.push_str("\\b"),
-            0x0C => s.push_str("\\f"),
-            0x0A => s.push_str("\\n"),
-            0x0D => s.push_str("\\r"),
-            0x09 => s.push_str("\\t"),
-            0x00..=0x1F => s.push_str(&format!("\\u{:04x}", u)),
-            0xD800..=0xDBFF => {
-                // High surrogate: pair with a following low surrogate if present.
-                if i + 1 < units.len() && (0xDC00..=0xDFFF).contains(&units[i + 1]) {
-                    let hi = u as u32;
-                    let lo = units[i + 1] as u32;
-                    let c = 0x10000 + ((hi - 0xD800) << 10) + (lo - 0xDC00);
-                    if let Some(ch) = char::from_u32(c) {
-                        s.push(ch);
-                    }
-                    i += 2;
-                    continue;
-                }
-                s.push_str(&format!("\\u{:04x}", u)); // lone high surrogate
-            }
-            0xDC00..=0xDFFF => s.push_str(&format!("\\u{:04x}", u)), // lone low surrogate
-            _ => {
-                if let Some(ch) = char::from_u32(u as u32) {
-                    s.push(ch);
-                }
-            }
-        }
-        i += 1;
-    }
-    s.push('"');
-}
+// String escaping is shared with json_value.rs — see crate::escape (imported at
+// the top of this module) so the two serializers can never drift.

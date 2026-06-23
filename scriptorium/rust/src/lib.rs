@@ -4,6 +4,7 @@
 // and, later, wasm32 (the browser editor) from this one source.
 
 mod ast;
+mod escape;
 mod json;
 pub mod json_value;
 mod parser;

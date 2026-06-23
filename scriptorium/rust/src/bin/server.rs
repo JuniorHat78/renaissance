@@ -15,7 +15,9 @@ use std::fs;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Component, Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use scriptorium_parser::json_value::{self, Json};
 
@@ -135,6 +137,16 @@ fn send(stream: &mut TcpStream, status: u16, reason: &str, content_type: &str, b
 
 fn send_json(stream: &mut TcpStream, status: u16, reason: &str, json: &str) {
     send(stream, status, reason, "application/json; charset=utf-8", json.as_bytes());
+}
+
+// Headers only (HEAD), with an explicit Content-Length for the would-be body.
+fn send_header_only(stream: &mut TcpStream, status: u16, reason: &str, content_type: &str, content_length: usize) {
+    let header = format!(
+        "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n",
+        status, reason, content_type, content_length
+    );
+    let _ = stream.write_all(header.as_bytes());
+    let _ = stream.flush();
 }
 
 fn send_error(stream: &mut TcpStream, status: u16, reason: &str, message: &str) {
@@ -488,7 +500,9 @@ fn serve_static(stream: &mut TcpStream, root: &Path, path: &str, head_only: bool
     }
     let ctype = content_type_for(&file);
     if head_only {
-        send(stream, 200, "OK", ctype, &[]);
+        // HEAD: headers only, but report the real entity length (like server.js
+        // and per HTTP semantics) — not 0.
+        send_header_only(stream, 200, "OK", ctype, meta.len() as usize);
         return;
     }
     match fs::read(&file) {
@@ -522,13 +536,26 @@ fn content_type_for(path: &Path) -> &'static str {
 
 // --- atomic write -----------------------------------------------------------
 
+// Per-write counter so two concurrent writes never pick the same temp name
+// (process id + nanos guard against collisions across processes; the counter
+// guards within this process — matching the uniqueness server.js got from
+// crypto.randomBytes).
+static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
+
 fn atomic_write(dest: &Path, data: &[u8]) -> Result<(), String> {
     let dir = dest.parent().ok_or_else(|| "no parent dir".to_string())?;
     fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    let seq = TMP_SEQ.fetch_add(1, Ordering::Relaxed);
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
     let tmp = dir.join(format!(
-        ".{}.{}.tmp",
+        ".{}.{}.{}.{}.tmp",
         dest.file_name().and_then(|n| n.to_str()).unwrap_or("out"),
-        std::process::id()
+        std::process::id(),
+        nanos,
+        seq
     ));
     {
         let mut f = fs::File::create(&tmp).map_err(|e| e.to_string())?;

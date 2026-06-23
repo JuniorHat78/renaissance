@@ -93,6 +93,7 @@ async function hit(port, spec) {
   return {
     status: res.status,
     location: res.headers.get("location"),
+    contentLength: res.headers.get("content-length"),
     json,
     bytes: buf,
     isJson: ctype.includes("application/json"),
@@ -109,6 +110,7 @@ const CASES = [
   { name: "GET unknown api", path: "/api/nope" },
   { name: "GET root redirect", path: "/" },
   { name: "GET static section file", path: "/raw/" + SLUG + "/1.txt" },
+  { name: "HEAD static section file", method: "HEAD", path: "/raw/" + SLUG + "/1.txt" },
   { name: "GET static 404", path: "/does-not-exist.txt" },
   { name: "GET static traversal", path: "/../../etc/passwd" },
   { name: "PUT section (write)", method: "PUT", path: "/api/section",
@@ -127,6 +129,14 @@ function compare(a, b, caseSpec) {
   }
   if (a.location !== b.location) {
     return "Location " + JSON.stringify(a.location) + " vs " + JSON.stringify(b.location);
+  }
+  // HEAD: no body, but the Content-Length header must match (and be the real
+  // file size, not 0) — this is the regression guard for the HEAD fix.
+  if ((caseSpec.method || "GET") === "HEAD") {
+    if (a.contentLength !== b.contentLength) {
+      return "HEAD Content-Length " + a.contentLength + " vs " + b.contentLength;
+    }
+    return null;
   }
   if (a.status >= 200 && a.status < 300) {
     if (a.isJson && b.isJson) {
