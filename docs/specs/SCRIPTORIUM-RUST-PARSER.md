@@ -483,15 +483,18 @@ Named here so the trigger is explicit, not so it's planned.
 shell (§8) consumes, so they are the right first move whether the frame ends up
 PWA or native. R4–R5 are the shell, decided in §8.
 
-- **R0 — the parser, behind the oracle.** Port the full §5 grammar to a crate-
-  free Rust library + the §4 canonical serializer. Stand up the §6 harness
-  (native-Rust vs Node-JS, corpus + fuzz). Nothing wired into the editor yet.
-  Done = byte-identical across corpus and fuzz, in CI.
-- **R1 — WASM in the browser.** Compile to `wasm32`, write the crate-free JS glue,
-  and load it in `editor.html` *alongside* `parse.js` behind a flag. Extend the
-  harness to drive WASM-in-browser vs Node-JS (closes `SCRIPTORIUM.md` §12
-  blocker 1). Done = the editor runs on the WASM parser and the preview/oracle
-  are unchanged.
+- **R0 — the parser, behind the oracle. [DONE]** Crate-free Rust port of the full
+  §5 grammar + the §4 serializer, including `stats` parity. The §6 harness diffs
+  native-Rust vs Node-JS over corpus + adversarial + 500 fuzz; green on an
+  ubuntu/windows/macos matrix in CI (565 inputs byte-identical, proving
+  cross-platform determinism too).
+- **R1 — WASM. [DONE bar the in-browser check]** The same source compiles to
+  `wasm32` (crate-free ABI, no `wasm-bindgen`); `scriptorium/wasm-parser.js` is
+  the browser glue; `editor.js` runs on it behind `?engine=wasm` with a JS
+  fallback (the default path is untouched). The wasm oracle drives the *shipped
+  glue* (via a fetch shim in Node) over the full set — 565 byte-identical, in CI.
+  Remaining: a Playwright in-browser parity check (closes `SCRIPTORIUM.md` §12
+  blocker 1 fully) and the eventual `parse.js` retirement at R3.
 - **R2 — the Rust server.** Port `server.js`'s contract (read/write, atomic
   writes, path safety, `--open`) to the binary; the binary embeds/serves the
   editor assets + `parser.wasm`. Node is no longer required to *run* Scriptorium.

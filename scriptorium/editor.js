@@ -105,6 +105,23 @@
     // module, no toolbar — the editor still authors by hand.
     const commands = window.ScriptoriumCommands || null;
 
+    // ----- parse engine (SCRIPTORIUM-RUST-PARSER.md) ----------------------
+    // Default: the ONE JS parse authority (parse.js), exactly the deploy path.
+    // Opt-in via ?engine=wasm: the oracle-validated, byte-identical Rust parser
+    // compiled to wasm. This is NOT a silent second parser (§2) — it is explicit,
+    // and the equivalence oracle proves it yields the identical AST, so preview /
+    // commands / mapping are unaffected. Any load failure leaves us on JS.
+    let parse = function parseJs(source) {
+      return ast.parseDocument(source);
+    };
+    function wantsWasmEngine() {
+      try {
+        return new URLSearchParams(window.location.search).get("engine") === "wasm";
+      } catch (error) {
+        return false;
+      }
+    }
+
     const els = {
       essaySelect: document.getElementById("essay-select"),
       sectionSelect: document.getElementById("section-select"),
@@ -147,7 +164,7 @@
 
       let parsed;
       try {
-        parsed = ast.parseDocument(source);
+        parsed = parse(source);
       } catch (error) {
         renderPreviewError(els.preview, error);
         renderDiagnostics(els, [{
@@ -589,7 +606,7 @@
         return;
       }
       const text = els.editor.value;
-      const result = commands.apply(id, text, els.editor.selectionStart, els.editor.selectionEnd, ast.parseDocument);
+      const result = commands.apply(id, text, els.editor.selectionStart, els.editor.selectionEnd, parse);
       if (!result || !result.ok) {
         setStatus((result && result.reason) || "Command not applicable here.", "error");
         return;
@@ -895,6 +912,28 @@
 
     // ----- boot -----------------------------------------------------------
     refreshFromBuffer(); // empty buffer → clean preview/diagnostics baseline
+
+    // Opt-in wasm engine: load asynchronously so the editor is instantly usable
+    // on JS; on success swap `parse` and repaint (the AST is identical, so this
+    // is seamless). A load failure simply leaves us on JS.
+    if (wantsWasmEngine() && window.ScriptoriumWasmParser) {
+      window.ScriptoriumWasmParser.load("scriptorium_parser.wasm").then(function ready() {
+        parse = function parseWasm(source) {
+          return window.ScriptoriumWasmParser.parseDocument(source);
+        };
+        document.body.setAttribute("data-parse-engine", "wasm");
+        refreshFromBuffer();
+        // eslint-disable-next-line no-console
+        console.info("[scriptorium] parse engine: wasm (Rust, oracle-validated byte-identical).");
+      }).catch(function failed(error) {
+        document.body.setAttribute("data-parse-engine", "js (wasm failed)");
+        // eslint-disable-next-line no-console
+        console.warn("[scriptorium] wasm engine failed to load; staying on JS:", error);
+      });
+    } else {
+      document.body.setAttribute("data-parse-engine", "js");
+    }
+
     loadEssays().catch(function essaysFailed(error) {
       clearChildren(els.essaySelect);
       els.essaySelect.appendChild(makeOption("", "Server offline"));
