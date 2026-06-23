@@ -592,6 +592,38 @@ if (!haveCompiledDir) {
     assert.strictEqual(r.text.slice(r.selectionStart, r.selectionEnd), "https://", "link caret should select the URL placeholder");
     assert.strictEqual(commands.countInline(parse(r.text), "link"), 1, "link did not yield exactly one link node");
   });
+
+  check("commands: block toggles (pull-quote / blockquote / divider) via oracle", () => {
+    // Pull-quote: wrap a single-line paragraph in quotes; oracle confirms the
+    // block type flipped. Toggle off restores it.
+    let r = run("pull-quote", "A line here\n\nbody", 0);
+    assert.ok(r.ok && r.text === '"A line here"\n\nbody', "pull-quote on failed: " + JSON.stringify(r));
+    assert.strictEqual(commands.topBlockAt(parse(r.text), 0).type, "pull_quote", "pull-quote did not parse as a pull_quote");
+    r = run("pull-quote", '"A line here"\n\nbody', 0);
+    assert.ok(r.ok && r.text === "A line here\n\nbody", "pull-quote off failed: " + JSON.stringify(r));
+
+    // Multi-line paragraph refuses to become a pull-quote.
+    r = run("pull-quote", "line one\nline two\n\nx", 0);
+    assert.ok(!r.ok, "pull-quote should refuse a multi-line paragraph");
+
+    // Blockquote: prefix every line with '> '; toggle off strips it.
+    r = run("blockquote", "quote me\n\nx", 0);
+    assert.ok(r.ok && r.text === "> quote me\n\nx", "blockquote on failed: " + JSON.stringify(r));
+    // A blockquote's position starts after its '> ' marker, so count it rather
+    // than probing offset 0.
+    assert.strictEqual(commands.countTopBlocks(parse(r.text), "blockquote"), 1, "blockquote did not parse as a blockquote");
+    r = run("blockquote", "> quote me\n\nx", 0);
+    assert.ok(r.ok && r.text === "quote me\n\nx", "blockquote off failed: " + JSON.stringify(r));
+
+    // Divider: insert '---' as its own block at the caret line.
+    r = run("divider", "top\n\nbottom", 5);
+    assert.ok(r.ok && r.text === "top\n\n---\nbottom", "divider insert failed: " + JSON.stringify(r));
+    assert.strictEqual(commands.countTopBlocks(parse(r.text), "divider"), 1, "divider did not yield one divider block");
+
+    // blockRangeAt returns the source span of the block at an offset (select-node).
+    const span = commands.blockRangeAt(parse("# Heading\n\npara here"), 2);
+    assert.ok(span && span.start === 0 && span.end === 9, "blockRangeAt wrong for heading: " + JSON.stringify(span));
+  });
 })();
 
 // ---------------------------------------------------------------------------

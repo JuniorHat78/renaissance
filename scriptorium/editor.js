@@ -513,6 +513,55 @@
       return Number.isFinite(fromSize) && fromSize > 0 ? fromSize * 1.65 : 0;
     }
 
+    // select-node (§6): set the native selection to the source span of the
+    // top-level block at the caret. Uses the prebuilt command index — no reparse.
+    function selectBlockAtCaret() {
+      if (!mapping || !state.blocks.length) {
+        return;
+      }
+      const entry = mapping.blockAtOffset(state.blocks, els.editor.selectionStart);
+      if (!entry) {
+        return;
+      }
+      els.editor.focus();
+      try {
+        els.editor.setSelectionRange(
+          Math.min(entry.start, els.editor.value.length),
+          Math.min(entry.end, els.editor.value.length)
+        );
+      } catch (error) {
+        /* ignore */
+      }
+      syncActiveFromCaret(true);
+    }
+
+    // Double-click a preview passage selects its whole source span (§6).
+    function selectFromPreviewDblClick(event) {
+      let node = event.target;
+      while (node && node !== els.preview &&
+             !(node.getAttribute && node.getAttribute("data-source-start") != null)) {
+        node = node.parentNode;
+      }
+      if (!node || node === els.preview) {
+        return;
+      }
+      const start = Number(node.getAttribute("data-source-start"));
+      const end = Number(node.getAttribute("data-source-end"));
+      if (!Number.isFinite(start) || !Number.isFinite(end)) {
+        return;
+      }
+      els.editor.focus();
+      try {
+        els.editor.setSelectionRange(
+          Math.min(start, els.editor.value.length),
+          Math.min(end, els.editor.value.length)
+        );
+      } catch (error) {
+        /* ignore */
+      }
+      syncActiveFromCaret(false);
+    }
+
     function offsetOfLine(text, lineIndex) {
       if (lineIndex <= 0) {
         return 0;
@@ -741,6 +790,7 @@
     // active block; clicking the preview moves the native caret; scrolling the
     // source drives the preview. All native-caret-only.
     els.preview.addEventListener("click", jumpFromPreviewClick);
+    els.preview.addEventListener("dblclick", selectFromPreviewDblClick);
     els.editor.addEventListener("click", function onEditorClick() {
       syncActiveFromCaret(true);
     });
@@ -809,16 +859,32 @@
       }
 
       let commandId = null;
-      if (event.altKey && /^[0-3]$/.test(event.key)) {
-        commandId = "heading-" + event.key;
-      } else if (!event.altKey && key === "b") {
-        commandId = "strong";
-      } else if (!event.altKey && key === "i") {
-        commandId = "emphasis";
-      } else if (!event.altKey && key === "`") {
-        commandId = "code";
-      } else if (!event.altKey && key === "k") {
-        commandId = "link";
+      if (event.altKey) {
+        // Alt chords: headings + block toggles + select-node.
+        if (/^[0-3]$/.test(event.key)) {
+          commandId = "heading-" + event.key;
+        } else if (key === "q") {
+          commandId = "pull-quote";
+        } else if (key === "b") {
+          commandId = "blockquote";
+        } else if (key === "h") {
+          commandId = "divider";
+        } else if (key === "l") {
+          event.preventDefault();
+          selectBlockAtCaret();
+          return;
+        }
+      } else {
+        // Plain mod chords: inline formatting + link.
+        if (key === "b") {
+          commandId = "strong";
+        } else if (key === "i") {
+          commandId = "emphasis";
+        } else if (key === "`") {
+          commandId = "code";
+        } else if (key === "k") {
+          commandId = "link";
+        }
       }
 
       if (commandId) {

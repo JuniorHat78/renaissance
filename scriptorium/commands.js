@@ -46,6 +46,9 @@
     { id: "heading-2", label: "H2", title: "Heading 2", key: "Ctrl/Cmd+Alt+2" },
     { id: "heading-3", label: "H3", title: "Heading 3", key: "Ctrl/Cmd+Alt+3" },
     { id: "heading-0", label: "¶", title: "Body text", key: "Ctrl/Cmd+Alt+0" },
+    { id: "pull-quote", label: "PQ", title: "Pull-quote", key: "Ctrl/Cmd+Alt+Q" },
+    { id: "blockquote", label: "›", title: "Blockquote", key: "Ctrl/Cmd+Alt+B" },
+    { id: "divider", label: "—", title: "Divider", key: "Ctrl/Cmd+Alt+H" },
   ];
 
   // ----- AST projections used by the oracle (pure walks) --------------------
@@ -259,6 +262,158 @@
     return fail("Couldn't make this a heading here.");
   }
 
+  // ----- block toggles (pull-quote / blockquote / divider) -----------------
+
+  function countTopBlocks(ast, type) {
+    var children = (ast && Array.isArray(ast.children)) ? ast.children : [];
+    return children.filter(function is(b) { return b.type === type; }).length;
+  }
+
+  // Matching quote pairs the parser recognizes for a pull-quote (isPullQuoteText).
+  var QUOTE_PAIRS = [['"', '"'], ["'", "'"], ["“", "”"], ["‘", "’"]];
+
+  function stripQuotes(text) {
+    var t = text.trim();
+    for (var i = 0; i < QUOTE_PAIRS.length; i++) {
+      if (t.length >= 2 && t[0] === QUOTE_PAIRS[i][0] && t[t.length - 1] === QUOTE_PAIRS[i][1]) {
+        return t.slice(1, -1);
+      }
+    }
+    return t;
+  }
+
+  function blockSpan(block) {
+    var pos = block && block.position;
+    if (!pos) {
+      return null;
+    }
+    return { start: Number(pos.startOffset), end: Number(pos.endOffset) };
+  }
+
+  // The full line range covering a block's span (from the start of the span's
+  // first line to the end of its last line). Needed for line-prefix operations
+  // like blockquote, whose content span EXCLUDES the '> ' marker.
+  function blockLineSpan(text, span) {
+    var start = text.lastIndexOf("\n", span.start - 1) + 1;
+    var end = text.indexOf("\n", span.end);
+    if (end === -1) {
+      end = text.length;
+    }
+    return { start: start, end: end };
+  }
+
+  // The top-level block the caret belongs to. Direct containment first; failing
+  // that (the caret sits on a marker like a blockquote's '> ', which is OUTSIDE
+  // the block's recorded span), the block whose span overlaps the caret's line.
+  function blockAtCaret(ast, text, offset) {
+    var direct = topBlockAt(ast, offset);
+    if (direct) {
+      return direct;
+    }
+    var lineStart = text.lastIndexOf("\n", offset - 1) + 1;
+    var lineEnd = text.indexOf("\n", offset);
+    if (lineEnd === -1) {
+      lineEnd = text.length;
+    }
+    var children = (ast && Array.isArray(ast.children)) ? ast.children : [];
+    for (var i = 0; i < children.length; i++) {
+      var pos = children[i].position;
+      if (pos && Number(pos.startOffset) <= lineEnd && Number(pos.endOffset) >= lineStart) {
+        return children[i];
+      }
+    }
+    return null;
+  }
+
+  // A pull-quote is a single-line paragraph whose text is wrapped in quote marks
+  // (§5.3, parser's isPullQuoteText). Toggle wraps / unwraps and the oracle
+  // confirms the block type actually flipped.
+  function applyPullQuote(text, start, parseFn) {
+    var before = parseFn(text);
+    var block = blockAtCaret(before, text, start);
+    if (!block || (block.type !== "paragraph" && block.type !== "pull_quote")) {
+      return fail("Pull-quotes apply to a paragraph.");
+    }
+    var span = blockSpan(block);
+    if (!span) {
+      return fail("Couldn't locate the block.");
+    }
+    var slice = text.slice(span.start, span.end);
+    if (slice.indexOf("\n") !== -1) {
+      return fail("Pull-quotes are a single line.");
+    }
+
+    var wasPull = block.type === "pull_quote";
+    var replacement = wasPull ? stripQuotes(slice) : '"' + slice.trim() + '"';
+    var candidate = text.slice(0, span.start) + replacement + text.slice(span.end);
+    // Count-based oracle: the pull_quote block count moves by one in the right
+    // direction (probing by offset is unreliable — block positions shift with
+    // markers). No new error either.
+    var after = parseFn(candidate);
+    var delta = countTopBlocks(after, "pull_quote") - countTopBlocks(before, "pull_quote");
+    if (errorCount(after) <= errorCount(before) && delta === (wasPull ? -1 : 1)) {
+      var caret = span.start + replacement.length;
+      return ok(candidate, caret, caret);
+    }
+    return fail("Couldn't toggle the pull-quote here.");
+  }
+
+  // A blockquote is `> `-prefixed lines (§5.3, parser's parseBlockQuoteLine).
+  // Toggle adds / strips the prefix on every line of the block.
+  function applyBlockquote(text, start, parseFn) {
+    var before = parseFn(text);
+    var block = blockAtCaret(before, text, start);
+    if (!block) {
+      return fail("Place the caret in a block first.");
+    }
+    var span = blockSpan(block);
+    if (!span) {
+      return fail("Couldn't locate the block.");
+    }
+    var wasQuote = block.type === "blockquote";
+    // Operate on the full LINE range — the blockquote's content span excludes
+    // its '> ' marker, so stripping the content slice alone would leave it.
+    var ls = blockLineSpan(text, span);
+    var lines = text.slice(ls.start, ls.end).split("\n");
+    var rewritten = wasQuote
+      ? lines.map(function strip(line) { return line.replace(/^(\s*)>[ \t]?/, "$1"); })
+      : lines.map(function add(line) { return "> " + line; });
+    var candidate = text.slice(0, ls.start) + rewritten.join("\n") + text.slice(ls.end);
+    // Count-based oracle: the blockquote count moves by one in the right
+    // direction, no new error.
+    var after = parseFn(candidate);
+    var delta = countTopBlocks(after, "blockquote") - countTopBlocks(before, "blockquote");
+    if (errorCount(after) <= errorCount(before) && delta === (wasQuote ? -1 : 1)) {
+      return ok(candidate, ls.start, ls.start);
+    }
+    return fail("Couldn't toggle the blockquote here.");
+  }
+
+  // Insert a divider (`---`) as its own block at the caret's line. isDividerLine
+  // flushes the current paragraph, so no surrounding blank line is required.
+  function applyDivider(text, start, parseFn) {
+    var before = parseFn(text);
+    var lineStart = text.lastIndexOf("\n", start - 1) + 1;
+    var candidate = text.slice(0, lineStart) + "---\n" + text.slice(lineStart);
+    var after = parseFn(candidate);
+    if (
+      errorCount(after) <= errorCount(before) &&
+      countTopBlocks(after, "divider") === countTopBlocks(before, "divider") + 1
+    ) {
+      var caret = lineStart + 4; // just past "---\n"
+      return ok(candidate, caret, caret);
+    }
+    return fail("Couldn't insert a divider here.");
+  }
+
+  // ----- select-node (not a buffer edit — a selection span) -----------------
+  // The source [start, end) of the top-level block containing `offset`, for the
+  // editor to set as the native selection (§6). Returns null if none.
+  function blockRangeAt(ast, offset) {
+    var block = topBlockAt(ast, offset);
+    return blockSpan(block);
+  }
+
   // ----- dispatch -----------------------------------------------------------
 
   function apply(id, text, start, end, parseFn) {
@@ -278,15 +433,26 @@
     if (headingMatch) {
       return applyHeading(Number(headingMatch[1]), text, s, parseFn);
     }
+    if (id === "pull-quote") {
+      return applyPullQuote(text, s, parseFn);
+    }
+    if (id === "blockquote") {
+      return applyBlockquote(text, s, parseFn);
+    }
+    if (id === "divider") {
+      return applyDivider(text, s, parseFn);
+    }
     return fail("Unknown command: " + id);
   }
 
   return {
     CATALOG: CATALOG,
     apply: apply,
+    blockRangeAt: blockRangeAt,
     // exposed for tests
     plainText: plainText,
     countInline: countInline,
+    countTopBlocks: countTopBlocks,
     topBlockAt: topBlockAt,
   };
 });
