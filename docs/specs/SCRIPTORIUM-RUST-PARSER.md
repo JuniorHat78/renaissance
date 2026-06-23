@@ -488,13 +488,14 @@ PWA or native. R4–R5 are the shell, decided in §8.
   native-Rust vs Node-JS over corpus + adversarial + 500 fuzz; green on an
   ubuntu/windows/macos matrix in CI (565 inputs byte-identical, proving
   cross-platform determinism too).
-- **R1 — WASM. [DONE bar the in-browser check]** The same source compiles to
-  `wasm32` (crate-free ABI, no `wasm-bindgen`); `scriptorium/wasm-parser.js` is
-  the browser glue; `editor.js` runs on it behind `?engine=wasm` with a JS
-  fallback (the default path is untouched). The wasm oracle drives the *shipped
-  glue* (via a fetch shim in Node) over the full set — 565 byte-identical, in CI.
-  Remaining: a Playwright in-browser parity check (closes `SCRIPTORIUM.md` §12
-  blocker 1 fully) and the eventual `parse.js` retirement at R3.
+- **R1 — WASM. [DONE]** The same source compiles to `wasm32` (crate-free ABI, no
+  `wasm-bindgen`); `scriptorium/wasm-parser.js` is the browser glue; `editor.js`
+  runs on it behind `?engine=wasm` with a JS fallback (the default path is
+  untouched). The wasm oracle drives the *shipped glue* (fetch-shimmed in Node) —
+  565 byte-identical, in CI. And a **Playwright parity check** in a real browser
+  (`scripts/tests/scriptorium-wasm-browser-parity.js`) asserts browser-JS ≡
+  wasm-in-browser ≡ Node-JS over corpus + adversarial — closing `SCRIPTORIUM.md`
+  §12 blocker 1 fully. Only `parse.js` retirement (R3) remains.
 - **R2 — the Rust server. [core DONE; differential-tested in CI]** A std-only
   HTTP server (`scriptorium/rust/src/bin/server.rs`, no crates) replicates
   `server.js`: static serving, `GET/PUT /api/section`, `GET/PUT /api/essays`,

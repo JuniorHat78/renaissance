@@ -62,6 +62,7 @@
     "oracle:rust-wasm": "node scripts/tests/rust-wasm-oracle.js",
     "oracle:rust-json": "node scripts/tests/rust-json-roundtrip.js",
     "oracle:rust-server": "node scripts/tests/rust-server-oracle.js",
+    "ci:scriptorium-parity": "node scripts/ci/run-with-server.js --port 4188 -- node scripts/tests/scriptorium-wasm-browser-parity.js --base http://127.0.0.1:4188",
     "test:rust": "npm run build:rust && npm run oracle:rust",
     "test:rust-wasm": "npm run build:rust-wasm && npm run oracle:rust-wasm",
     "wasm:editor": "npm run build:rust-wasm && node -e \"require('fs').copyFileSync('scriptorium/rust/target/wasm32-unknown-unknown/release/scriptorium_parser.wasm','scriptorium/scriptorium_parser.wasm')\"",

@@ -23,6 +23,8 @@ on:
       - "scripts/tests/rust-wasm-oracle.js"
       - "scripts/tests/rust-json-roundtrip.js"
       - "scripts/tests/rust-server-oracle.js"
+      - "scripts/tests/scriptorium-wasm-browser-parity.js"
+      - "scriptorium/wasm-parity.html"
       - "scripts/tests/lib/parser-oracle-corpus.js"
       - ".github/workflows/scriptorium-rust-oracle.yml"
   pull_request:
@@ -35,6 +37,8 @@ on:
       - "scripts/tests/rust-wasm-oracle.js"
       - "scripts/tests/rust-json-roundtrip.js"
       - "scripts/tests/rust-server-oracle.js"
+      - "scripts/tests/scriptorium-wasm-browser-parity.js"
+      - "scriptorium/wasm-parity.html"
       - "scripts/tests/lib/parser-oracle-corpus.js"
       - ".github/workflows/scriptorium-rust-oracle.yml"
   workflow_dispatch:
@@ -146,3 +150,31 @@ jobs:
         env:
           SCRIPTORIUM_SERVER_BIN: scriptorium/rust/target/release/scriptorium-server
         run: npm run oracle:rust-server
+
+  browser-parity:
+    name: wasm parity in a real browser (R1 last mile)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust (stable) + wasm32 target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Build + stage the wasm next to the editor
+        run: npm run wasm:editor
+
+      - name: Browser parity (browser-JS ≡ wasm-in-browser ≡ Node-JS)
+        run: npm run ci:scriptorium-parity
