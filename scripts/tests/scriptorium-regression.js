@@ -740,6 +740,14 @@ if (!haveCompiledDir) {
     const commands = at('src="commands.js"');
     const wasm = at('src="wasm-parser.js"');
     const editor = at('src="editor.js"');
+    // The command-surface modules must also load before editor.js (it reads them
+    // from window at start).
+    const feature = {
+      "palette.js": at('src="palette.js"'),
+      "find-replace.js": at('src="find-replace.js"'),
+      "block-ops.js": at('src="block-ops.js"'),
+      "list-continue.js": at('src="list-continue.js"'),
+    };
 
     assert.ok(core !== -1, "editor.html does not load core.js");
     assert.ok(render !== -1, "editor.html does not load render.js");
@@ -752,6 +760,11 @@ if (!haveCompiledDir) {
     if (mapping !== -1) assert.ok(mapping < editor, "mapping.js must load before editor.js");
     if (commands !== -1) assert.ok(commands < editor, "commands.js must load before editor.js");
     if (wasm !== -1) assert.ok(wasm < editor, "wasm-parser.js must load before editor.js (engine swap)");
+    Object.keys(feature).forEach(function each(name) {
+      if (feature[name] !== -1) {
+        assert.ok(feature[name] < editor, name + " must load before editor.js");
+      }
+    });
   });
 })();
 

@@ -7,8 +7,11 @@
 > *viewer with an editable pane* into an editor that feels alive.
 >
 > Status: **P3a/b/c shipped** (two-way sync, oracle-verified commands,
-> select-node + block toggles), plus a zero-dep installable-PWA capstone. The
-> pure brain (`mapping.js`, `commands.js`) is fully unit-tested in the spine
+> select-node + block toggles), plus a zero-dep installable-PWA capstone, plus
+> the **command & navigation & feel layer** (§14): command palette, slash menu,
+> find & replace, block ops, list continuation, focus mode, autosave, theme,
+> reading time, shortcuts. The pure brains (`mapping`, `commands`, `palette`,
+> `find-replace`, `block-ops`, `list-continue`) are unit-tested in the spine
 > guard. Read `SCRIPTORIUM.md` first; this assumes its spine invariant (§2) and
 > caret boundary (§4) as settled law.
 >
@@ -232,8 +235,9 @@ decision when forced.
 - Keybindings as in the table. The existing `Ctrl+S` interception pattern is the
   model: intercept the chord, `preventDefault`, run the pure command, apply via
   §5.4.
-- **Deferred:** a `/` slash-menu. Nice, not load-bearing; revisit after the
-  toolbar proves the command model.
+- **Shipped (was deferred):** a `/` slash-menu — see §14. The toolbar proved the
+  command model, so the slash menu, command palette, and find/replace were built
+  on top of it.
 
 ## 6. Feature three — select-this-node
 
@@ -307,7 +311,8 @@ Each is a per-checkpoint commit and leaves the editor usable.
 1. **Scroll sync is one-way (source→preview) in v1.** §4.4.
 2. **Undo via `execCommand("insertText")`, no custom history.** §5.4.
 3. **Normalize `\r\n?`→`\n` once on load, then never.** §3.1.
-4. **Toolbar first, slash-menu deferred.** §5.5.
+4. **Toolbar first; slash-menu, palette, and find/replace built on the proven
+   command model.** §5.5, §14.
 5. **Container blocks (`block_quote`/`list`/`divider`) get command targeting via
    the AST offset index, but no preview highlight element, in v1.** §5.3.
 
@@ -333,3 +338,47 @@ Each is a per-checkpoint commit and leaves the editor usable.
   that must satisfy this layer's coordinate contract (§3.1) byte-for-byte; its
   §4.2 is the UTF-16 offset reconciliation that keeps the caret↔node mapping
   exact.
+
+## 14. The command & navigation & feel layer (shipped)
+
+Built on top of the proven command model (§5), all **above the caret** (§4):
+overlays and buffer text-surgery only, never a re-solved editing surface. The
+brains are pure, dual-mode, and unit-tested in `scripts/tests/scriptorium-regression.js`;
+`editor.js` owns the DOM and maps ids to actions that ride the oracle-verified
+commands.
+
+**Command surfaces**
+- **Command palette** (`Ctrl/Cmd+Shift+P` — `Ctrl+K` is Link). A fuzzy launcher
+  over every command + navigation (jump to a section, jump to any block) +
+  editor actions. Brain: `palette.js` (`fuzzyMatch`/`filter` with match-position
+  highlighting).
+- **Slash menu** (`/` at a line/word start). A caret-anchored popup of block
+  commands, filtered as you type; accept removes the `/query` then runs the
+  command. Brain: `palette.js` `slashContext` (never triggers on `http://`,
+  `and/or`, `a/b`); caret pixel position via a mirror-div helper.
+
+**Find & replace** (`Ctrl/Cmd+F` / `Ctrl/Cmd+H`). Match count, next/prev with
+wrap, case / whole-word / regex toggles, invalid-regex feedback, replace-current
+and replace-all. Brain: `find-replace.js` — matching always via one compiled
+RegExp (literal queries escaped) so case-insensitivity can't desync offsets;
+edits apply via `execCommand` so one `Ctrl+Z` reverses them.
+
+**Block operations** (`Alt+↑`/`Alt+↓` move; duplicate/delete via the palette).
+Brain: `block-ops.js` — move / duplicate / delete the caret's block by line-span
+surgery; the result re-parses to the same blocks reordered/copied/removed.
+
+**List continuation** (`Enter` in a list item). Continues the list with the next
+marker, or ends it on an empty item. The boundary-respecting kind of smart
+typing (§7): a single explicit edit on Enter, never ambient reflow. Brain:
+`list-continue.js`.
+
+**Feel & utility**
+- **Focus / typewriter mode** — dims non-active preview blocks, centers the caret
+  line. **Autosave** (off by default) — debounced idle save when dirty.
+  **Light/dark theme** — persisted to `localStorage`. **Reading time** in the
+  stats bar (~200 wpm). **Prev/next section**, **copy section text**, **trim
+  trailing whitespace**, and a **keyboard-shortcuts overlay** — all palette
+  actions.
+
+Everything here is additive and behind new keys/triggers; the default authoring
+path (type + preview) is untouched, and nothing forks the parser.
