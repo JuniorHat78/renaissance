@@ -440,6 +440,136 @@ body[data-parse-engine*="wasm"]::after {
   z-index: 50;
 }
 
+/* ── Command palette + slash menu + find/replace (above the caret) ──────────
+ * Overlays and a buffer-edit bar; no editing-surface re-solve. */
+
+.cmd-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.28);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  z-index: 100;
+}
+.cmd-overlay[hidden] { display: none; }
+
+.cmd-panel {
+  margin-top: 12vh;
+  width: min(620px, 92vw);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.32);
+  overflow: hidden;
+}
+
+.cmd-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 14px 16px;
+  border: none;
+  border-bottom: 1px solid var(--line);
+  background: var(--paper-edit);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 16px;
+  outline: none;
+}
+
+.cmd-list {
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+.cmd-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: var(--font-ui);
+  color: var(--text);
+}
+.cmd-row-active { background: var(--accent-wash); box-shadow: inset 2px 0 0 var(--accent); }
+.cmd-label { font-size: 14px; }
+.cmd-mark { background: transparent; color: var(--accent); font-weight: 700; }
+.cmd-hint {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+  flex: none;
+}
+
+/* Slash menu: a compact popup anchored at the caret. */
+.cmd-slash {
+  position: fixed;
+  z-index: 100;
+  min-width: 200px;
+  max-width: 320px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.26);
+}
+.cmd-slash[hidden] { display: none; }
+.cmd-slash .cmd-list { padding: 4px; max-height: 40vh; }
+
+/* Find & replace bar — pinned at the top of the editor pane. */
+.find-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  background: var(--paper-edit);
+  border-bottom: 1px solid var(--line);
+}
+.find-bar[hidden] { display: none; }
+.find-row { display: flex; align-items: center; gap: 6px; }
+.find-field {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--paper);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  outline: none;
+}
+.find-field:focus { border-color: var(--accent); }
+.find-field.find-invalid { border-color: var(--error); }
+.find-count {
+  flex: none;
+  min-width: 64px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+  text-align: right;
+}
+.find-toggle,
+.find-btn {
+  flex: none;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--paper);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  cursor: pointer;
+}
+.find-toggle:hover,
+.find-btn:hover { color: var(--text); border-color: var(--accent); }
+.find-toggle-on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+
 /* ---- side rail (diagnostics + outline) -------------------------------- */
 .pane-side {
   gap: 0;

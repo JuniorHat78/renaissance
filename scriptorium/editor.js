@@ -800,8 +800,578 @@
       });
     }
 
+    // ===== command palette + slash menu + find/replace ===================
+    // All above the caret (§4): overlays and buffer text-surgery only. The pure
+    // brains live in palette.js / find-replace.js (unit-tested); here we own the
+    // DOM and map ids to actions that ride the existing oracle-verified commands.
+    const palette = window.ScriptoriumPalette || null;
+    const findReplace = window.ScriptoriumFindReplace || null;
+
+    // Caret pixel coordinates via a hidden mirror div (the canonical textarea
+    // technique) — used to anchor the slash menu at the caret. Returns viewport
+    // coords { top, left, height }.
+    function caretCoordinates(el, position) {
+      const div = document.createElement("div");
+      const computed = window.getComputedStyle(el);
+      const s = div.style;
+      s.position = "absolute";
+      s.visibility = "hidden";
+      s.whiteSpace = "pre-wrap";
+      s.wordWrap = "break-word";
+      s.overflow = "hidden";
+      [
+        "boxSizing", "width", "height", "borderTopWidth", "borderRightWidth",
+        "borderBottomWidth", "borderLeftWidth", "paddingTop", "paddingRight",
+        "paddingBottom", "paddingLeft", "fontStyle", "fontVariant", "fontWeight",
+        "fontStretch", "fontSize", "lineHeight", "fontFamily", "textAlign",
+        "textTransform", "textIndent", "letterSpacing", "wordSpacing", "tabSize",
+      ].forEach(function copyProp(p) {
+        s[p] = computed[p];
+      });
+      const rect = el.getBoundingClientRect();
+      s.left = window.scrollX + rect.left + "px";
+      s.top = window.scrollY + rect.top + "px";
+      div.textContent = el.value.slice(0, position);
+      const span = document.createElement("span");
+      span.textContent = el.value.slice(position) || ".";
+      div.appendChild(span);
+      document.body.appendChild(div);
+      const top = rect.top + (span.offsetTop - el.scrollTop);
+      const left = rect.left + (span.offsetLeft - el.scrollLeft);
+      const height = parseInt(computed.lineHeight, 10) || parseInt(computed.fontSize, 10) || 16;
+      document.body.removeChild(div);
+      return { top: top, left: left, height: height };
+    }
+
+    function jumpToOffset(offset) {
+      const n = Math.max(0, Math.min(Number(offset) || 0, els.editor.value.length));
+      els.editor.focus();
+      els.editor.setSelectionRange(n, n);
+      syncActiveFromCaret(true);
+    }
+
+    function blockSnippet(passage) {
+      const raw = els.editor.value.slice(passage.start, passage.end).replace(/\s+/g, " ").trim();
+      return raw.length > 48 ? raw.slice(0, 48) + "…" : (raw || "(empty)");
+    }
+
+    // Render a label with the fuzzy-matched characters wrapped in <mark>.
+    function highlightInto(node, label, positions) {
+      const set = {};
+      (positions || []).forEach(function mark(p) { set[p] = true; });
+      for (let i = 0; i < label.length; i += 1) {
+        if (set[i]) {
+          const m = document.createElement("mark");
+          m.className = "cmd-mark";
+          m.textContent = label.charAt(i);
+          node.appendChild(m);
+        } else {
+          node.appendChild(document.createTextNode(label.charAt(i)));
+        }
+      }
+    }
+
+    // ---- command palette (Ctrl/Cmd+Shift+P) ----
+    let paletteEl = null;
+    let paletteInput = null;
+    let paletteList = null;
+    let paletteItems = [];
+    let paletteResults = [];
+    let paletteIndex = 0;
+    let paletteRunById = {};
+
+    function ensurePaletteDom() {
+      if (paletteEl) {
+        return;
+      }
+      paletteEl = document.createElement("div");
+      paletteEl.className = "cmd-overlay";
+      paletteEl.hidden = true;
+      const panel = document.createElement("div");
+      panel.className = "cmd-panel";
+      paletteInput = document.createElement("input");
+      paletteInput.type = "text";
+      paletteInput.className = "cmd-input";
+      paletteInput.setAttribute("placeholder", "Run a command, jump to a section or block…");
+      paletteInput.setAttribute("aria-label", "Command palette");
+      paletteList = document.createElement("ul");
+      paletteList.className = "cmd-list";
+      paletteList.setAttribute("role", "listbox");
+      panel.appendChild(paletteInput);
+      panel.appendChild(paletteList);
+      paletteEl.appendChild(panel);
+      document.body.appendChild(paletteEl);
+      paletteEl.addEventListener("mousedown", function onBackdrop(event) {
+        if (event.target === paletteEl) {
+          closePalette();
+        }
+      });
+      paletteInput.addEventListener("input", renderPalette);
+      paletteInput.addEventListener("keydown", onPaletteKey);
+    }
+
+    function buildPaletteItems() {
+      const items = [];
+      paletteRunById = {};
+      function add(id, label, hint, keywords, run) {
+        items.push({ id: id, label: label, hint: hint, keywords: keywords });
+        paletteRunById[id] = run;
+      }
+      if (commands && commands.CATALOG) {
+        commands.CATALOG.forEach(function eachCmd(c) {
+          add("cmd:" + c.id, c.title || c.label, c.key || "", (c.title || "") + " " + (c.label || ""), function run() {
+            runCommand(c.id);
+          });
+        });
+      }
+      add("act:save", "Save section", "Ctrl/Cmd+S", "save write disk", saveSection);
+      add("act:select", "Select current block", "Ctrl/Cmd+Alt+L", "select node block", selectBlockAtCaret);
+      if (findReplace) {
+        add("act:find", "Find…", "Ctrl/Cmd+F", "find search", function run() { openFindBar(false); });
+        add("act:replace", "Find & replace…", "Ctrl/Cmd+H", "replace substitute", function run() { openFindBar(true); });
+      }
+      const essay = state.current.slug ? state.essayBySlug[state.current.slug] : null;
+      if (essay && Array.isArray(essay.section_order)) {
+        essay.section_order.forEach(function eachSection(n) {
+          const meta = essay.section_meta && essay.section_meta[String(n)];
+          const title = meta && meta.title ? meta.title : "Section " + n;
+          add("sec:" + n, "Go to " + n + " — " + title, "section", "section go " + n + " " + title, function run() {
+            loadSection(state.current.slug, String(n));
+          });
+        });
+      }
+      (state.passages || []).forEach(function eachBlock(p, i) {
+        const snippet = blockSnippet(p);
+        add("blk:" + i, "↦ " + snippet, p.type, "block jump " + p.type + " " + snippet, function run() {
+          jumpToOffset(p.start);
+        });
+      });
+      return items;
+    }
+
+    function openPalette() {
+      if (!palette) {
+        return;
+      }
+      ensurePaletteDom();
+      paletteItems = buildPaletteItems();
+      paletteInput.value = "";
+      paletteEl.hidden = false;
+      renderPalette();
+      paletteInput.focus();
+    }
+
+    function closePalette() {
+      if (paletteEl && !paletteEl.hidden) {
+        paletteEl.hidden = true;
+        els.editor.focus();
+      }
+    }
+
+    function renderPalette() {
+      paletteResults = palette.filter(paletteInput.value, paletteItems);
+      paletteIndex = 0;
+      paletteList.innerHTML = "";
+      paletteResults.slice(0, 50).forEach(function renderRow(r, i) {
+        const li = document.createElement("li");
+        li.className = "cmd-row" + (i === paletteIndex ? " cmd-row-active" : "");
+        li.setAttribute("role", "option");
+        const labelEl = document.createElement("span");
+        labelEl.className = "cmd-label";
+        highlightInto(labelEl, r.label, r.positions);
+        li.appendChild(labelEl);
+        const hint = paletteItemHint(r.id);
+        if (hint) {
+          const h = document.createElement("span");
+          h.className = "cmd-hint";
+          h.textContent = hint;
+          li.appendChild(h);
+        }
+        li.addEventListener("mousedown", function onPick(event) {
+          event.preventDefault();
+          paletteIndex = i;
+          acceptPalette();
+        });
+        paletteList.appendChild(li);
+      });
+    }
+
+    function paletteItemHint(id) {
+      for (let i = 0; i < paletteItems.length; i += 1) {
+        if (paletteItems[i].id === id) {
+          return paletteItems[i].hint || "";
+        }
+      }
+      return "";
+    }
+
+    function movePalette(delta) {
+      const max = Math.min(paletteResults.length, 50);
+      if (!max) {
+        return;
+      }
+      paletteIndex = (paletteIndex + delta + max) % max;
+      const rows = paletteList.children;
+      for (let i = 0; i < rows.length; i += 1) {
+        rows[i].className = "cmd-row" + (i === paletteIndex ? " cmd-row-active" : "");
+      }
+      if (rows[paletteIndex]) {
+        rows[paletteIndex].scrollIntoView({ block: "nearest" });
+      }
+    }
+
+    function acceptPalette() {
+      const r = paletteResults[paletteIndex];
+      closePalette();
+      if (r && paletteRunById[r.id]) {
+        paletteRunById[r.id]();
+      }
+    }
+
+    function onPaletteKey(event) {
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        movePalette(1);
+      } else if (event.key === "ArrowUp") {
+        event.preventDefault();
+        movePalette(-1);
+      } else if (event.key === "Enter") {
+        event.preventDefault();
+        acceptPalette();
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        closePalette();
+      }
+    }
+
+    // ---- slash menu (type "/" at a line/word start) ----
+    let slashEl = null;
+    let slashList = null;
+    let slashResults = [];
+    let slashIndex = 0;
+    let slashCtx = null;
+    let slashItems = null;
+
+    // The block-ish commands worth a slash shortcut, by catalog id.
+    const SLASH_IDS = ["heading-1", "heading-2", "heading-3", "heading-0", "pull-quote", "blockquote", "divider", "link"];
+
+    function slashCommandItems() {
+      if (slashItems) {
+        return slashItems;
+      }
+      slashItems = [];
+      if (commands && commands.CATALOG) {
+        const byId = {};
+        commands.CATALOG.forEach(function index(c) { byId[c.id] = c; });
+        SLASH_IDS.forEach(function pick(id) {
+          const c = byId[id];
+          if (c) {
+            slashItems.push({ id: id, label: c.title || c.label, keywords: (c.title || "") + " " + id });
+          }
+        });
+      }
+      return slashItems;
+    }
+
+    function ensureSlashDom() {
+      if (slashEl) {
+        return;
+      }
+      slashEl = document.createElement("div");
+      slashEl.className = "cmd-slash";
+      slashEl.hidden = true;
+      slashList = document.createElement("ul");
+      slashList.className = "cmd-list";
+      slashList.setAttribute("role", "listbox");
+      slashEl.appendChild(slashList);
+      document.body.appendChild(slashEl);
+    }
+
+    function slashOpen() {
+      return slashEl && !slashEl.hidden;
+    }
+
+    function hideSlash() {
+      if (slashEl) {
+        slashEl.hidden = true;
+      }
+      slashCtx = null;
+    }
+
+    function updateSlash() {
+      if (!palette || !commands || els.editor.disabled) {
+        return;
+      }
+      const ctx = palette.slashContext(els.editor.value, els.editor.selectionStart);
+      if (!ctx.active) {
+        hideSlash();
+        return;
+      }
+      const results = palette.filter(ctx.query, slashCommandItems());
+      if (!results.length) {
+        hideSlash();
+        return;
+      }
+      ensureSlashDom();
+      slashCtx = ctx;
+      slashResults = results;
+      slashIndex = 0;
+      renderSlash();
+      const coords = caretCoordinates(els.editor, ctx.start);
+      slashEl.style.left = Math.round(coords.left) + "px";
+      slashEl.style.top = Math.round(coords.top + coords.height) + "px";
+      slashEl.hidden = false;
+    }
+
+    function renderSlash() {
+      slashList.innerHTML = "";
+      slashResults.forEach(function renderRow(r, i) {
+        const li = document.createElement("li");
+        li.className = "cmd-row" + (i === slashIndex ? " cmd-row-active" : "");
+        li.setAttribute("role", "option");
+        const labelEl = document.createElement("span");
+        labelEl.className = "cmd-label";
+        highlightInto(labelEl, r.label, r.positions);
+        li.appendChild(labelEl);
+        li.addEventListener("mousedown", function onPick(event) {
+          event.preventDefault();
+          slashIndex = i;
+          acceptSlash();
+        });
+        slashList.appendChild(li);
+      });
+    }
+
+    function moveSlash(delta) {
+      const max = slashResults.length;
+      if (!max) {
+        return;
+      }
+      slashIndex = (slashIndex + delta + max) % max;
+      const rows = slashList.children;
+      for (let i = 0; i < rows.length; i += 1) {
+        rows[i].className = "cmd-row" + (i === slashIndex ? " cmd-row-active" : "");
+      }
+    }
+
+    function acceptSlash() {
+      const r = slashResults[slashIndex];
+      if (!r || !slashCtx) {
+        hideSlash();
+        return;
+      }
+      const id = r.id;
+      const caret = els.editor.selectionStart;
+      // Remove the typed "/query" first, leaving the caret where it was, then run
+      // the command so it operates on a clean block (no stray slash text).
+      const value = els.editor.value;
+      const cleaned = value.slice(0, slashCtx.start) + value.slice(caret);
+      applyBufferEdit(cleaned, slashCtx.start, slashCtx.start);
+      hideSlash();
+      refreshFromBuffer();
+      runCommand(id);
+    }
+
+    function onSlashKey(event) {
+      if (!slashOpen()) {
+        return;
+      }
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        event.stopPropagation();
+        moveSlash(1);
+      } else if (event.key === "ArrowUp") {
+        event.preventDefault();
+        event.stopPropagation();
+        moveSlash(-1);
+      } else if (event.key === "Enter" || event.key === "Tab") {
+        event.preventDefault();
+        event.stopPropagation();
+        acceptSlash();
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        hideSlash();
+      }
+    }
+
+    // ---- find & replace (Ctrl/Cmd+F / Ctrl/Cmd+H) ----
+    let findBar = null;
+    let findInput = null;
+    let replaceInput = null;
+    let replaceRow = null;
+    let findCountEl = null;
+    let findMatchesCache = [];
+    const findOptions = { caseSensitive: false, wholeWord: false, regex: false };
+
+    function ensureFindDom() {
+      if (findBar) {
+        return;
+      }
+      findBar = document.createElement("div");
+      findBar.className = "find-bar";
+      findBar.hidden = true;
+
+      const findRow = document.createElement("div");
+      findRow.className = "find-row";
+      findInput = document.createElement("input");
+      findInput.type = "text";
+      findInput.className = "find-field";
+      findInput.setAttribute("placeholder", "Find");
+      findInput.setAttribute("aria-label", "Find");
+      findCountEl = document.createElement("span");
+      findCountEl.className = "find-count";
+      findRow.appendChild(findInput);
+      findRow.appendChild(findCountEl);
+      findRow.appendChild(makeToggle("Aa", "caseSensitive", "Match case"));
+      findRow.appendChild(makeToggle("|w|", "wholeWord", "Whole word"));
+      findRow.appendChild(makeToggle(".*", "regex", "Regular expression"));
+      findRow.appendChild(makeFindBtn("‹", "Previous match", function () { gotoMatch(false); }));
+      findRow.appendChild(makeFindBtn("›", "Next match", function () { gotoMatch(true); }));
+      findRow.appendChild(makeFindBtn("✕", "Close (Esc)", closeFindBar));
+
+      replaceRow = document.createElement("div");
+      replaceRow.className = "find-row";
+      replaceInput = document.createElement("input");
+      replaceInput.type = "text";
+      replaceInput.className = "find-field";
+      replaceInput.setAttribute("placeholder", "Replace");
+      replaceInput.setAttribute("aria-label", "Replace");
+      replaceRow.appendChild(replaceInput);
+      replaceRow.appendChild(makeFindBtn("Replace", "Replace current match", replaceCurrent));
+      replaceRow.appendChild(makeFindBtn("All", "Replace all", replaceAllMatches));
+
+      findBar.appendChild(findRow);
+      findBar.appendChild(replaceRow);
+      // Anchor the bar at the top of the editor pane.
+      els.editor.parentNode.insertBefore(findBar, els.editor);
+
+      findInput.addEventListener("input", recomputeFind);
+      findInput.addEventListener("keydown", onFindKey);
+      replaceInput.addEventListener("keydown", onFindKey);
+    }
+
+    function makeToggle(label, optKey, title) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "find-toggle";
+      b.textContent = label;
+      b.title = title;
+      b.addEventListener("click", function toggle() {
+        findOptions[optKey] = !findOptions[optKey];
+        b.className = "find-toggle" + (findOptions[optKey] ? " find-toggle-on" : "");
+        recomputeFind();
+      });
+      return b;
+    }
+
+    function makeFindBtn(label, title, fn) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "find-btn";
+      b.textContent = label;
+      b.title = title;
+      b.addEventListener("click", fn);
+      return b;
+    }
+
+    function openFindBar(withReplace) {
+      if (!findReplace) {
+        return;
+      }
+      ensureFindDom();
+      replaceRow.hidden = !withReplace;
+      findBar.hidden = false;
+      const sel = els.editor.value.slice(els.editor.selectionStart, els.editor.selectionEnd);
+      if (sel && sel.indexOf("\n") === -1) {
+        findInput.value = sel;
+      }
+      recomputeFind();
+      findInput.focus();
+      findInput.select();
+    }
+
+    function closeFindBar() {
+      if (findBar && !findBar.hidden) {
+        findBar.hidden = true;
+        els.editor.focus();
+      }
+    }
+
+    function recomputeFind() {
+      const q = findInput.value;
+      const invalid = q !== "" && !findReplace.isValid(q, findOptions);
+      findInput.classList.toggle("find-invalid", invalid);
+      findMatchesCache = invalid ? [] : findReplace.findMatches(els.editor.value, q, findOptions);
+      findCountEl.textContent = !q ? "" : invalid ? "bad regex" : findMatchesCache.length + " match" + (findMatchesCache.length === 1 ? "" : "es");
+    }
+
+    function gotoMatch(forward) {
+      if (!findMatchesCache.length) {
+        return;
+      }
+      const caret = forward ? els.editor.selectionEnd : els.editor.selectionStart;
+      const idx = findReplace.nextMatchIndex(findMatchesCache, caret, forward);
+      const m = findMatchesCache[idx];
+      if (!m) {
+        return;
+      }
+      els.editor.focus();
+      els.editor.setSelectionRange(m.start, m.end);
+      syncActiveFromCaret(true);
+      // Keep the find field usable: refocus it but the selection stays visible.
+      findInput.focus();
+    }
+
+    function replaceCurrent() {
+      if (!findMatchesCache.length) {
+        return;
+      }
+      const start = els.editor.selectionStart;
+      const end = els.editor.selectionEnd;
+      // Only replace when the selection is exactly a current match.
+      const onMatch = findMatchesCache.some(function eq(m) { return m.start === start && m.end === end; });
+      if (!onMatch || start === end) {
+        gotoMatch(true);
+        return;
+      }
+      const result = findReplace.replaceRange(els.editor.value, start, end, replaceInput.value);
+      applyBufferEdit(result.text, result.selectionStart, result.selectionEnd);
+      refreshFromBuffer();
+      recomputeFind();
+      gotoMatch(true);
+    }
+
+    function replaceAllMatches() {
+      const res = findReplace.replaceAll(els.editor.value, findInput.value, replaceInput.value, findOptions);
+      if (!res.count) {
+        setStatus("Nothing to replace.", "");
+        return;
+      }
+      const caret = Math.min(els.editor.selectionStart, res.text.length);
+      applyBufferEdit(res.text, caret, caret);
+      refreshFromBuffer();
+      recomputeFind();
+      setStatus("Replaced " + res.count + " match" + (res.count === 1 ? "" : "es") + ".", "ok");
+    }
+
+    function onFindKey(event) {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        gotoMatch(!event.shiftKey);
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        closeFindBar();
+      }
+    }
+
     // ----- wiring ---------------------------------------------------------
     els.editor.addEventListener("input", scheduleRefresh);
+    if (palette) {
+      els.editor.addEventListener("input", updateSlash);
+      els.editor.addEventListener("keydown", onSlashKey);
+      els.editor.addEventListener("blur", hideSlash);
+    }
 
     // Structural sync (§4). Caret moves (click/keyup) highlight + reveal the
     // active block; clicking the preview moves the native caret; scrolling the
@@ -868,6 +1438,25 @@
       if (key === "s") {
         event.preventDefault();
         saveSection();
+        return;
+      }
+
+      // Command palette / find / replace — work regardless of the commands
+      // module, and only with the non-Alt modifier so they don't shadow the
+      // Alt block chords.
+      if (event.shiftKey && key === "p") {
+        event.preventDefault();
+        openPalette();
+        return;
+      }
+      if (!event.altKey && key === "f") {
+        event.preventDefault();
+        openFindBar(false);
+        return;
+      }
+      if (!event.altKey && key === "h") {
+        event.preventDefault();
+        openFindBar(true);
         return;
       }
 

@@ -29,6 +29,10 @@
        requireable in Node for tests; neither forks the parser. -->
   <script src="mapping.js" defer></script>
   <script src="commands.js" defer></script>
+  <!-- Command-surface brains (pure, unit-tested): fuzzy ranking + slash trigger
+       for the palette / slash menu, and the find & replace engine. -->
+  <script src="palette.js" defer></script>
+  <script src="find-replace.js" defer></script>
   <!-- Opt-in parse engine (?engine=wasm): the oracle-validated Rust parser as
        wasm (SCRIPTORIUM-RUST-PARSER.md R1). Inert until editor.js loads it; the
        default path stays on parse.js. Build it with `npm run wasm:editor`. -->
