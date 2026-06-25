@@ -620,3 +620,84 @@ PWA or native. R4–R5 are the shell, decided in §8.
   §5 and `parse.js` disagree (until R3 flips authority).
 - `scripts/ast/parse.js`, `scripts/ast/core.js` — the authoritative source of the
   §5 grammar until the R3 cutover.
+
+## 14. Execution plan — Pass 1 (consolidation) & Pass 2 (extension)
+
+This section is the design of record for finishing the JS→Rust consolidation. It
+sequences the remaining ports and — importantly — draws the line at the one place
+the equivalence story changes character (byte-identity → floating-point
+score-identity). Everything here lands behind an oracle that is green **before**
+the JS twin is removed; that invariant is what makes "port everything" safe
+rather than reckless.
+
+### 14.1 The two passes, and why the seam falls where it does
+
+**Pass 1 — consolidation (this pass). All byte-identical oracles.** The remaining
+build pipeline is moved into the one Rust core, then the JS parser/renderer are
+retired. Every artifact here is a *deterministic byte stream* (compiled JSON,
+search-index JSON, rendered HTML); equivalence is a literal diff — the tractable
+kind. Steps:
+
+1. **R2 leftovers — self-contained binary.** Embed the editor assets +
+   `parser.wasm` into the server binary via `include_bytes!` (resolving §12's
+   asset-embedding question that way), with a `--serve-dir` flag for hackable dev;
+   `--open`/`--app` launch parity so the binary, not node, opens the editor. After
+   this the Rust server is one portable file.
+2. **Port `generate-content-ast.js` → a Rust `bin/`.** Read `data/essays.json`
+   with `json_value::parse`, walk `section_order`, read each `raw/<n>.txt`, parse
+   → `withoutLeadingHeadings`, and emit `data/compiled/<slug>.json`. Output is a
+   `json_value::Json` tree pretty-printed with `to_pretty(&v, 2)` + trailing
+   newline — byte-identical to `JSON.stringify(value, null, 2) + "\n"`.
+   New core surface required: `withoutLeadingHeadings` (trivial — slice leading
+   `Block::Heading` children) and a `Document → Json` converter with `sourceName`
+   set (json.rs already emits the exact JS key order; this lifts it into the
+   `Json` value space so the shared pretty-printer formats it). `toSearchableText`
+   / `wordCount` already exist in Rust (they back `stats { words }`).
+3. **Port `generate-search-index.js` → Rust.** `wordCount` + per-passage records
+   (the projection is already `consume.rs`) + term-frequency tabulation
+   (`df >= 2`, keys sorted) → `data/search-index.json`, byte-identical. The build
+   pipeline now has **zero** `parse.js` consumers.
+4. **R3 cutover — retire `parse.js` + `render.js`.** With the editor on WASM (R1)
+   and the build on Rust (steps 2–3), nothing *ships from* or *builds from* the JS
+   parser/renderer. Remove them from every build and runtime path. See §14.2 for
+   the one judgment call this forces (what the oracle compares against).
+
+**Pass 2 — extension (separate, focused). Float score-identity — the hard one.**
+
+5. **Port `search-oracle.js` → Rust→WASM.** The ranking engine. Its scores are
+   **idf-weighted f64**, so "equivalent" means *score-identical floating point
+   across two languages* — order of operations, rounding, `NaN`/`-0`, and float
+   stringification all have to agree. That is a genuinely harder problem than
+   byte-identity and runtime-critical (it ranks every in-browser query). It gets
+   its own pass whose **first** task is proving f64 determinism on the adversarial
+   corpus before a single ranking signal is ported — never a tolerance-based
+   oracle, which would betray the whole discipline.
+6. **Port `ast-tools/` → Rust.** doctor / lint-corpus / compare-renderers /
+   report fold into the binary. "One core" closure; tooling, not the product.
+
+The line between 4 and 5 is not arbitrary: it is the boundary between
+deterministic-by-construction (no floats, no hashing — see §10 "Determinism is
+free here") and floating-point equivalence, which is the only research-grade
+correctness problem in the whole effort.
+
+### 14.2 What R3 retirement does to the oracle (the one judgment call)
+
+Today the equivalence oracles use `scripts/ast/index.js` (i.e. `parse.js` /
+`render.js`) as the **reference** Rust is compared against. Deleting them removes
+that reference, so step 4 must decide what equivalence means afterward:
+
+- **Option A (recommended) — delete + frozen golden fixtures.** Snapshot the
+  corpus + adversarial outputs from the last-known-good JS, commit them as golden
+  files, and have the oracles assert Rust ≡ goldens. parse.js/core.js/render.js
+  are deleted; one parser remains. The oracle degrades from "Rust ≡ an independent
+  live impl" to "Rust ≡ a blessed snapshot" — acceptable precisely because R3 is
+  gated on the live oracle having been green long enough to *trust* the port.
+- **Option B — freeze, don't delete.** Keep the JS as a test-only reference,
+  removed from all ship/build paths. "Two parsers in production" ends, but a
+  grammar change still edits two files. Weaker on the project's "one parser" thesis.
+
+This is the single reversible-with-care decision in Pass 1 (deleting the reference
+implementation changes the testing philosophy), so step 4 surfaces it for sign-off
+rather than deciding unilaterally. **This plan also resolves §12's open question 4
+("where parse.js lives after R3") in favor of moving the reader build pipeline to
+Rust too** — Pass 1 is therefore R3 *and* the AST-COMPILER build cutover in one arc.
