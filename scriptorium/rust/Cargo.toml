@@ -28,6 +28,12 @@ path = "src/bin/server.rs"
 name = "scriptorium-content-ast"
 path = "src/bin/content-ast.rs"
 
+# The build-time search index (Pass 1 step 3) — emits data/search-index.json
+# byte-identical to generate-search-index.js.
+[[bin]]
+name = "scriptorium-search-index"
+path = "src/bin/search-index.rs"
+
 [profile.release]
 opt-level = 2
 # Abort on panic — no unwinding tables, and a clean import-free wasm module.

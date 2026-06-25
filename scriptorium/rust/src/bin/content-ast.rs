@@ -13,8 +13,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::exit;
 
-use scriptorium_parser::json_value::{self, Json};
 use scriptorium_parser as sp;
+use scriptorium_parser::essays::{self, k, s};
+use scriptorium_parser::json_value::{self, Json};
 
 const ARTIFACT_VERSION: i64 = 1;
 const AST_VERSION: &str = "0.2.0";
@@ -25,11 +26,12 @@ fn main() {
         .unwrap_or_else(|_| env::current_dir().expect("cwd"));
     let check = env::args().any(|a| a == "--check");
 
-    let essays = load_essays(&root);
-    let artifacts: Vec<(String, String, i64)> = compilable(&essays)
+    let all = load_essays(&root);
+    let artifacts: Vec<(String, String, i64)> = all
         .iter()
+        .filter(|e| !essays::essay_slug(e).is_empty())
         .map(|e| {
-            let slug = essay_slug(e);
+            let slug = essays::essay_slug(e);
             let (content, section_count) = essay_artifact(&root, e, &slug);
             (slug, content, section_count)
         })
@@ -90,11 +92,11 @@ fn main() {
 // --- artifact assembly ------------------------------------------------------
 
 fn essay_artifact(root: &Path, essay: &Json, slug: &str) -> (String, i64) {
-    let title = essay_title(essay, slug);
-    let sections: Vec<(i64, Json)> = unique_numbers(essay.get("section_order"))
+    let title = essays::essay_title(essay, slug);
+    let sections: Vec<Json> = essays::unique_numbers(essay.get("section_order"))
         .into_iter()
         .enumerate()
-        .map(|(order, n)| (n, section_record(root, essay, slug, n, order as i64)))
+        .map(|(order, n)| section_record(root, essay, slug, n, order as i64))
         .collect();
     let section_count = sections.len() as i64;
 
@@ -104,18 +106,18 @@ fn essay_artifact(root: &Path, essay: &Json, slug: &str) -> (String, i64) {
         (k("slug"), s(slug)),
         (k("title"), s(&title)),
         (k("sectionCount"), Json::Int(section_count)),
-        (k("sections"), Json::Array(sections.into_iter().map(|(_, r)| r).collect())),
+        (k("sections"), Json::Array(sections)),
     ]);
     (json_value::to_pretty(&artifact, 2) + "\n", section_count)
 }
 
 fn section_record(root: &Path, essay: &Json, slug: &str, n: i64, order: i64) -> Json {
-    let source_name = source_name_for(essay, n);
+    let source_name = essays::source_name_for(essay, n);
     let raw = read_section_source(root, slug, &source_name);
     let units: Vec<u16> = raw.encode_utf16().collect();
     let doc = sp::content_document(&units);
 
-    let (title, subtitle) = section_meta(essay, n);
+    let (title, subtitle) = essays::section_meta(essay, n);
     let name_units: Vec<u16> = source_name.encode_utf16().collect();
     Json::Object(vec![
         (k("sectionNumber"), Json::Int(n)),
@@ -128,7 +130,7 @@ fn section_record(root: &Path, essay: &Json, slug: &str, n: i64, order: i64) -> 
     ])
 }
 
-// --- essays.json helpers (mirror generate-content-ast.js) -------------------
+// --- fs helpers -------------------------------------------------------------
 
 fn load_essays(root: &Path) -> Vec<Json> {
     let path = root.join("data").join("essays.json");
@@ -141,44 +143,7 @@ fn load_essays(root: &Path) -> Vec<Json> {
         eprintln!("data/essays.json is not valid JSON: {}", e.0);
         exit(1);
     });
-    match parsed.get("essays").and_then(|v| v.as_array()) {
-        Some(list) => clone_array(list),
-        None => Vec::new(),
-    }
-}
-
-// essay && essay.slug — compilable (published or draft; gating happens elsewhere).
-fn compilable(essays: &[Json]) -> Vec<&Json> {
-    essays.iter().filter(|e| !essay_slug(e).is_empty()).collect()
-}
-
-fn essay_slug(essay: &Json) -> String {
-    essay.get("slug").and_then(|v| v.as_string()).unwrap_or_default()
-}
-
-fn essay_title(essay: &Json, slug: &str) -> String {
-    truthy_string(essay.get("title")).unwrap_or_else(|| slug.to_string())
-}
-
-fn section_meta(essay: &Json, n: i64) -> (String, String) {
-    let meta = essay
-        .get("section_meta")
-        .and_then(|m| m.get(&n.to_string()));
-    let title = meta
-        .and_then(|m| truthy_string(m.get("title")))
-        .unwrap_or_else(|| format!("Section {}", n));
-    let subtitle = meta.and_then(|m| truthy_string(m.get("subtitle"))).unwrap_or_default();
-    (title, subtitle)
-}
-
-fn source_name_for(essay: &Json, n: i64) -> String {
-    let dir = essay
-        .get("source_dir")
-        .and_then(|v| v.as_string())
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "raw".to_string());
-    format!("{}/{}.txt", dir, n)
+    essays::essays_array(&parsed)
 }
 
 fn read_section_source(root: &Path, slug: &str, source_name: &str) -> String {
@@ -191,10 +156,7 @@ fn read_section_source(root: &Path, slug: &str, source_name: &str) -> String {
     match fs::read(&path) {
         Ok(bytes) => String::from_utf8_lossy(&bytes).replace("\r\n", "\n"),
         Err(_) => {
-            eprintln!(
-                "Missing section file for content compile: {} ({})",
-                source_name, slug
-            );
+            eprintln!("Missing section file for content compile: {} ({})", source_name, slug);
             exit(1);
         }
     }
@@ -211,98 +173,4 @@ fn list_compiled(out_dir: &Path) -> Vec<String> {
     };
     names.sort();
     names
-}
-
-// --- value helpers ----------------------------------------------------------
-
-fn s(text: &str) -> Json {
-    Json::Str(text.encode_utf16().collect())
-}
-
-fn k(key: &str) -> Vec<u16> {
-    key.encode_utf16().collect()
-}
-
-// JS: value || fallback where a non-empty string is truthy. Returns Some only for
-// a present, non-empty string value.
-fn truthy_string(value: Option<&Json>) -> Option<String> {
-    value.and_then(|v| v.as_string()).filter(|s| !s.is_empty())
-}
-
-// uniqueNumbers: parseInt(String(v),10), keep finite > 0, dedup, preserve order.
-fn unique_numbers(value: Option<&Json>) -> Vec<i64> {
-    let list = match value.and_then(|v| v.as_array()) {
-        Some(a) => a,
-        None => return Vec::new(),
-    };
-    let mut seen: Vec<i64> = Vec::new();
-    let mut out: Vec<i64> = Vec::new();
-    for item in list {
-        if let Some(n) = to_number(item) {
-            if !seen.contains(&n) {
-                seen.push(n);
-                out.push(n);
-            }
-        }
-    }
-    out
-}
-
-fn to_number(value: &Json) -> Option<i64> {
-    let n = parse_int_js(&js_string(value))?;
-    if n > 0 {
-        Some(n)
-    } else {
-        None
-    }
-}
-
-fn js_string(value: &Json) -> String {
-    match value {
-        Json::Int(n) => n.to_string(),
-        Json::Str(u) => String::from_utf16_lossy(u),
-        Json::Bool(b) => b.to_string(),
-        Json::Null => "null".to_string(),
-        Json::Float(f) => f.to_string(),
-        _ => String::new(),
-    }
-}
-
-// Number.parseInt(s, 10): skip leading whitespace, optional sign, leading digits.
-fn parse_int_js(s: &str) -> Option<i64> {
-    let bytes = s.trim_start().as_bytes();
-    let mut i = 0;
-    let mut neg = false;
-    if i < bytes.len() && (bytes[i] == b'+' || bytes[i] == b'-') {
-        neg = bytes[i] == b'-';
-        i += 1;
-    }
-    let start = i;
-    let mut value: i64 = 0;
-    while i < bytes.len() && bytes[i].is_ascii_digit() {
-        value = value.saturating_mul(10).saturating_add((bytes[i] - b'0') as i64);
-        i += 1;
-    }
-    if i == start {
-        return None;
-    }
-    Some(if neg { -value } else { value })
-}
-
-// json_value::Json is not Clone; rebuild the array entries we keep by reference
-// into owned values via a re-parse-free deep copy.
-fn clone_array(list: &[Json]) -> Vec<Json> {
-    list.iter().map(deep_copy).collect()
-}
-
-fn deep_copy(v: &Json) -> Json {
-    match v {
-        Json::Null => Json::Null,
-        Json::Bool(b) => Json::Bool(*b),
-        Json::Int(n) => Json::Int(*n),
-        Json::Float(f) => Json::Float(*f),
-        Json::Str(u) => Json::Str(u.clone()),
-        Json::Array(a) => Json::Array(a.iter().map(deep_copy).collect()),
-        Json::Object(o) => Json::Object(o.iter().map(|(key, val)| (key.clone(), deep_copy(val))).collect()),
-    }
 }

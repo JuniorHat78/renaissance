@@ -59,6 +59,7 @@
     "build:rust-wasm": "cargo build --release --lib --target wasm32-unknown-unknown --manifest-path scriptorium/rust/Cargo.toml",
     "build:rust-server": "cargo build --release --bin scriptorium-server --manifest-path scriptorium/rust/Cargo.toml",
     "build:rust-content-ast": "cargo build --release --bin scriptorium-content-ast --manifest-path scriptorium/rust/Cargo.toml",
+    "build:rust-search-index": "cargo build --release --bin scriptorium-search-index --manifest-path scriptorium/rust/Cargo.toml",
     "oracle:rust": "node scripts/tests/rust-parser-oracle.js",
     "oracle:rust-wasm": "node scripts/tests/rust-wasm-oracle.js",
     "oracle:rust-json": "node scripts/tests/rust-json-roundtrip.js",

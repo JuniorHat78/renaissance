@@ -7,6 +7,7 @@ mod ast;
 mod consume;
 mod docjson;
 mod escape;
+pub mod essays;
 mod json;
 pub mod json_value;
 mod parser;
@@ -75,6 +76,19 @@ pub fn searchable_word_count(doc: &Document) -> usize {
 /// passagesFromDocument(doc).length — the section `passageCount` field.
 pub fn passage_count(doc: &Document) -> usize {
     consume::passages(doc).len()
+}
+
+/// passagesFromDocument(doc) as Json records (the search-index `passages` array;
+/// the same {passageId, passageIndex, blockType, text, source*} shape the
+/// consume oracle already proves ≡ core.passagesFromDocument).
+pub fn passage_records(doc: &Document) -> Vec<Json> {
+    consume::passages(doc)
+}
+
+/// wordCount over a UTF-16 string — the search index sums this over passage
+/// texts (distinct from content-ast's toSearchableText-based section count).
+pub fn word_count_units(units: &[u16]) -> usize {
+    parser::word_count(units)
 }
 
 /// Reformat a JSON document (parse + re-serialize). `pretty` → 2-space like
