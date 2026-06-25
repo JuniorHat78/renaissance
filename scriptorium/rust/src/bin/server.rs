@@ -15,6 +15,7 @@ use std::fs;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Component, Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -25,6 +26,10 @@ const DEFAULT_PORT: u16 = 4500;
 const DEFAULT_ROUTE: &str = "/scriptorium/editor.html";
 
 fn main() {
+    let args: Vec<String> = env::args().collect();
+    let should_app = args.iter().any(|a| a == "--app");
+    let should_open = args.iter().any(|a| a == "--open");
+
     let root = env::var("SCRIPTORIUM_ROOT")
         .map(PathBuf::from)
         .unwrap_or_else(|_| env::current_dir().expect("cwd"));
@@ -34,9 +39,18 @@ fn main() {
         .unwrap_or(DEFAULT_PORT);
 
     let listener = TcpListener::bind(("127.0.0.1", port)).expect("bind");
+    let editor_url = format!("http://localhost:{}{}", port, DEFAULT_ROUTE);
     eprintln!("Scriptorium server (rust) running.");
     eprintln!("  Project root: {}", root.display());
-    eprintln!("  Open the editor: http://localhost:{}{}", port, DEFAULT_ROUTE);
+    eprintln!("  Open the editor: {}", editor_url);
+
+    // Launch parity with server.js (--app chromeless window, --open a tab), so the
+    // native binary boots AND opens the editor with no Node. Best-effort.
+    if should_app {
+        launch_app_window(&editor_url);
+    } else if should_open {
+        open_in_browser(&editor_url);
+    }
 
     for stream in listener.incoming() {
         if let Ok(stream) = stream {
@@ -613,4 +627,76 @@ fn status_reason(code: u16) -> &'static str {
         500 => "Internal Server Error",
         _ => "OK",
     }
+}
+
+// --- editor launch (mirrors server.js openInBrowser / launchAppWindow) -------
+
+fn quiet(cmd: &mut Command) -> &mut Command {
+    cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
+}
+
+// Open a URL in the OS default browser. Best-effort: a launch failure never takes
+// the server down (the server is already listening).
+fn open_in_browser(url: &str) {
+    let _child = if cfg!(target_os = "windows") {
+        // Empty title arg keeps URLs with & intact.
+        quiet(Command::new("cmd").args(["/c", "start", "", url])).spawn()
+    } else if cfg!(target_os = "macos") {
+        quiet(Command::new("open").arg(url)).spawn()
+    } else {
+        quiet(Command::new("xdg-open").arg(url)).spawn()
+    };
+}
+
+// Candidate Chromium executables for an --app (chromeless) window, by platform.
+fn chromium_candidates() -> Vec<String> {
+    if cfg!(target_os = "windows") {
+        let pf = env::var("ProgramFiles").unwrap_or_else(|_| "C:\\Program Files".into());
+        let pf86 = env::var("ProgramFiles(x86)").unwrap_or_else(|_| "C:\\Program Files (x86)".into());
+        let local = env::var("LOCALAPPDATA").unwrap_or_default();
+        vec![
+            format!("{}\\Google\\Chrome\\Application\\chrome.exe", pf),
+            format!("{}\\Google\\Chrome\\Application\\chrome.exe", pf86),
+            format!("{}\\Google\\Chrome\\Application\\chrome.exe", local),
+            format!("{}\\Microsoft\\Edge\\Application\\msedge.exe", pf),
+            format!("{}\\Microsoft\\Edge\\Application\\msedge.exe", pf86),
+        ]
+    } else if cfg!(target_os = "macos") {
+        vec![
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome".into(),
+            "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge".into(),
+            "/Applications/Chromium.app/Contents/MacOS/Chromium".into(),
+        ]
+    } else {
+        // linux: rely on PATH lookup (spawn errors → next candidate → fallback).
+        vec![
+            "google-chrome".into(),
+            "chromium".into(),
+            "chromium-browser".into(),
+            "microsoft-edge".into(),
+        ]
+    }
+}
+
+// Launch a chromeless single-purpose window via a Chromium browser (--app=URL).
+// Falls back to the OS default browser (a normal tab) if none is found, so this
+// is never worse than --open.
+fn launch_app_window(url: &str) {
+    let look_by_path = !cfg!(target_os = "windows") && !cfg!(target_os = "macos");
+    for exe in chromium_candidates() {
+        if !look_by_path && !Path::new(&exe).exists() {
+            continue;
+        }
+        let spawned = quiet(
+            Command::new(&exe)
+                .arg(format!("--app={}", url))
+                .arg("--new-window"),
+        )
+        .spawn();
+        if spawned.is_ok() {
+            return;
+        }
+    }
+    // No Chromium found / all failed — a normal browser tab is still fine.
+    open_in_browser(url);
 }

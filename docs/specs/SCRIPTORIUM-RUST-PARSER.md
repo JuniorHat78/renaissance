@@ -505,11 +505,13 @@ PWA or native. R4–R5 are the shell, decided in §8.
   the real `essays.json` + 400 fuzz). A differential oracle
   (`scripts/tests/rust-server-oracle.js`) boots node + rust against isolated
   content and compares status + JSON bodies + bytes-written (15 cases; node-vs-node
-  green locally, node-vs-rust in CI). **Deferred:** `/api/doctor` (JS-only, not
+  green locally, node-vs-rust in CI). **`--open`/`--app` launch parity is DONE**
+  (Pass 1 step 1): the binary opens the editor (chromeless app window or tab) like
+  `server.js`, and the launchers prefer it — so Node is required neither to *serve*
+  nor to *launch* the editor. **Deferred:** `/api/doctor` (JS-only, not
   re-implemented — the route returns a placeholder and is not compared); embedding
-  the editor assets / `parser.wasm` into the binary (R2 ships file-served);
-  `--open`/`--app` launch parity (the native binary is a server, the launchers
-  stay on node for now). Node is no longer required to *serve* the editor.
+  the editor assets / `parser.wasm` into the binary (R2 ships file-served; see
+  §14.1 step 1 for why this is parked).
 - **R3 — the cutover (retire `parse.js`).** After the oracle has been green long
   enough to trust, make the WASM parser the only browser parser and the Rust
   parser the one authority; `parse.js` is retired from the Scriptorium runtime
@@ -638,11 +640,17 @@ retired. Every artifact here is a *deterministic byte stream* (compiled JSON,
 search-index JSON, rendered HTML); equivalence is a literal diff — the tractable
 kind. Steps:
 
-1. **R2 leftovers — self-contained binary.** Embed the editor assets +
-   `parser.wasm` into the server binary via `include_bytes!` (resolving §12's
-   asset-embedding question that way), with a `--serve-dir` flag for hackable dev;
-   `--open`/`--app` launch parity so the binary, not node, opens the editor. After
-   this the Rust server is one portable file.
+1. **R2 leftovers — launch parity.** [DONE] The Rust server binary now supports
+   `--open` (default browser) and `--app` (chromeless Chrome/Edge/Chromium window,
+   falling back to a tab), mirroring `server.js` exactly; the `scriptorium.sh` /
+   `.cmd` launchers prefer the built binary and fall back to Node. So the native
+   binary boots **and** opens the editor with no Node in the launch path.
+   **Asset embedding via `include_bytes!` is deliberately deferred** (not done):
+   the editor's asset graph spans `../scripts/ast/*` and a *gitignored* build
+   artifact (`scriptorium_parser.wasm`), so embedding is fragile build-ordering for
+   marginal benefit while the tool runs in-repo (disk-serving already covers it).
+   Revisit only if standalone single-file binary distribution becomes a goal — at
+   which point the wasm must be built-then-embedded and the AST scripts pulled in.
 2. **Port `generate-content-ast.js` → a Rust `bin/`.** Read `data/essays.json`
    with `json_value::parse`, walk `section_order`, read each `raw/<n>.txt`, parse
    → `withoutLeadingHeadings`, and emit `data/compiled/<slug>.json`. Output is a

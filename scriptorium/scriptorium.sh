@@ -1,7 +1,12 @@
 #!/usr/bin/env sh
-# Scriptorium launcher (macOS / Linux) — boots the local author server and opens
-# the editor in a chromeless app window (--app) via Chrome/Edge/Chromium if
-# present, else a normal tab. Zero dependencies: just Node. You can also "Install
-# app" from the browser for a standalone PWA window.
-cd "$(dirname "$0")" || exit 1
-exec node server.js --app
+# Scriptorium launcher (macOS / Linux) — boots the author server and opens the
+# editor in a chromeless app window (--app) via Chrome/Edge/Chromium if present,
+# else a normal tab. Prefers the native (Rust) server binary when built — zero
+# runtime deps, no Node — and falls back to Node otherwise. Build the binary with:
+#   cargo build --release --manifest-path scriptorium/rust/Cargo.toml --bin scriptorium-server
+cd "$(dirname "$0")/.." || exit 1
+bin="scriptorium/rust/target/release/scriptorium-server"
+if [ -x "$bin" ]; then
+  exec "$bin" --app
+fi
+exec node scriptorium/server.js --app
