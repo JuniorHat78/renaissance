@@ -709,3 +709,52 @@ implementation changes the testing philosophy), so step 4 surfaces it for sign-o
 rather than deciding unilaterally. **This plan also resolves §12's open question 4
 ("where parse.js lives after R3") in favor of moving the reader build pipeline to
 Rust too** — Pass 1 is therefore R3 *and* the AST-COMPILER build cutover in one arc.
+
+### 14.3 The parse.js cutover — resolved plan (signed off)
+
+**Decision: Option A — delete `parse.js` + golden fixtures.** Honors the standing
+goal (one parser, the `.js` retired). The equivalence oracles have done their job
+proving Rust ≡ JS over the live differential; at deletion we snapshot the JS
+outputs (corpus + adversarial + a fixed fuzz seed) into committed golden files and
+the parse-side oracles compare Rust against those goldens — a regression guard, no
+longer a live differential. **Scope: only `parse.js` is deleted now.** `core.js`
+and `render.js` stay (the reader renders the hydrated AST through them at runtime —
+that is the separate, later "reader → wasm" effort, item 4), so the render/consume
+oracles keep their live JS reference.
+
+`parse.js` is reached by six consumer groups; all must be cut in one coherent
+cutover, because they are coupled (deleting `parse.js` breaks any that remain):
+
+1. **Build generators** — `generate-content-ast.js`, `generate-search-index.js`
+   (via `ast/index.js`). Cut by flipping `build:artifacts` (and `pages.yml`) to
+   the proven Rust bins; the JS generators are deleted or reduced. This is the
+   build-flip, bundled here per sign-off (adds `cargo` to the deploy — accept it
+   now because it's the moment Node's parser actually leaves the build).
+2. **Editor** — `editor.html` loads `../scripts/ast/parse.js`; `editor.js`
+   defaults to JS parse with wasm opt-in (`?engine=wasm`). Flip to **wasm-default**:
+   drop the `parse.js` script tag, make the wasm parser the only parser (keep
+   `core.js` + `render.js` for `renderBlocks`). The async-load fallback to JS goes.
+3. **Browser parity test** — `scriptorium-wasm-browser-parity.js` compares
+   browser-JS ≡ wasm ≡ node-JS. With JS-parse gone it becomes wasm ≡ golden
+   (in-browser determinism vs the committed snapshot).
+4. **Equivalence oracles** — `rust-parser-oracle.js`, `rust-wasm-oracle.js`,
+   `rust-content-ast-oracle.js` reference `ast/index.js`. Repoint to golden
+   fixtures. (`rust-render-oracle.js` / `rust-consume-oracle.js` keep using live
+   `render.js` / `core.js` — those stay.)
+5. **ast-tools** — seven tools + `lib/fixtures.js` do `require("../ast")`. Rewire
+   their parse path to the wasm parser (loadable from Node, as the oracles already
+   do) via a thin `ast/index.js` that sources `parseDocument` from wasm; rendering
+   keeps `render.js`. No tool is reimplemented in Rust — they consume the one Rust
+   parser through wasm.
+6. **`ast/index.js` + node tests** — `index.js` stops `require`-ing `parse.js`
+   (sources `parseDocument` from wasm instead, keeps `core` + `render`).
+   `content-ast-regression.js`, `search-index-regression.js`,
+   `scriptorium-regression.js` ride that change unchanged.
+
+**Execution order (one focused run, each a pushed checkpoint):** (a) golden-fixture
+generator + committed goldens; (b) repoint parse-side oracles + browser-parity to
+goldens, keep `parse.js` present and prove green; (c) `index.js` + ast-tools onto
+the wasm parse path, prove green; (d) editor wasm-default; (e) flip `build:artifacts`
++ `pages.yml` to the Rust bins; (f) **delete `parse.js`**, run the full suite. Order
+matters: nothing deletes `parse.js` until every consumer is proven off it. Most
+steps validate only on Actions (native + browser), so this is an Actions-driven run.
