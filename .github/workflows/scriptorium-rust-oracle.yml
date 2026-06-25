@@ -155,16 +155,21 @@ jobs:
         run: npm run oracle:rust-server
 
   # End-to-end artifact parity: the native Rust build bins must reproduce the
-  # committed data/compiled/*.json + data/search-index.json (JS-generated)
-  # byte-for-byte. The wasm oracle proves the content serializer over fuzz; this
-  # proves the whole bins (essays.json walk + wrappers + term stats + orphan set)
-  # against the real corpus.
+  # JS generators' output byte-for-byte. data/compiled/*.json and
+  # data/search-index.json are gitignored build outputs (AST-compiler P5
+  # "net-off"), so the JS generators run first as the authority, then the Rust
+  # bins --check against them. The wasm oracle proves the content serializer over
+  # fuzz; this proves the whole bins (essays.json walk + wrappers + term stats +
+  # orphan set) against the real corpus.
   build-artifacts:
-    name: rust build bins ≡ committed artifacts
+    name: rust build bins ≡ JS generators
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
       - uses: actions/cache@v4
         with:
           path: |
@@ -173,11 +178,24 @@ jobs:
             scriptorium/rust/target
           key: ${{ runner.os }}-cast-cargo-${{ hashFiles('scriptorium/rust/**/*.rs', 'scriptorium/rust/Cargo.toml') }}
           restore-keys: ${{ runner.os }}-cast-cargo-
-      - run: npm run build:rust
-      - name: Rust content compiler ≡ committed data/compiled/*.json
+      - run: cargo build --release --manifest-path scriptorium/rust/Cargo.toml --bin scriptorium-content-ast --bin scriptorium-search-index
+      - name: Generate the authoritative artifacts with the JS generators
+        run: |
+          node scripts/generate-content-ast.js
+          node scripts/generate-search-index.js
+      - name: Rust content compiler ≡ JS data/compiled/*.json
         run: scriptorium/rust/target/release/scriptorium-content-ast --check
-      - name: Rust search index ≡ committed data/search-index.json
+      - name: Rust search index ≡ JS data/search-index.json
         run: scriptorium/rust/target/release/scriptorium-search-index --check
+      - name: DEBUG search-index diff on failure (temporary)
+        if: failure()
+        run: |
+          node scripts/generate-search-index.js
+          cp data/search-index.json /tmp/js-index.json
+          scriptorium/rust/target/release/scriptorium-search-index || true
+          echo "=== sizes js vs rust ==="; wc -c /tmp/js-index.json data/search-index.json
+          echo "=== first 60 diff lines (js < / rust >) ==="
+          diff /tmp/js-index.json data/search-index.json | head -60 || true
 
   # Heavy seeded fuzz against every wasm oracle (compute is not a constraint).
   heavy-fuzz:
