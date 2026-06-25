@@ -187,15 +187,6 @@ jobs:
         run: scriptorium/rust/target/release/scriptorium-content-ast --check
       - name: Rust search index ≡ JS data/search-index.json
         run: scriptorium/rust/target/release/scriptorium-search-index --check
-      - name: DEBUG search-index diff on failure (temporary)
-        if: failure()
-        run: |
-          node scripts/generate-search-index.js
-          cp data/search-index.json /tmp/js-index.json
-          scriptorium/rust/target/release/scriptorium-search-index || true
-          echo "=== sizes js vs rust ==="; wc -c /tmp/js-index.json data/search-index.json
-          echo "=== first 60 diff lines (js < / rust >) ==="
-          diff /tmp/js-index.json data/search-index.json | head -60 || true
 
   # Heavy seeded fuzz against every wasm oracle (compute is not a constraint).
   heavy-fuzz:

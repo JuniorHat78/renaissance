@@ -163,8 +163,15 @@ fn section_record(
 
 // --- term stats -------------------------------------------------------------
 
-// buildTermStats: passage-frequency per term; store terms with df >= 2, keys
-// sorted; vocabulary = total distinct terms, indexedTerms = stored count.
+// buildTermStats: passage-frequency per term; store terms with df >= 2;
+// vocabulary = total distinct terms, indexedTerms = stored count.
+//
+// Key ORDER must reproduce JS object property ordering exactly: the JS generator
+// inserts keys in lexicographic order, but a JS object then emits integer-index
+// keys FIRST in ascending numeric order, and the remaining string keys in
+// insertion (here: lexicographic) order. So a pure-digit canonical token like
+// "5"/"40"/"300" sorts numerically ahead of "000" (non-canonical → string key)
+// and "1920s" (has a letter → string key).
 fn build_term_stats(texts: &[Vec<u16>]) -> (Json, usize, usize) {
     let mut df: HashMap<String, i64> = HashMap::new();
     for text in texts {
@@ -177,17 +184,51 @@ fn build_term_stats(texts: &[Vec<u16>]) -> (Json, usize, usize) {
         }
     }
     let vocabulary = df.len();
-    let mut keys: Vec<&String> = df.keys().collect();
+
+    // Lexicographic baseline (JS insertion order), then split out integer-index
+    // keys to the front in numeric order — matching JS object key ordering.
+    let mut keys: Vec<&String> = df.keys().filter(|key| df[*key] >= 2).collect();
     keys.sort();
-    let mut entries: Vec<(Vec<u16>, Json)> = Vec::new();
+    let mut index_keys: Vec<(u64, &String)> = Vec::new();
+    let mut string_keys: Vec<&String> = Vec::new();
     for key in keys {
-        let count = df[key];
-        if count >= 2 {
-            entries.push((k(key), Json::Int(count)));
+        match array_index(key) {
+            Some(value) => index_keys.push((value, key)),
+            None => string_keys.push(key),
         }
+    }
+    index_keys.sort_by_key(|(value, _)| *value);
+
+    let mut entries: Vec<(Vec<u16>, Json)> = Vec::new();
+    for (_, key) in &index_keys {
+        entries.push((k(key), Json::Int(df[*key])));
+    }
+    for key in &string_keys {
+        entries.push((k(key), Json::Int(df[*key])));
     }
     let indexed = entries.len();
     (Json::Object(entries), vocabulary, indexed)
+}
+
+// A JS array-index property: ToString(ToUint32(s)) === s && ToUint32(s) != 2^32-1.
+// For our [a-z0-9]+ tokens that means a canonical decimal (no leading zero unless
+// "0") with value <= 2^32-2; returns the numeric value for ordering.
+fn array_index(s: &str) -> Option<u64> {
+    let bytes = s.as_bytes();
+    if bytes.is_empty() || !bytes.iter().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    if bytes.len() > 1 && bytes[0] == b'0' {
+        return None; // leading zero → non-canonical → string key
+    }
+    let mut value: u64 = 0;
+    for &b in bytes {
+        value = value * 10 + (b - b'0') as u64;
+        if value > 4_294_967_294 {
+            return None; // exceeds 2^32-2 → not an array index
+        }
+    }
+    Some(value)
 }
 
 // tokenize: String(text).toLowerCase().match(/[a-z0-9]+/g) — maximal ASCII
