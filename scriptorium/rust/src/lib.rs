@@ -5,6 +5,7 @@
 
 mod ast;
 mod consume;
+mod docjson;
 mod escape;
 mod json;
 pub mod json_value;
@@ -24,6 +25,57 @@ pub fn render_to_html_units(units: &[u16]) -> Vec<u16> {
 }
 
 pub use ast::Document;
+pub use json_value::Json;
+
+// --- content-AST compiler surface (Pass 1 step 2) ---------------------------
+//
+// Promotes generate-content-ast.js / generate-search-index.js into the one Rust
+// core: parse → withoutLeadingHeadings → the projections the reader hydrates and
+// the search index derives from. Held byte-identical by the content-ast oracle.
+
+/// core.js withoutLeadingHeadings: drop leading heading blocks, preserving the
+/// original diagnostics and stats (Object.assign keeps them — only `children` is
+/// replaced, so stats stay the FULL-document counts).
+pub fn without_leading_headings(doc: Document) -> Document {
+    let Document { children, diagnostics, stats_blocks, stats_words } = doc;
+    let mut first_content = 0;
+    while first_content < children.len()
+        && matches!(children[first_content], ast::Block::Heading { .. })
+    {
+        first_content += 1;
+    }
+    let kept = children.into_iter().skip(first_content).collect();
+    Document { children: kept, diagnostics, stats_blocks, stats_words }
+}
+
+/// parseDocument(text) then withoutLeadingHeadings — the reader's content AST.
+pub fn content_document(units: &[u16]) -> Document {
+    without_leading_headings(parser::parse_document(units))
+}
+
+/// The content AST serialized as `JSON.stringify(ast, null, 2)` (no trailing
+/// newline) — the per-section `ast` field of data/compiled/<slug>.json.
+pub fn content_ast_pretty(units: &[u16], source_name: &[u16]) -> String {
+    let doc = content_document(units);
+    json_value::to_pretty(&docjson::document_to_json(&doc, Some(source_name)), 2)
+}
+
+/// Document → Json (re-export for the compiler bin, which composes it into the
+/// per-essay artifact wrapper).
+pub fn document_to_json(doc: &Document, source_name: Option<&[u16]>) -> Json {
+    docjson::document_to_json(doc, source_name)
+}
+
+/// wordCount(toSearchableText(doc)) — the section `wordCount` field (computed on
+/// the heading-stripped projection, distinct from the full-doc stats.words).
+pub fn searchable_word_count(doc: &Document) -> usize {
+    parser::word_count(&parser::searchable_text(&doc.children))
+}
+
+/// passagesFromDocument(doc).length — the section `passageCount` field.
+pub fn passage_count(doc: &Document) -> usize {
+    consume::passages(doc).len()
+}
 
 /// Reformat a JSON document (parse + re-serialize). `pretty` → 2-space like
 /// `JSON.stringify(v, null, 2)`; otherwise compact like `JSON.stringify(v)`.
@@ -128,6 +180,22 @@ mod wasm_abi {
     pub unsafe extern "C" fn render_utf16(ptr: *const u8, byte_len: usize) -> u64 {
         let units = utf16le_units(ptr, byte_len);
         pack_units(crate::render_to_html_units(&units))
+    }
+
+    /// Content AST as 2-space-pretty JSON (the per-section `ast` field of the
+    /// compiled artifact): withoutLeadingHeadings(parse) with `sourceName` set
+    /// from the second buffer. Drives the content-ast oracle.
+    /// # Safety: both (ptr,len) pairs must describe readable UTF-16LE buffers.
+    #[no_mangle]
+    pub unsafe extern "C" fn content_ast_utf16(
+        ptr: *const u8,
+        byte_len: usize,
+        name_ptr: *const u8,
+        name_byte_len: usize,
+    ) -> u64 {
+        let units = utf16le_units(ptr, byte_len);
+        let name = utf16le_units(name_ptr, name_byte_len);
+        pack(crate::content_ast_pretty(&units, &name))
     }
 
     unsafe fn utf16le_units(ptr: *const u8, byte_len: usize) -> Vec<u16> {

@@ -24,6 +24,11 @@ on:
       - "scripts/tests/rust-server-oracle.js"
       - "scripts/tests/scriptorium-wasm-browser-parity.js"
       - "scripts/tests/lib/parser-oracle-corpus.js"
+      - "scripts/tests/rust-content-ast-oracle.js"
+      - "scripts/generate-content-ast.js"
+      - "data/essays.json"
+      - "data/compiled/**"
+      - "raw/**"
       - ".github/workflows/scriptorium-rust-oracle.yml"
   pull_request:
     paths:
@@ -40,6 +45,11 @@ on:
       - "scripts/tests/rust-server-oracle.js"
       - "scripts/tests/scriptorium-wasm-browser-parity.js"
       - "scripts/tests/lib/parser-oracle-corpus.js"
+      - "scripts/tests/rust-content-ast-oracle.js"
+      - "scripts/generate-content-ast.js"
+      - "data/essays.json"
+      - "data/compiled/**"
+      - "raw/**"
       - ".github/workflows/scriptorium-rust-oracle.yml"
   workflow_dispatch:
 
@@ -110,6 +120,7 @@ jobs:
       - run: npm run oracle:rust-json
       - run: npm run oracle:rust-render
       - run: npm run oracle:rust-consume
+      - run: npm run oracle:rust-content-ast
 
   # Differential server oracle (rust ≡ node) across OS.
   server-oracle:
@@ -139,6 +150,28 @@ jobs:
           SCRIPTORIUM_SERVER_BIN: scriptorium/rust/target/release/scriptorium-server
         run: npm run oracle:rust-server
 
+  # End-to-end content-AST artifact parity: the native Rust compiler bin must
+  # reproduce the committed data/compiled/*.json (JS-generated) byte-for-byte.
+  # The wasm oracle proves the serializer over fuzz; this proves the whole bin
+  # (essays.json walk + per-essay wrapper + orphan set) against the real corpus.
+  content-ast-artifacts:
+    name: content-ast bin ≡ committed artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            scriptorium/rust/target
+          key: ${{ runner.os }}-cast-cargo-${{ hashFiles('scriptorium/rust/**/*.rs', 'scriptorium/rust/Cargo.toml') }}
+          restore-keys: ${{ runner.os }}-cast-cargo-
+      - run: npm run build:rust-content-ast
+      - name: Rust content compiler ≡ committed artifacts (byte-identical)
+        run: scriptorium/rust/target/release/scriptorium-content-ast --check
+
   # Heavy seeded fuzz against every wasm oracle (compute is not a constraint).
   heavy-fuzz:
     name: heavy fuzz (50k)
@@ -166,6 +199,7 @@ jobs:
       - run: npm run oracle:rust-render
       - run: npm run oracle:rust-consume
       - run: npm run oracle:rust-json
+      - run: npm run oracle:rust-content-ast
 
   # In-browser parity across all three Playwright engines.
   browser-parity:

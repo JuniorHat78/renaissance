@@ -22,6 +22,12 @@ path = "src/main.rs"
 name = "scriptorium-server"
 path = "src/bin/server.rs"
 
+# The build-time content compiler (Pass 1 step 2) — emits data/compiled/<slug>.json
+# byte-identical to generate-content-ast.js, with zero parse.js in the build path.
+[[bin]]
+name = "scriptorium-content-ast"
+path = "src/bin/content-ast.rs"
+
 [profile.release]
 opt-level = 2
 # Abort on panic — no unwinding tables, and a clean import-free wasm module.

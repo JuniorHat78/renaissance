@@ -417,7 +417,10 @@ pub(crate) fn block_to_searchable_text(block: &Block) -> Vec<u16> {
     }
 }
 
-fn searchable_text(blocks: &[Block]) -> Vec<u16> {
+// toSearchableText over a block list (core.js): join non-empty searchable text
+// with " ". pub(crate) so the content-ast compiler can compute a section's
+// heading-stripped wordCount the same way the reader does.
+pub(crate) fn searchable_text(blocks: &[Block]) -> Vec<u16> {
     let parts: Vec<Vec<u16>> = blocks
         .iter()
         .map(block_to_searchable_text)
@@ -427,7 +430,7 @@ fn searchable_text(blocks: &[Block]) -> Vec<u16> {
 }
 
 // wordCount: count of /\S+/ runs (normalize-invariant, so we count runs directly).
-fn word_count(units: &[u16]) -> usize {
+pub(crate) fn word_count(units: &[u16]) -> usize {
     let mut count = 0;
     let mut in_word = false;
     for &u in units {
