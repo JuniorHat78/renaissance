@@ -23,7 +23,7 @@ const wasmGlue = require("../../scriptorium/wasm-parser.js");
 const ROOT = shared.ROOT;
 const WASM = process.env.SCRIPTORIUM_PARSER_WASM && process.env.SCRIPTORIUM_PARSER_WASM.trim()
   ? path.resolve(process.env.SCRIPTORIUM_PARSER_WASM.trim())
-  : path.join(ROOT, "scriptorium", "rust", "target", "wasm32-unknown-unknown", "release", "scriptorium_parser.wasm");
+  : path.join(ROOT, "rust", "target", "wasm32-unknown-unknown", "release", "scriptorium_parser.wasm");
 
 // Shim fetch so the browser glue's load() can read the local .wasm file. This is
 // the only browser-ism the glue needs; everything else (WebAssembly, DataView,

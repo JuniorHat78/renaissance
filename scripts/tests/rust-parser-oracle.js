@@ -27,7 +27,7 @@ const ROOT = shared.ROOT;
 const EXE = process.platform === "win32" ? "scriptorium-parser.exe" : "scriptorium-parser";
 const BIN = process.env.SCRIPTORIUM_PARSER_BIN && process.env.SCRIPTORIUM_PARSER_BIN.trim()
   ? path.resolve(process.env.SCRIPTORIUM_PARSER_BIN.trim())
-  : path.join(ROOT, "scriptorium", "rust", "target", "release", EXE);
+  : path.join(ROOT, "rust", "target", "release", EXE);
 
 function encodeFrames(inputs) {
   const parts = [];
@@ -57,7 +57,7 @@ function main() {
   if (!fs.existsSync(BIN)) {
     console.warn(
       "SKIP rust-parser-oracle — binary not built at " + path.relative(ROOT, BIN) + ".\n" +
-      "  Build it first:  cargo build --release --manifest-path scriptorium/rust/Cargo.toml\n" +
+      "  Build it first:  cargo build --release --manifest-path rust/Cargo.toml\n" +
       "  (CI builds it before running this; locally it needs a working linker — on Windows\n" +
       "   the MSVC linker + Windows SDK. The wasm oracle has no such requirement.)"
     );

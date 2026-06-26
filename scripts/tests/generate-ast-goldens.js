@@ -19,7 +19,13 @@
 const fs = require("node:fs");
 const path = require("node:path");
 
-const ast = require("../ast/index.js");
+// Anchor directly to the JS parser, NOT ast/index.js — index.js now sources
+// parseDocument from the wasm (the cutover), so going through it would make the
+// goldens "wasm ≡ wasm". The goldens must capture the JS authority (parse.js)
+// while it survives, so the Rust parser is held to an independent reference.
+// parse.js + the goldens + this generator retire together at cutover step f.
+const core = require("../ast/core.js");
+const parse = require("../ast/parse.js");
 const shared = require("./lib/parser-oracle-corpus.js");
 
 // Fixed so the golden is reproducible and bounded (the live oracle still cranks
@@ -34,10 +40,10 @@ function build() {
   const { corpus, adversarial, fuzz, inputs } = shared.allInputs();
   // Compact canonical JSON per input (lone surrogates escaped as \uXXXX → valid
   // JSON). Stored as strings; an oracle JSON.parses each for a structural compare.
-  const asts = inputs.map((input) => JSON.stringify(ast.parseDocument(input)));
+  const asts = inputs.map((input) => JSON.stringify(parse.parseDocument(input)));
   return {
     note: "JS parseDocument goldens for the parse.js cutover; see generate-ast-goldens.js.",
-    astVersion: String(ast.VERSION),
+    astVersion: String(core.VERSION),
     fuzz: GOLDEN_FUZZ,
     counts: { corpus: corpus.length, adversarial: adversarial.length, fuzz: fuzz.length, total: inputs.length },
     asts,

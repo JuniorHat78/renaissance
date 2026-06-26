@@ -1,19 +1,23 @@
 // Renaissance AST — Node entry (build-time full surface).
 //
 // The unchanged require() surface for the compiler, the generators, ast-tools,
-// and the whole test suite. It merges the three split modules — core (shared +
-// consume), render (DOM + serialize), parse (text -> AST, Node-only) — and
-// re-exports exactly the public API the monolith exposed. Requiring parse.js also
-// registers the parser hooks into core, so normalizeAstInput accepts raw input
-// here. The browser never loads this file; it loads core + render only.
-// See docs/specs/AST-COMPILER.md.
+// and the whole test suite. It merges the surviving modules — core (shared +
+// consume), render (DOM + serialize), validate (AST invariant checks) — and
+// sources the ONE parser (text -> AST) from the Rust core via wasm (parse-wasm),
+// which also registers the string parser into core so normalizeAstInput accepts
+// raw input here. Requiring parse-wasm costs nothing until the first parse (the
+// wasm loads lazily). The browser never loads this file; it loads core + render
+// only. The retired parse.js's parser-only helpers (parseInline, normalizeSource,
+// the legacy bridge) had no consumers and left with it. See AST-COMPILER.md and
+// SCRIPTORIUM-RUST-PARSER.md §14.3.
 "use strict";
 
 const core = require("./core.js");
 const render = require("./render.js");
-const parse = require("./parse.js"); // side effect: registers parser hooks into core
+const validate = require("./validate.js");
+const parse = require("./parse-wasm.js"); // side effect: registers the wasm string parser into core
 
-const merged = Object.assign({}, core, render, parse);
+const merged = Object.assign({}, core, render, validate, parse);
 
 module.exports = Object.freeze({
   VERSION: merged.VERSION,
@@ -27,10 +31,7 @@ module.exports = Object.freeze({
   escapeHtml: merged.escapeHtml,
   firstParagraphText: merged.firstParagraphText,
   formatDisplayText: merged.formatDisplayText,
-  legacyBlocksToAst: merged.legacyBlocksToAst,
-  normalizeSource: merged.normalizeSource,
   parseDocument: merged.parseDocument,
-  parseInline: merged.parseInline,
   passagesFromDocument: merged.passagesFromDocument,
   renderBlocks: merged.renderBlocks,
   renderDocument: merged.renderDocument,

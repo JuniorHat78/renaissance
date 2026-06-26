@@ -23,7 +23,7 @@ const { loadGoldens } = require("./lib/parse-goldens.js");
 const ROOT = shared.ROOT;
 const WASM = process.env.SCRIPTORIUM_PARSER_WASM && process.env.SCRIPTORIUM_PARSER_WASM.trim()
   ? path.resolve(process.env.SCRIPTORIUM_PARSER_WASM.trim())
-  : path.join(ROOT, "scriptorium", "rust", "target", "wasm32-unknown-unknown", "release", "scriptorium_parser.wasm");
+  : path.join(ROOT, "rust", "target", "wasm32-unknown-unknown", "release", "scriptorium_parser.wasm");
 
 // A representative sourceName, exercised identically on both sides (it is the
 // only field the projection reads beyond the text itself).

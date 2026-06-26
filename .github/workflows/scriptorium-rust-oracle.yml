@@ -11,7 +11,7 @@ on:
   push:
     branches: [main, feat/scriptorium]
     paths:
-      - "scriptorium/rust/**"
+      - "rust/**"
       - "scriptorium/wasm-parser.js"
       - "scriptorium/server.js"
       - "scriptorium/wasm-parity.html"
@@ -37,7 +37,7 @@ on:
       - ".github/workflows/scriptorium-rust-oracle.yml"
   pull_request:
     paths:
-      - "scriptorium/rust/**"
+      - "rust/**"
       - "scriptorium/wasm-parser.js"
       - "scriptorium/server.js"
       - "scriptorium/wasm-parity.html"
@@ -89,8 +89,8 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            scriptorium/rust/target
-          key: ${{ runner.os }}-${{ matrix.toolchain }}-cargo-${{ hashFiles('scriptorium/rust/**/*.rs', 'scriptorium/rust/Cargo.toml') }}
+            rust/target
+          key: ${{ runner.os }}-${{ matrix.toolchain }}-cargo-${{ hashFiles('rust/**/*.rs', 'rust/Cargo.toml') }}
           restore-keys: ${{ runner.os }}-${{ matrix.toolchain }}-cargo-
       - uses: actions/setup-node@v4
         with:
@@ -119,8 +119,8 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            scriptorium/rust/target
-          key: ${{ runner.os }}-wasm-cargo-${{ hashFiles('scriptorium/rust/**/*.rs', 'scriptorium/rust/Cargo.toml') }}
+            rust/target
+          key: ${{ runner.os }}-wasm-cargo-${{ hashFiles('rust/**/*.rs', 'rust/Cargo.toml') }}
           restore-keys: ${{ runner.os }}-wasm-cargo-
       - uses: actions/setup-node@v4
         with:
@@ -148,8 +148,8 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            scriptorium/rust/target
-          key: ${{ runner.os }}-srv-cargo-${{ hashFiles('scriptorium/rust/**/*.rs', 'scriptorium/rust/Cargo.toml') }}
+            rust/target
+          key: ${{ runner.os }}-srv-cargo-${{ hashFiles('rust/**/*.rs', 'rust/Cargo.toml') }}
           restore-keys: ${{ runner.os }}-srv-cargo-
       - uses: actions/setup-node@v4
         with:
@@ -157,7 +157,7 @@ jobs:
       - run: npm run build:rust-server
       - name: Differential server oracle
         env:
-          SCRIPTORIUM_SERVER_BIN: scriptorium/rust/target/release/scriptorium-server
+          SCRIPTORIUM_SERVER_BIN: rust/target/release/scriptorium-server
         run: npm run oracle:rust-server
 
   # End-to-end artifact parity: the native Rust build bins must reproduce the
@@ -173,6 +173,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -181,18 +183,21 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            scriptorium/rust/target
-          key: ${{ runner.os }}-cast-cargo-${{ hashFiles('scriptorium/rust/**/*.rs', 'scriptorium/rust/Cargo.toml') }}
+            rust/target
+          key: ${{ runner.os }}-cast-cargo-${{ hashFiles('rust/**/*.rs', 'rust/Cargo.toml') }}
           restore-keys: ${{ runner.os }}-cast-cargo-
-      - run: cargo build --release --manifest-path scriptorium/rust/Cargo.toml --bin scriptorium-content-ast --bin scriptorium-search-index
+      - run: cargo build --release --manifest-path rust/Cargo.toml --bin scriptorium-content-ast --bin scriptorium-search-index
+      # The JS generators now parse through the wasm core (the parse.js cutover),
+      # so build it before running them as the authority.
+      - run: npm run build:rust-wasm
       - name: Generate the authoritative artifacts with the JS generators
         run: |
           node scripts/generate-content-ast.js
           node scripts/generate-search-index.js
       - name: Rust content compiler ≡ JS data/compiled/*.json
-        run: scriptorium/rust/target/release/scriptorium-content-ast --check
+        run: rust/target/release/scriptorium-content-ast --check
       - name: Rust search index ≡ JS data/search-index.json
-        run: scriptorium/rust/target/release/scriptorium-search-index --check
+        run: rust/target/release/scriptorium-search-index --check
 
   # The committed AST goldens must stay current with the corpus + the JS parser
   # (SCRIPTORIUM-RUST-PARSER.md §14.3). The parse-side oracles compare the Rust
@@ -225,8 +230,8 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            scriptorium/rust/target
-          key: ubuntu-wasm-cargo-${{ hashFiles('scriptorium/rust/**/*.rs', 'scriptorium/rust/Cargo.toml') }}
+            rust/target
+          key: ubuntu-wasm-cargo-${{ hashFiles('rust/**/*.rs', 'rust/Cargo.toml') }}
           restore-keys: ubuntu-wasm-cargo-
       - uses: actions/setup-node@v4
         with:
@@ -273,13 +278,13 @@ jobs:
           components: rustfmt, clippy
       - name: cargo fmt --check
         continue-on-error: true
-        run: cargo fmt --manifest-path scriptorium/rust/Cargo.toml --all -- --check
+        run: cargo fmt --manifest-path rust/Cargo.toml --all -- --check
       - name: cargo clippy
         continue-on-error: true
-        run: cargo clippy --manifest-path scriptorium/rust/Cargo.toml --all-targets
+        run: cargo clippy --manifest-path rust/Cargo.toml --all-targets
       - name: cargo test
         continue-on-error: true
-        run: cargo test --manifest-path scriptorium/rust/Cargo.toml
+        run: cargo test --manifest-path rust/Cargo.toml
 
   # wasm artifact size report — informative.
   wasm-size:
@@ -294,6 +299,6 @@ jobs:
       - run: npm run build:rust-wasm
       - name: Report .wasm size
         run: |
-          f=scriptorium/rust/target/wasm32-unknown-unknown/release/scriptorium_parser.wasm
+          f=rust/target/wasm32-unknown-unknown/release/scriptorium_parser.wasm
           ls -la "$f"
           echo "wasm size: $(wc -c < "$f") bytes"

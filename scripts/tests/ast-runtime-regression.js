@@ -51,16 +51,16 @@ check("lists and blockquotes render as structural blocks", () => {
   assert.equal(Ast.toSearchableText(documentNode), "First Second Quoted line.");
 });
 
-check("legacy bridge degrades richer AST nodes predictably", () => {
+check("legacy projection degrades richer AST nodes predictably", () => {
+  // astToLegacyBlocks (AST -> legacy) survives in core.js — the reader uses it.
+  // The reverse bridge (legacyBlocksToAst) was a parse.js helper with no
+  // production consumer; it retired with the JS parser at the cutover (§14.3).
   const documentNode = Ast.parseDocument("- **Strong**\n\n> Quoted *line*.");
   const legacy = Ast.astToLegacyBlocks(documentNode);
   assert.deepEqual(legacy, [
     { type: "p", text: "- **Strong**" },
     { type: "p", text: "> Quoted line." },
   ]);
-
-  const roundTrip = Ast.legacyBlocksToAst([{ type: "p", text: "Body with **strong**." }]);
-  assert.equal(Ast.serializeDocument(roundTrip), "<p>Body with <strong>strong</strong>.</p>");
 });
 
 check("leading headings can be removed without mutating the source document", () => {

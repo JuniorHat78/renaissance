@@ -50,8 +50,17 @@ jobs:
           node-version: 22.17.0
           cache: npm
 
+      - name: Setup Rust (wasm parser)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
       - name: Install Node Dependencies
         run: npm ci
+
+      - name: Build the Rust parser (wasm)
+        # The artifact build parses through the Rust core (wasm) after the cutover.
+        run: npm run build:rust-wasm
 
       - name: Build derived artifacts
         # Net-off (AST P5): derived artifacts are built from source, not committed.

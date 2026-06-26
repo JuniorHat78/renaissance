@@ -87,7 +87,7 @@ oracle is what makes it safe to pay.
 
 ```
                      ┌───────────────────────────────┐
-                     │   scriptorium/rust/parser/     │   one crate-free
+                     │   rust/parser/     │   one crate-free
                      │   the grammar, written ONCE    │   Rust source
                      └───────────────┬───────────────┘
                 native target        │        wasm32 target
@@ -497,7 +497,7 @@ PWA or native. R4–R5 are the shell, decided in §8.
   wasm-in-browser ≡ Node-JS over corpus + adversarial — closing `SCRIPTORIUM.md`
   §12 blocker 1 fully. Only `parse.js` retirement (R3) remains.
 - **R2 — the Rust server. [core DONE; differential-tested in CI]** A std-only
-  HTTP server (`scriptorium/rust/src/bin/server.rs`, no crates) replicates
+  HTTP server (`rust/src/bin/server.rs`, no crates) replicates
   `server.js`: static serving, `GET/PUT /api/section`, `GET/PUT /api/essays`,
   atomic writes, path safety, per-essay `source_dir` + slug-uniqueness, save-side
   newline normalization. JSON read/write uses `json_value` — **verified
@@ -758,3 +758,42 @@ the wasm parse path, prove green; (d) editor wasm-default; (e) flip `build:artif
 + `pages.yml` to the Rust bins; (f) **delete `parse.js`**, run the full suite. Order
 matters: nothing deletes `parse.js` until every consumer is proven off it. Most
 steps validate only on Actions (native + browser), so this is an Actions-driven run.
+
+### 14.4 Execution amendments (discovered mid-cutover)
+
+The §14.3 plan under-specified two things that surfaced while executing it. Both
+are resolved; recording them so the design of record matches reality.
+
+**(1) `parse.js` is not only the parser.** Besides the tokenizer it owned
+`validateDocument` (a pure AST→errors validator, 5 consumers: 4 ast-tools + a
+test) and `legacyBlocksToAst` (the legacy→AST bridge, test-only + a dead core
+registration). `parseInline` / `normalizeSource` had no external consumers. So
+"delete `parse.js`" decomposes:
+- The parser (`parseDocument` + the tokenizers) → the Rust core via wasm. In Node,
+  `ast/parse-wasm.js` sources `parseDocument` from the wasm (lazy synchronous
+  instantiate; self-contained marshalling, no dependency on `scriptorium/`) and
+  registers it as core's string parser. `ast/index.js` merges core + render +
+  validate + parse-wasm.
+- `validateDocument` (not a parser) → moved verbatim to the surviving Node module
+  `ast/validate.js`.
+- `parseInline`, `normalizeSource`, `legacyBlocksToAst` → **retired** with the
+  tokenizer (no production consumer; the reader uses `astToLegacyBlocks`, the
+  forward projection in core.js, which stays). The one test asserting the reverse
+  bridge dropped that assertion.
+
+**(2) The build's parser vs. the §6 quarantine.** Routing the build through the
+Rust parser made `build:artifacts` depend on the Rust core — which lived under
+`scriptorium/`, so the quarantine ("delete `scriptorium/`, the build still
+succeeds") would have broken. Resolution: the Rust crate was **promoted to a
+top-level `rust/`**. `rust/` is the shared core (parser lib + wasm + the
+`content-ast`/`search-index` build bins + the editor server bin); `scriptorium/`
+is the editor *application* (web assets + browser glue + launchers) on top. The
+build consumes `rust/`, never `scriptorium/`, so the quarantine holds **literally**
+(it now builds `rust/`'s wasm first, then deletes `scriptorium/`, then builds). The
+goldens generator (`generate-ast-goldens.js`) anchors directly to `parse.js` (not
+`index.js`, which now points at wasm) so the Rust parser is held to an independent
+JS reference until `parse.js` is deleted at step (f).
+
+**Coupling introduced:** the Node build/test toolchain now requires the wasm built
+(`npm run build:rust-wasm`) before anything parses. CI builds it in every job that
+runs the parsing suites or `build:artifacts`.

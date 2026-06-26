@@ -18,7 +18,7 @@ const shared = require("./lib/parser-oracle-corpus.js");
 const ROOT = shared.ROOT;
 const WASM = process.env.SCRIPTORIUM_PARSER_WASM && process.env.SCRIPTORIUM_PARSER_WASM.trim()
   ? path.resolve(process.env.SCRIPTORIUM_PARSER_WASM.trim())
-  : path.join(ROOT, "scriptorium", "rust", "target", "wasm32-unknown-unknown", "release", "scriptorium_parser.wasm");
+  : path.join(ROOT, "rust", "target", "wasm32-unknown-unknown", "release", "scriptorium_parser.wasm");
 
 function makeRender(instance) {
   const ex = instance.exports;

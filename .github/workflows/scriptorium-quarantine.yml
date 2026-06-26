@@ -1,9 +1,12 @@
 name: scriptorium-quarantine
 
-# Proves the §6 quarantine the hard way: delete scriptorium/ entirely, then run
-# the real deploy build. If build:artifacts still succeeds, the shipped site has
-# no dependency on the author tooling — the one-way arrow holds. This is the
-# enforcer SCRIPTORIUM.md §12 asked for (the asset-budget regex was not it).
+# Proves the §6 quarantine the hard way: build the shared Rust core (rust/),
+# delete the editor app (scriptorium/) entirely, then run the real deploy build.
+# If build:artifacts still succeeds, the shipped site depends only on the Rust
+# core + scripts/, never the author tooling — the one-way arrow holds. After the
+# parse.js cutover the build's parser IS the Rust core (wasm), which lives at the
+# top-level rust/ precisely so this still holds; scriptorium/ is just the editor
+# web app on top. This is the enforcer SCRIPTORIUM.md §12 asked for.
 #
 # Deterministic correctness gate → allowed to hard-fail.
 
@@ -42,14 +45,25 @@ jobs:
         with:
           node-version: 22
 
+      - name: Setup Rust (wasm target)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
       - name: Install dependencies
         run: npm ci
 
-      - name: Delete the author tooling
+      - name: Build the shared Rust core (the build's parser)
+        # rust/ is the shared core, NOT author tooling — it survives the deletion
+        # below. The build (content-ast / search-index generators) parses through
+        # this wasm after the cutover.
+        run: npm run build:rust-wasm
+
+      - name: Delete the author tooling (the editor app)
         run: rm -rf scriptorium
 
       - name: Build the shipped artifacts without it
         run: npm run build:artifacts
 
       - name: Quarantine holds
-        run: echo "build:artifacts succeeded with scriptorium/ deleted — the shipped site has no dependency on the author tooling."
+        run: echo "build:artifacts succeeded with scriptorium/ deleted — the shipped site depends only on the Rust core + scripts/, never the author tooling."

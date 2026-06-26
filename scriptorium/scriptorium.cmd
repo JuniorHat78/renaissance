@@ -3,9 +3,9 @@ REM Scriptorium launcher (Windows) — boots the author server and opens the edi
 REM in a chromeless app window (--app) via Chrome/Edge if present, else a normal
 REM tab. Prefers the native (Rust) server binary when built — zero runtime deps,
 REM no Node — and falls back to Node otherwise. Build the binary with:
-REM   cargo build --release --manifest-path scriptorium\rust\Cargo.toml --bin scriptorium-server
+REM   cargo build --release --manifest-path rust\Cargo.toml --bin scriptorium-server
 cd /d "%~dp0\.."
-set "BIN=scriptorium\rust\target\release\scriptorium-server.exe"
+set "BIN=rust\target\release\scriptorium-server.exe"
 if exist "%BIN%" (
   "%BIN%" --app
 ) else (
