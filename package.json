@@ -55,6 +55,7 @@
     "test:search-engine": "node scripts/tests/search-engine-regression.js",
     "test:source-encoding": "node scripts/tests/source-encoding-regression.js",
     "test:scriptorium": "node scripts/tests/scriptorium-regression.js",
+    "bench:marshalling": "node scripts/bench/marshalling-bench.js",
     "build:rust": "cargo build --release --manifest-path rust/Cargo.toml",
     "build:rust-wasm": "cargo build --release --lib --target wasm32-unknown-unknown --manifest-path rust/Cargo.toml",
     "build:rust-server": "cargo build --release --bin scriptorium-server --manifest-path rust/Cargo.toml",

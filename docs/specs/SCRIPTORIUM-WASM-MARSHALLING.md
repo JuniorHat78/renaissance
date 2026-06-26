@@ -1,106 +1,96 @@
-# Scriptorium — optimizing the JS ⇄ WASM marshalling boundary
+# Scriptorium — the JS ⇄ WASM marshalling boundary (measured, closed)
 
-> A short, measure-first plan to tighten the per-parse boundary between the
-> browser editor (JS) and the Rust parser (wasm), before any native-FFI work.
-> Doc-driven: written first, built against, retired into SCRIPTORIUM-RUST-PARSER.md
-> when it ships.
+> Measure-first investigation of the per-parse boundary between the browser editor
+> (JS) and the Rust parser (wasm). **Outcome: not pursued — the boundary is not the
+> bottleneck.** This doc is kept as a decision record so the pre-allocation idea is
+> not re-proposed without re-reading the numbers.
 >
-> Status: **spec / not started.** Last refreshed: 2026-06-27.
+> Status: **CLOSED / resolved (2026-06-27).** Built the step-0 benchmark; it refuted
+> the premise. The harness (`scripts/bench/marshalling-bench.js`,
+> `npm run bench:marshalling`) lives on as a regression guard.
 
 ---
 
-## 1. Why now, and what this is NOT
+## 1. What this was going to be
 
-The `parse.js` cutover is done (SCRIPTORIUM-RUST-PARSER.md §14): the Rust core is
-the one parser, in the browser editor as wasm. The editor reparses the whole
-section buffer on **every keystroke**, so the JS⇄wasm boundary is the hot path
-for authoring latency. Tighten it while the PWA is the daily driver.
+The `parse.js` cutover left the Rust core (as wasm) the one parser, reparsing the
+whole section buffer on every keystroke. The hypothesis was that the JS⇄wasm
+boundary — specifically the per-parse `alloc`/`dealloc` churn — was a meaningful
+authoring-latency cost worth removing with a persistent pre-allocated buffer.
 
-**Scope is the marshalling only.** Not a grammar change, not a new AST. The
-byte-identical contract (§4 of the parser spec) is untouched; the equivalence
-oracles still gate it.
+The discipline (mandated up front): **measure before optimizing.** Step 0 was a
+benchmark harness; nothing was allowed to land without a before/after number.
 
-**Explicit non-goal — the native app sidesteps this entirely.** The future native
-desktop editor (R5) calls Rust in-process with no marshalling, so this work pays
-off *specifically for the browser/PWA editor*. That is fine — the PWA is the
-current daily driver, R5 is unbuilt — but it means this is not on the FFI path.
+## 2. What we measured
 
-## 2. The current per-parse cycle (the thing we are optimizing)
+`scripts/bench/marshalling-bench.js` drives the **real shipped browser glue**
+(`scriptorium/wasm-parser.js`, via a `fetch` shim) for the authoritative whole-parse
+cost, plus an instrumented mirror of the exact marshalling sequence for a per-phase
+breakdown, asserting the two produce byte-identical output. Inputs are real content
+sections (`raw/`): tiny (123 ch), realistic (13 KB), large/worst-case (55 KB).
 
-Two glue implementations marshal identically (kept in lockstep):
-- `scriptorium/wasm-parser.js` — the **browser** glue (the editor's hot path).
-- `scripts/ast/parse-wasm.js` — the **Node** build/test path (not latency-critical;
-  keep consistent, but the browser glue is the target).
+Per-keystroke cost, **realistic 13 KB section (~580 µs whole-parse)**:
 
-wasm exports today: `alloc`, `dealloc`, `parse_utf16(ptr,len) -> i64`
-(packed `(outPtr<<32)|outLen`), `memory`. Per call, JS does:
+| component | µs | share | at the boundary? |
+|---|---|---|---|
+| parse — the AST build itself | ~514 | ~66% | no — pure algorithm |
+| JSON serialize (Rust → string) | ~241 | ~32% of `parse_utf16` | yes |
+| JSON.parse (JS) | ~60 | ~10% | yes |
+| input-write (char-by-char `setUint16`) | ~38 | ~6% | yes (cheap) |
+| copy-out + UTF-8 decode | ~27 | ~5% | yes (cheap) |
+| **alloc + dealloc** | **~1.6** | **0.2%** | **yes** |
 
-1. `alloc(byteLen)` — input buffer in wasm linear memory.
-2. **char-by-char** `DataView.setUint16` write loop (UTF-16LE).
-3. `parse_utf16` → Rust builds the AST, **serializes it to a JSON string** into a
-   freshly-allocated output buffer, returns `(ptr,len)`.
-4. `new Uint8Array(memory.buffer, outPtr, outLen).slice()` (copy out).
-5. `TextDecoder.decode` (UTF-8) → `JSON.parse` (rebuild the JS object tree).
-6. `dealloc(outPtr)` + `dealloc(inPtr)`.
+The parse-vs-serialize split came from a temporary `parse_only` wasm export (parse,
+return a checksum, no serialize) subtracted from `parse_utf16`; the export was
+removed after measuring. A `render_utf16` (parse → HTML in wasm, no JSON) probe ran
+~693 µs realistic — *barely* cheaper than serialize, and *more* expensive on the
+55 KB case.
 
-Per keystroke: **2 alloc + 2 dealloc, a per-char JS write loop, a slice copy, a
-UTF-8 decode, and a full JSON serialize (Rust) + parse (JS) round-trip.**
+## 3. What the numbers say
 
-## 3. Hypothesis (unmeasured — step 0 settles it)
+1. **The premise is refuted.** `alloc`/`dealloc` is **0.2%** of a parse. The
+   persistent pre-allocated buffer (the whole reason for this doc) would reclaim
+   ~1 µs out of 580. Not worth a single line of code.
+2. **Two-thirds of every keystroke is the parse algorithm itself** — nothing at the
+   boundary touches it. Only a faster parser helps, and there is no workload that
+   makes that worth doing (see §5).
+3. **The only real boundary lever is the JSON round-trip** (~300 µs serialize+parse
+   combined, ~40% overlapping). But cashing it means eliminating JSON entirely —
+   render-in-wasm or a columnar wire format. The `render_utf16` probe shows
+   rendering is *itself* ~as expensive as serializing, so it only wins if JS then
+   drops both `JSON.parse` **and** its own AST→DOM render. That is the
+   "retire the JS renderer" arc, not a marshalling tweak — a separate spec if ever.
+4. **There is no latency problem to solve.** 580 µs/keystroke realistic is
+   imperceptible (16 ms frame budget); the 55 KB worst case is 2.3 ms, still under a
+   frame. Even at wasm's ~3-5× penalty vs native, fine.
 
-The alloc/dealloc churn is real but probably the *smaller* cost. The likely fat
-costs are (a) the **char-by-char UTF-16 write loop** and (b) the **JSON
-round-trip** — we pay a full serialize+deserialize to cross an in-process
-boundary, every keystroke. Pre-allocation fixes (a-adjacent) churn but not the
-round-trip. **So: measure before optimizing.**
+## 4. Decision
 
-## 4. The plan
+**Not pursued.** No pre-allocation, no bulk-write rewrite, no wire-format change.
+The valuable output is *knowing the boundary is not the bottleneck* — exactly what
+measure-first is for. The benchmark is kept (`npm run bench:marshalling`) as a
+standing regression guard so any future change to the glue or wasm surfaces a
+per-phase delta.
 
-### Step 0 — Benchmark harness (gate everything on this)
-A node script that drives the **real shipped glue** over a realistic section
-(~few KB), a large paste (worst case), and a tiny buffer, N iterations, and
-reports a per-phase breakdown: input-write, `parse_utf16`, copy-out + decode,
-`JSON.parse`, and alloc/dealloc. Print a baseline table. This both directs the
-work and becomes a regression guard. **No optimization lands without a before/after
-number from this.**
+Why we went Rust still stands and was never about browser keystroke speed: one
+parser, native bins for the build/server, no JS-as-authority in the browser, and the
+in-process FFI path for the native app (R5) — where Rust's speed actually pays
+because it sidesteps marshalling entirely.
 
-### Step 1 — Persistent buffers, zero per-parse alloc (the cheap, safe win)
-- **Input:** one reusable scratch region JS `alloc`s once and reuses; `realloc`
-  (or free+bigger-alloc) only when a longer input arrives. Cap discipline: shrink
-  back if a giant paste blew it up, so we don't hold megabytes forever. Write via
-  a `Uint16Array` view over `memory.buffer`, not `DataView.setUint16` (drops the
-  per-char endianness branch; lets the engine optimize the store loop).
-- **Output:** a Rust-side reusable `static mut Vec<u8>` (single-threaded wasm, so
-  sound) that the parser clears + writes into and returns `(ptr,len)` for. No
-  caller buffer, no output alloc/dealloc. JS reads it and must consume before the
-  next call (JSON.parse copies anyway). New export, e.g. `parse_utf16_reuse`, kept
-  alongside the old one until both glues + oracles are cut over.
-- Net after warmup: **zero alloc/dealloc per parse.** Apply to the browser glue;
-  mirror in the Node glue.
+## 5. Conditional note: parser perf (do NOT act now)
 
-### Step 2 — Re-measure, then decide the boundary itself
-If `JSON.parse` now dominates (expected), that is the real fork:
-- **(a)** a leaner wire format — a flat typed-array/columnar AST encoding JS walks
-  directly, skipping JSON entirely; or
-- **(b)** push more work into wasm so JS stops rebuilding the whole AST object each
-  keystroke — wasm emits the preview HTML + diagnostics + outline directly. This
-  overlaps the **"renderer → wasm"** frontier (the next "retire the .js" step): if
-  wasm renders, the editor barely needs the AST object at all.
+If parsing ever becomes a *felt* cost — a much larger corpus, or a huge live document
+in the native app — profile here first, in priority order:
 
-Pick based on the step-0/step-1 numbers, not a priori. (b) is the bigger arc and
-folds into a separate spec if chosen.
+- `utf16le_units` does a full `.collect()` into a `Vec<u16>` (a whole-input copy
+  inside wasm) on every parse, on top of the JS-side write.
+- per-node allocations in the parser hot loop (`parser.rs`).
+- the JSON serialize (32% of `parse_utf16`) — but this is a *boundary* cost that
+  vanishes in the native app, so weigh it against just building the native path.
 
-## 5. Safety
+No current workload is slow (keystroke imperceptible, build corpus ~500 KB, native
+app sidesteps the boundary). This is a "where to look if" note, not a TODO.
 
-The equivalence oracles (`rust-wasm-oracle.js`, `scriptorium-wasm-browser-parity.js`)
-drive the **real shipped glue**, so any marshalling refactor is validated
-byte-identical against the frozen goldens for free — we can be aggressive. The
-benchmark adds the perf-regression guard. Keep the two glues (browser + Node) in
-lockstep; the Node one rides the same exports.
-
-## 6. Done when
-
-The browser glue does zero per-parse alloc/dealloc, the input write is bulk, and
-the benchmark shows a real improvement on the realistic + worst-case inputs with
-the oracles still green. Then either retire this doc into SCRIPTORIUM-RUST-PARSER.md
-or, if step 2(b) is chosen, hand off to a renderer-to-wasm spec.
+(Not measured, file-and-move-on: a head-to-head vs the retired `parse.js`. It would
+likely show JIT'd native JS was *competitive per-parse* because it had no marshalling
+tax — a reality check on the wasm cost we accepted, not a verdict on the cutover.)
