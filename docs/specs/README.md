@@ -21,6 +21,10 @@ roadmap, but they are not the roadmap itself. For overall orientation read
   sections are being superseded by the native-editor umbrella spec.
 - `SCRIPTORIUM-WASM-MARSHALLING.md`: **closed** — the JS⇄wasm boundary was
   measured and is not the bottleneck (`npm run bench:marshalling` kept as a guard).
+- `SCRIPTORIUM-NATIVE-EDITOR.md`: **the active frontier** — umbrella vision +
+  architecture for a true zero-dep native Windows editor (hand-rolled Win32 +
+  DirectWrite FFI, own the text engine, reuse `rust/` in-process). North star +
+  living roadmap + decisions ledger; per-component specs spawn from it.
 
 **Search, recovery, UX:**
 - `ORACLE-SEARCH-SPEC.md`: target AST-native search/index/ranking system for

@@ -1,11 +1,15 @@
 # Roadmap
 
-This is the current planning source for Renaissance.
+This is the current planning source for Renaissance (the reader site).
 
 The next work should make the existing reader feel more intentional before
 adding a large new interaction. Spotlight search is still important; it should
 become the first flagship expression of the Renaissance interaction system, not
 a generic command palette.
+
+> **Scriptorium native editor** (the authoring tool's project-within-a-project)
+> has its own living roadmap in `docs/specs/SCRIPTORIUM-NATIVE-EDITOR.md` §7 —
+> the active frontier is a true zero-dep native Windows editor.
 
 ## Guiding Shape
 

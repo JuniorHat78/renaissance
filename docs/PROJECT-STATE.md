@@ -298,6 +298,10 @@ essays are continuous prose; never fabricate apparatus.
 - `docs/specs/SCRIPTORIUM-WASM-MARSHALLING.md` — **closed** decision record: the
   JS⇄wasm boundary was measured and is not the bottleneck; `npm run bench:marshalling`
   kept as a regression guard.
+- `docs/specs/SCRIPTORIUM-NATIVE-EDITOR.md` — **the active frontier**: umbrella
+  vision + architecture for the true zero-dep native Windows editor (hand-rolled
+  Win32 + DirectWrite FFI, own the text engine, reuse `rust/` in-process). North
+  star, living roadmap, and decisions ledger; per-component specs spawn from it.
 - `docs/specs/ORACLE-SEARCH-SPEC.md`, `SEARCH-RANKING-SPEC.md` — search/ranking.
 - `docs/specs/SPOTLIGHT-UX-SPEC.md`, `404-MAGIC-SPEC.md`, `HARDENING-GAUNTLETS-SPEC.md`.
 - `docs/ARCHITECTURE.md` — system architecture + the derived-artifacts/net-off model.
