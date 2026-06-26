@@ -8,7 +8,7 @@
     "node": ">=22.17.0"
   },
   "scripts": {
-    "predev": "npm run build:artifacts",
+    "predev": "npm run build:rust-wasm && npm run build:artifacts",
     "dev": "python -m http.server 8000",
     "check": "npm run check:syntax && npm run test:ast && npm run validate:content",
     "check:syntax": "node scripts/check-js-syntax.js",
@@ -60,6 +60,7 @@
     "build:rust-server": "cargo build --release --bin scriptorium-server --manifest-path rust/Cargo.toml",
     "build:rust-content-ast": "cargo build --release --bin scriptorium-content-ast --manifest-path rust/Cargo.toml",
     "build:rust-search-index": "cargo build --release --bin scriptorium-search-index --manifest-path rust/Cargo.toml",
+    "build:rust-bins": "cargo build --release --bin scriptorium-content-ast --bin scriptorium-search-index --manifest-path rust/Cargo.toml",
     "oracle:rust": "node scripts/tests/rust-parser-oracle.js",
     "oracle:rust-wasm": "node scripts/tests/rust-wasm-oracle.js",
     "oracle:rust-json": "node scripts/tests/rust-json-roundtrip.js",
@@ -116,9 +117,9 @@
     "visual:check": "node scripts/visual/check.js",
     "visual:approve": "node scripts/visual/approve.js",
     "validate:content": "node scripts/validate-content.js",
-    "search-index:generate": "node scripts/generate-search-index.js",
+    "search-index:generate": "node scripts/build/generate-artifact.js scriptorium-search-index scripts/generate-search-index.js",
     "test:search-index": "node scripts/tests/search-index-regression.js",
-    "content-ast:generate": "node scripts/generate-content-ast.js",
+    "content-ast:generate": "node scripts/build/generate-artifact.js scriptorium-content-ast scripts/generate-content-ast.js",
     "test:content-ast": "node scripts/tests/content-ast-regression.js",
     "test:search-oracle": "node scripts/tests/search-oracle-regression.js",
     "test:search-lexicon": "node scripts/tests/search-lexicon-regression.js",

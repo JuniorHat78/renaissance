@@ -45,19 +45,18 @@ jobs:
         with:
           node-version: 22
 
-      - name: Setup Rust (wasm target)
+      - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-unknown-unknown
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Build the shared Rust core (the build's parser)
+      - name: Build the native Rust generators (the deploy's artifact builders)
         # rust/ is the shared core, NOT author tooling — it survives the deletion
-        # below. The build (content-ast / search-index generators) parses through
-        # this wasm after the cutover.
-        run: npm run build:rust-wasm
+        # below. The build generates data/compiled + search-index via these native
+        # bins after the cutover, exactly as the deploy does. They parse internally
+        # (Rust), so the build needs neither scriptorium/ nor a JS parser.
+        run: npm run build:rust-bins
 
       - name: Delete the author tooling (the editor app)
         run: rm -rf scriptorium
