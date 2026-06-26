@@ -5,9 +5,13 @@
 > where things stand*. It links out to the durable feature specs for depth.
 > Pairs with the root `CLAUDE.md` (the short, always-loaded version).
 >
-> Last refreshed: 2026-06-24. AST compiler **P5** is shipped (the client parser
+> Last refreshed: 2026-06-27. AST compiler **P5** is shipped (the client parser
 > was dropped and derived artifacts were "netted off"); **Scriptorium**, the local
-> authoring tool, is the active second project-within-a-project (§9).
+> authoring tool, is the active second project-within-a-project (§9). The
+> **parse.js cutover is complete** — the JS parser is deleted and a crate-free
+> **Rust core at top-level `rust/`** is now the one parser (native bins for the
+> build, wasm in the editor). The next frontier is a **true native desktop
+> editor** (zero-dep, Win32 FFI); see §9.
 
 ---
 
@@ -75,27 +79,31 @@ for the canonical design of record.** Summary:
   ("Unable to load this section."), **not** a reparse — since P5 there is no
   client parser to fall back to.
 
-### The `scripts/ast/` module split (P5)
+### The `scripts/ast/` module split (P5 → post-cutover)
 
 The AST library is split along the parse/consume seam so the tokenizer stops
-shipping to the browser:
+shipping to the browser. After the **parse.js cutover** (see §9) the JS parser is
+gone; the parser is the Rust core, reached in Node through a thin wasm glue:
 
 | File | Role | Ships to browser? |
 |------|------|-------------------|
 | `ast/core.js` | shared spine + every consume projection + `normalizeAstInput` | **yes** |
 | `ast/render.js` | DOM render + HTML serialize | **yes** |
-| `ast/parse.js` | tokenizer / validator / legacy bridge | **no — Node/build-time only** |
-| `ast/index.js` | thin Node merge re-exporting the full 25-key surface | n/a (Node) |
+| `ast/parse-wasm.js` | registers `parseDocument` via the Rust **wasm** (self-contained; depends only on `rust/`) | **no — Node/build-time only** |
+| `ast/validate.js` | `validateDocument` + helpers (survived parse.js's deletion) | **no — Node/build-time only** |
+| `ast/index.js` | thin Node merge (core + render + validate + wasm parse) | n/a (Node) |
 
 `core.normalizeAstInput` reaches the parser through **registration hooks** that
-`parse.js` installs at load. In the browser `parse.js` is never loaded, so the
-hooks stay unregistered and a raw-string/legacy input throws loudly — the reader
-only ever hands in already-parsed ASTs. The Node `require("./ast/index.js")`
-surface is unchanged, so the equivalence oracle and the whole test suite guard
-the split itself. The browser's only AST entry point is `content.js`; the four
-reader shells load `core.js` then `render.js` (never `index.js`/`parse.js`). An
-`ast doctor` check (`scripts/ast-tools/doctor.js`) enforces "parser does not
-ship." Result: shipped AST weight dropped ~48KB → ~21KB per shell.
+`parse-wasm.js` installs at load (the Rust wasm is the registered string parser).
+In the browser neither file is loaded, so the hooks stay unregistered and a
+raw-string input throws loudly — the reader only ever hands in already-parsed
+ASTs. The Node `require("./ast/index.js")` surface is preserved, so the
+equivalence oracle and the whole test suite guard the split. The browser's only
+AST entry point is `content.js`; the four reader shells load `core.js` then
+`render.js` (never `index.js`). An `ast doctor` check enforces "parser does not
+ship," and the Scriptorium doctor enforces "parse-wasm depends only on `rust/`,
+never on the editor app." (`parseInline` / `normalizeSource` / `legacyBlocksToAst`
+were retired with parse.js — they had no live consumers.)
 
 ## 4. Build model — derive-at-deploy + net-off
 
@@ -216,13 +224,13 @@ The four reader **shells** are `index.html` (home), `essay.html`, `section.html`
 - Write commit messages via the Write tool to a temp file, not heredoc, to avoid
   permission prompts in unattended runs.
 
-## 9. Where things stand (2026-06-23)
+## 9. Where things stand (2026-06-27)
 
 **Shipped & live:** the full AST compiler (P0–P5), derive-at-deploy, net-off, the
 soft-nav reading shell, same-document continuity, oracle search + spotlight,
 reading-attention, the 404/recovery magic, the rich a11y/device/network CI
-gauntlets. Two PRs just landed on `main`: **#17** (P5 parser-drop + net-off) and
-**#18** (review-feedback + all CodeQL findings patched).
+gauntlets. PRs **#17** (P5 parser-drop + net-off) and **#18** (review-feedback +
+CodeQL) landed on `main`.
 
 **Scriptorium — the second project-within-a-project (active, on `feat/scriptorium`):**
 A zero-dependency, local-only authoring tool that writes prose **and** its
@@ -231,21 +239,44 @@ lie" — the authoring analogue of the equivalence oracle). The structural edito
 layer (P3: two-way source↔preview sync, oracle-verified AST-aware commands,
 select-node) is shipped, plus a zero-dep installable-PWA desktop capstone. It is
 **quarantined** — never shipped to readers, never in the precache/budget/
-gauntlets; it gets its own spine guard (`scripts/tests/scriptorium-regression.js`)
-and a project doctor (`scriptorium/doctor.js`). Design of record:
-`docs/specs/SCRIPTORIUM.md` (+ `SCRIPTORIUM-EDITOR.md`). A speculative,
-not-yet-started extension — porting the runtime to a single crate-free Rust
-binary (parser as WASM in the browser + native, oracle-validated byte-identical,
-eventually a true native Windows app) — is specced in `SCRIPTORIUM-RUST-PARSER.md`.
+gauntlets. Design of record: `docs/specs/SCRIPTORIUM.md` (+ `SCRIPTORIUM-EDITOR.md`).
+
+**The crate-free Rust core — shipped (cutover complete, 2026-06-27).** The
+speculative port is no longer speculative:
+- The Rust crate is promoted to **top-level `rust/`** (a shared workspace: parser
+  library + wasm + the build generator bins + the editor server bin). `scriptorium/`
+  is the editor *app* on top; the reader build consumes `rust/` directly.
+- **`scripts/ast/parse.js` is deleted.** The Rust core is the one parser — natively
+  (the `content-ast` / `search-index` build bins, prefer-native-else-JS-via-wasm)
+  and as wasm in the editor. AST goldens (`scripts/tests/goldens/parse-ast.json`)
+  are a FROZEN self-contained snapshot of the retired JS authority; the parse-side
+  oracles compare Rust against it.
+- The **JS⇄wasm marshalling boundary was benchmarked and is NOT the bottleneck**
+  (alloc churn = 0.2%; parse algorithm dominates; no latency problem). The
+  optimization was *not pursued*; `npm run bench:marshalling` stays as a guard.
+  Design of record: `SCRIPTORIUM-RUST-PARSER.md` §14 + `SCRIPTORIUM-WASM-MARSHALLING.md`
+  (closed).
+
+**Next frontier — a true native desktop editor (in design).** The destination is
+a zero-dep native Windows app: hand-rolled **Win32 + COM/DirectWrite FFI** (the
+dependency line drawn at the OS API; bindings hand-declared, no `windows-sys`), with
+the editor's text engine (buffer, layout, caret, input) **owned by us** for total
+control of feel, reusing the `rust/` parser in-process (no wasm, no marshalling).
+The PWA was a stepping stone that "didn't feel right" — the engine, not the chrome,
+is the reason. First move (decided): a **platform/render walking skeleton** (window
++ DirectWrite text + caret + keyboard) to de-risk the COM FFI and unlock the
+feel-loop. An umbrella vision/architecture spec is being written; it supersedes the
+older "Win32 + RichEdit" sketch in `SCRIPTORIUM-RUST-PARSER.md` (RichEdit = OS owns
+the caret; the new direction owns the whole engine — opposite philosophies).
 
 **Top parked / next work (in priority order):**
-1. **`section.js` physical split** — `section.html` is the heaviest shell;
-   its asset budget is parked at 384KB (was 1024KB; P5 pulled it down). The
-   split is the real fix and returns the budget to a real ~256–300KB ceiling.
-2. **A-phase checkpoint 4: magic texture polish** — spring easing, veil
-   dissolve, arriving-words shimmer (high visual-review risk).
-3. **Reading-attention feel pass** — tune WPM/read-fraction/velocity constants.
-4. Bespoke typesetting (B-feel) and concordance / literary apparatus (C).
+1. **Native editor umbrella spec + platform/render skeleton** (the active frontier).
+2. **`section.js` physical split** — `section.html` is the heaviest shell; budget
+   parked at 384KB (was 1024KB). The split returns it to a real ~256–300KB ceiling.
+3. **A-phase checkpoint 4: magic texture polish** — spring easing, veil dissolve,
+   arriving-words shimmer (high visual-review risk).
+4. **Reading-attention feel pass** — tune WPM/read-fraction/velocity constants.
+5. Bespoke typesetting (B-feel) and concordance / literary apparatus (C).
 
 Note: editorial apparatus (footnotes/sidenotes) is deliberately **OUT** — the
 essays are continuous prose; never fabricate apparatus.
@@ -261,8 +292,12 @@ essays are continuous prose; never fabricate apparatus.
   server, phase plan, review findings + status).
 - `docs/specs/SCRIPTORIUM-EDITOR.md` — the structural editor layer (two-way
   source↔preview sync, the offset↔block mapping, AST-aware commands + oracle).
-- `docs/specs/SCRIPTORIUM-RUST-PARSER.md` — speculative crate-free Rust core
-  (oracle-validated byte-identical parser → WASM + native; native-app sequencing).
+- `docs/specs/SCRIPTORIUM-RUST-PARSER.md` — the crate-free Rust core (oracle-validated
+  byte-identical parser → WASM + native). **Parser cutover complete**; the native-app
+  shell sections are being superseded by the forthcoming native-editor umbrella spec.
+- `docs/specs/SCRIPTORIUM-WASM-MARSHALLING.md` — **closed** decision record: the
+  JS⇄wasm boundary was measured and is not the bottleneck; `npm run bench:marshalling`
+  kept as a regression guard.
 - `docs/specs/ORACLE-SEARCH-SPEC.md`, `SEARCH-RANKING-SPEC.md` — search/ranking.
 - `docs/specs/SPOTLIGHT-UX-SPEC.md`, `404-MAGIC-SPEC.md`, `HARDENING-GAUNTLETS-SPEC.md`.
 - `docs/ARCHITECTURE.md` — system architecture + the derived-artifacts/net-off model.

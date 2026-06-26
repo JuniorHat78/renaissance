@@ -44,9 +44,12 @@ its authoring analogue:
 > authority*, exactly as the reader hydrates *through the one consume authority*.**
 
 Concretely: what the author types is turned into an AST by the **same**
-`contentAstFor` / parse authority the compiler uses (`scripts/ast/parse.js` via
-`scripts/generate-content-ast.js`). There is no editor-private parse. Therefore
-the chain is closed end to end:
+`contentAstFor` / parse authority the compiler uses — since the cutover
+(`SCRIPTORIUM-RUST-PARSER.md` §14) that authority is the crate-free **Rust core**
+in `rust/` (native bins for the build, wasm in the editor), behavior-identical to
+the retired `parse.js`. There is no editor-private parse. (Later references below
+to `parse.js` / `DIAGNOSTIC_CODES` / position-stamping name that same contract,
+now fulfilled by the Rust parser.) Therefore the chain is closed end to end:
 
 ```
 author's buffer  ─parse(one authority)→  AST  ─compile→  data/compiled/<slug>.json

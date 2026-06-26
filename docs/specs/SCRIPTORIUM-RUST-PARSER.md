@@ -10,17 +10,26 @@
 >
 > This is the answer to "an *actual* zero-dependency desktop app, not just a PWA"
 > (`docs/specs/SCRIPTORIUM.md` §8 P3's PWA capstone, taken to the metal). The
-> shell is a separate axis from the parser (§8): the PWA is the *interim* shell,
-> and the **destination is a true native app — Windows-first, hand-rolled Win32 +
-> RichEdit, zero crate** — where the OS text control owns the caret, so going
-> native *honors* the §4 boundary rather than breaching it. Read `SCRIPTORIUM.md`
-> first; this assumes its spine invariant (§2), caret boundary (§4), and
-> quarantine (§6) as settled law.
+> shell is a separate axis from the parser (§8): the PWA was the *interim* shell,
+> and the **destination is a true native app**. Read `SCRIPTORIUM.md` first; this
+> assumes its spine invariant (§2), caret boundary (§4), and quarantine (§6) as
+> settled law.
 >
-> Status: **spec / not started.** Doc-driven — written first, built against, and
-> retired into the parent specs when it ships (the AST-compiler convention).
+> Status: **the parser is shipped — cutover complete (2026-06-27).** R0–R3 done:
+> the crate-free Rust core (top-level `rust/`) is the one parser, natively (build
+> bins) and as wasm (editor); `scripts/ast/parse.js` is deleted; the parse-side
+> equivalence oracles compare Rust against a frozen golden snapshot. The JS⇄wasm
+> boundary was benchmarked and is not the bottleneck (`SCRIPTORIUM-WASM-MARSHALLING.md`,
+> closed). §§1–14 below are the parser design of record and the cutover history.
 >
-> Last refreshed: 2026-06-24.
+> **Open / superseded:** the native-app *shell* sketch in this doc (Win32 +
+> **RichEdit**, OS owns the caret) is being revisited. The current direction is the
+> opposite — hand-roll the whole text engine on **Win32 + COM/DirectWrite FFI** (we
+> own buffer/layout/caret/input for total control of feel), reusing `rust/` in-process.
+> That is the subject of the forthcoming native-editor umbrella spec; treat the
+> RichEdit/native-shell paragraphs here as historical until it lands.
+>
+> Last refreshed: 2026-06-27.
 
 ---
 

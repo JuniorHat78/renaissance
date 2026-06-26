@@ -41,17 +41,20 @@ raw/<n>.txt  ──parse──▶  contentAst  ──▶  data/compiled/<slug>.j
   `main` and publishes via GitHub Actions Pages. Derived artifacts are **build
   output, not committed** (see Net-off).
 
-## Module layout (post-P5)
+## Module layout (post-P5 → post-cutover)
 
 `scripts/ast/` splits along the parse/consume seam so the parser stops shipping
-to the browser:
+to the browser. After the **parse.js cutover** (`SCRIPTORIUM-RUST-PARSER.md` §14)
+the JS tokenizer is deleted — the parser is now the crate-free Rust core in
+`rust/`, reached in Node through a thin wasm glue:
 
 | File | Role | Ships to browser? |
 |------|------|-------------------|
 | `ast/core.js` | Shared spine: `BLOCK_TYPES`/`INLINE_TYPES`, `clampHeadingLevel`, `normalizeWhitespace`, `escapeHtml`, `inlineToText`, `blockToSearchableText`, `normalizeAstInput`, `getBlockChildren` | yes |
 | `ast/render.js` | Consume-only: `renderBlocks`, `passagesFromDocument`, `toSearchableText`, `firstParagraphText`, `wordCount`, `astToLegacyBlocks`, `serializeBlocks`, `withoutLeadingHeadings` | yes |
-| `ast/parse.js` | Text → AST: `parseDocument` + every tokenizer, `validateDocument`, `legacyBlocksToAst` | **no — Node build-time only** |
-| `ast/index.js` | Full Node re-export (`core + render + parse`) — the unchanged `require()` surface | n/a (Node) |
+| `ast/parse-wasm.js` | Registers `parseDocument` via the Rust **wasm** (self-contained; depends only on `rust/`) | **no — Node build-time only** |
+| `ast/validate.js` | `validateDocument` + helpers (survived parse.js's deletion) | **no — Node build-time only** |
+| `ast/index.js` | Full Node re-export (`core + render + validate + wasm parse`) — the unchanged `require()` surface | n/a (Node) |
 
 **Why this shape:** keeping `ast/index.js` as the full Node re-export means the
 compiler, the search-index generator, every `ast-tools/*` script, and every test
