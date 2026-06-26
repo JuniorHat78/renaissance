@@ -16,8 +16,9 @@
 const fs = require("node:fs");
 const path = require("node:path");
 
-const ast = require("../ast/index.js");
+const core = require("../ast/core.js");
 const shared = require("./lib/parser-oracle-corpus.js");
+const { loadGoldens } = require("./lib/parse-goldens.js");
 
 const ROOT = shared.ROOT;
 const WASM = process.env.SCRIPTORIUM_PARSER_WASM && process.env.SCRIPTORIUM_PARSER_WASM.trim()
@@ -57,8 +58,12 @@ function makeCompiler(instance) {
   };
 }
 
-function jsContentAst(str) {
-  const doc = ast.withoutLeadingHeadings(ast.parseDocument(str, { sourceName: SOURCE_NAME }));
+// The JS reference, rebuilt from the golden tree instead of a live parse: the
+// golden is the bare parseDocument shape (sourceName === null); inject the
+// representative sourceName the same way parseDocument(text, { sourceName })
+// would, then re-project through the surviving core.js (withoutLeadingHeadings).
+function jsContentAst(tree) {
+  const doc = core.withoutLeadingHeadings(Object.assign({}, tree, { sourceName: SOURCE_NAME }));
   return JSON.stringify(doc, null, 2);
 }
 
@@ -76,12 +81,12 @@ async function main() {
     }
   }
   const compile = makeCompiler(mod.instance);
-  const { corpus, adversarial, fuzz, inputs } = shared.allInputs();
+  const { corpus, adversarial, fuzz, inputs, trees } = loadGoldens();
 
   let failures = 0;
   const MAX = 20;
   for (let i = 0; i < inputs.length; i += 1) {
-    const jsJson = jsContentAst(inputs[i]);
+    const jsJson = jsContentAst(trees[i]);
     let rustJson;
     try {
       rustJson = compile(inputs[i]);

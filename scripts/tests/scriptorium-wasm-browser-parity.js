@@ -5,14 +5,16 @@
 // blocker 1): in a REAL browser, parse a set of inputs with BOTH the browser AST
 // authority (core+render+parse.js globals) and the wasm parser, and assert:
 //   (a) browser-JS ≡ wasm-in-browser  — the editor's two engines agree, and
-//   (b) browser-JS ≡ Node-JS authority — the original browser-vs-Node concern.
+//   (b) wasm-in-browser ≡ the committed golden snapshot (§14.3) — in-browser
+//       determinism vs the frozen JS authority, the original browser-vs-Node
+//       concern now anchored to the goldens rather than a live Node parse.
 // Structural comparison (JSON-parsed), same canonical-form contract as the other
 // oracles. Run via run-with-server (serves the project + the built/copied wasm).
 
 const path = require("node:path");
 const { browserType, resolveBrowserName } = require("./lib/browser");
-const ast = require("../ast/index.js");
 const shared = require("./lib/parser-oracle-corpus.js");
+const { loadGoldens } = require("./lib/parse-goldens.js");
 
 function parseArgs(argv) {
   const options = { base: "http://127.0.0.1:4173" };
@@ -29,11 +31,15 @@ function parseArgs(argv) {
 async function main() {
   const options = parseArgs(process.argv);
 
-  // Corpus + adversarial (skip the 500 fuzz — keep the browser run quick; the
-  // node-wasm oracle already fuzzes the same engine heavily).
-  const corpus = shared.corpusInputs();
-  const adversarial = shared.adversarialInputs();
+  // Corpus + adversarial (skip the fuzz tail — keep the browser run quick; the
+  // node-wasm oracle already fuzzes the same engine heavily). The goldens are
+  // index-aligned with [corpus, adversarial, fuzz], so the leading slice is
+  // exactly these inputs and trees[i] is their frozen JS reference.
+  const golden = loadGoldens();
+  const corpus = golden.corpus;
+  const adversarial = golden.adversarial;
   const inputs = corpus.concat(adversarial);
+  const goldenTrees = golden.trees.slice(0, inputs.length);
   const inputsJson = JSON.stringify(inputs); // survives CDP transport incl. lone surrogates
 
   const browser = await browserType().launch({ headless: true });
@@ -70,16 +76,16 @@ async function main() {
     for (let i = 0; i < inputs.length; i += 1) {
       const browserJs = JSON.parse(results[i].js);
       const browserWasm = JSON.parse(results[i].wasm);
-      const nodeJs = ast.parseDocument(inputs[i]);
+      const golden = goldenTrees[i];
 
       const dWasm = shared.diffDeep(browserJs, browserWasm, "$");
-      const dNode = shared.diffDeep(nodeJs, browserJs, "$");
-      if (dWasm || dNode) {
+      const dGolden = shared.diffDeep(golden, browserWasm, "$");
+      if (dWasm || dGolden) {
         failures += 1;
         if (failures <= MAX) {
           const region = i < corpus.length ? "corpus" : "adversarial";
           if (dWasm) console.error("FAIL #" + i + " (" + region + ") browserJS≠wasm at " + dWasm.path + " — " + dWasm.why);
-          if (dNode) console.error("FAIL #" + i + " (" + region + ") nodeJS≠browserJS at " + dNode.path + " — " + dNode.why);
+          if (dGolden) console.error("FAIL #" + i + " (" + region + ") wasm≠golden at " + dGolden.path + " — " + dGolden.why);
           console.error("  input: " + shared.snippet(inputs[i]));
         }
       }
@@ -95,7 +101,7 @@ async function main() {
   }
   console.log(
     "scriptorium-wasm-browser-parity (" + resolveBrowserName() + "): " + inputs.length +
-    " inputs — browser-JS ≡ wasm-in-browser ≡ Node-JS."
+    " inputs — browser-JS ≡ wasm-in-browser ≡ golden snapshot."
   );
 }
 

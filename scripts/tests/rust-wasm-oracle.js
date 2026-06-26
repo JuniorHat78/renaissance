@@ -3,10 +3,11 @@
 
 // The WASM equivalence oracle (SCRIPTORIUM-RUST-PARSER.md §6, R1): instantiate
 // the SAME Rust parser compiled to wasm32 and assert its AST is structurally
-// identical to the ONE JS parse authority over the shared corpus + adversarial +
-// fuzz set. This is the artifact the browser editor loads, so proving the .wasm
-// is byte-identical (in Node, which runs wasm natively) covers the parser; the
-// in-browser wiring check (Playwright) is the remaining mile.
+// identical to the committed golden snapshot of the JS parse authority (§14.3)
+// over the shared corpus + adversarial + fuzz set. This is the artifact the
+// browser editor loads, so proving the .wasm matches the goldens (in Node, which
+// runs wasm natively) covers the parser; the in-browser wiring check (Playwright)
+// is the remaining mile.
 //
 // It drives the ACTUAL shipped browser glue (scriptorium/wasm-parser.js) via a
 // fetch shim, so the editor's real load/parse path is what gets tested — not a
@@ -15,8 +16,8 @@
 const fs = require("node:fs");
 const path = require("node:path");
 
-const ast = require("../ast/index.js");
 const shared = require("./lib/parser-oracle-corpus.js");
+const { loadGoldens } = require("./lib/parse-goldens.js");
 const wasmGlue = require("../../scriptorium/wasm-parser.js");
 
 const ROOT = shared.ROOT;
@@ -55,7 +56,7 @@ async function main() {
   }
 
   const parse = wasmGlue.parseDocument;
-  const { corpus, adversarial, fuzz, inputs } = shared.allInputs();
+  const { corpus, adversarial, fuzz, inputs, trees } = loadGoldens();
 
   let failures = 0;
   const MAX_REPORT = 20;
@@ -71,7 +72,7 @@ async function main() {
       }
       continue;
     }
-    const d = shared.diffDeep(ast.parseDocument(inputs[i]), wasmTree, "$");
+    const d = shared.diffDeep(trees[i], wasmTree, "$");
     if (d) {
       failures += 1;
       if (failures <= MAX_REPORT) {
@@ -79,9 +80,9 @@ async function main() {
           "FAIL #" + i + " (" + shared.regionFor(i, corpus.length, adversarial.length) +
           ") at " + d.path + " — " + d.why
         );
-        console.error("  input: " + shared.snippet(inputs[i]));
-        console.error("  JS  : " + JSON.stringify(d.a));
-        console.error("  wasm: " + JSON.stringify(d.b));
+        console.error("  input : " + shared.snippet(inputs[i]));
+        console.error("  golden: " + JSON.stringify(d.a));
+        console.error("  wasm  : " + JSON.stringify(d.b));
       }
     }
   }
@@ -94,10 +95,10 @@ async function main() {
     process.exit(1);
   }
   console.log(
-    "rust-wasm-oracle: " + inputs.length + " inputs byte-identical " +
+    "rust-wasm-oracle: " + inputs.length + " inputs match the goldens " +
     "(" + corpus.length + " corpus, " + adversarial.length + " adversarial, " + fuzz.length + " fuzz)."
   );
-  console.log("Rust parser (wasm, via shipped glue) ≡ JS authority.");
+  console.log("Rust parser (wasm, via shipped glue) ≡ JS golden snapshot.");
 }
 
 main();

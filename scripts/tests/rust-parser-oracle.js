@@ -2,11 +2,13 @@
 "use strict";
 
 // The NATIVE equivalence oracle for the Rust parser (SCRIPTORIUM-RUST-PARSER.md
-// §6): drive the crate-free Rust *binary* against the ONE JS parse authority
-// (scripts/ast/index.js) over the shared corpus + adversarial + fuzz set, and
-// assert the two ASTs are STRUCTURALLY identical (the canonical-form contract —
-// both sides JSON-parsed and deep-compared, so key order / number formatting
-// can't cause a false diff). Fail-closed with the first differing path.
+// §6): drive the crate-free Rust *binary* against the committed golden snapshot
+// of the JS parse authority (scripts/tests/goldens/parse-ast.json, §14.3) over
+// the shared corpus + adversarial + fuzz set, and assert the two ASTs are
+// STRUCTURALLY identical (the canonical-form contract — both sides JSON-parsed
+// and deep-compared, so key order / number formatting can't cause a false diff).
+// Fail-closed with the first differing path. The live differential already
+// proved Rust ≡ JS; with parse.js retired the goldens are the regression guard.
 //
 // One spawn handles ALL inputs via a length-prefixed framing: stdin/stdout carry
 // [u32 LE len][payload]. Inputs are UTF-16LE (the parser's native unit;
@@ -18,8 +20,8 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 
-const ast = require("../ast/index.js");
 const shared = require("./lib/parser-oracle-corpus.js");
+const { loadGoldens } = require("./lib/parse-goldens.js");
 
 const ROOT = shared.ROOT;
 const EXE = process.platform === "win32" ? "scriptorium-parser.exe" : "scriptorium-parser";
@@ -62,7 +64,7 @@ function main() {
     process.exit(0);
   }
 
-  const { corpus, adversarial, fuzz, inputs } = shared.allInputs();
+  const { corpus, adversarial, fuzz, inputs, trees } = loadGoldens();
   const res = spawnSync(BIN, [], { input: encodeFrames(inputs), maxBuffer: 256 * 1024 * 1024 });
   if (res.status !== 0 || res.error) {
     console.error("rust-parser-oracle: binary failed to run.");
@@ -94,7 +96,7 @@ function main() {
       }
       continue;
     }
-    const d = shared.diffDeep(ast.parseDocument(inputs[i]), rustTree, "$");
+    const d = shared.diffDeep(trees[i], rustTree, "$");
     if (d) {
       failures += 1;
       if (failures <= MAX_REPORT) {
@@ -102,9 +104,9 @@ function main() {
           "FAIL #" + i + " (" + shared.regionFor(i, corpus.length, adversarial.length) +
           ") at " + d.path + " — " + d.why
         );
-        console.error("  input: " + shared.snippet(inputs[i]));
-        console.error("  JS  : " + JSON.stringify(d.a));
-        console.error("  Rust: " + JSON.stringify(d.b));
+        console.error("  input : " + shared.snippet(inputs[i]));
+        console.error("  golden: " + JSON.stringify(d.a));
+        console.error("  Rust  : " + JSON.stringify(d.b));
       }
     }
   }
@@ -117,10 +119,10 @@ function main() {
     process.exit(1);
   }
   console.log(
-    "rust-parser-oracle (native): " + inputs.length + " inputs byte-identical " +
+    "rust-parser-oracle (native): " + inputs.length + " inputs match the goldens " +
     "(" + corpus.length + " corpus, " + adversarial.length + " adversarial, " + fuzz.length + " fuzz)."
   );
-  console.log("Rust parser ≡ JS authority.");
+  console.log("Rust parser ≡ JS golden snapshot.");
 }
 
 main();
