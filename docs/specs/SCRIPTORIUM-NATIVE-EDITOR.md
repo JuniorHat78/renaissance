@@ -157,7 +157,7 @@ when we go deep on it. Status tags keep §2.5 honest:
 
 | Component | What it is | Status | Notes |
 |---|---|---|---|
-| **Platform/render skeleton** | Window + DirectWrite text + caret + keyboard, end to end, reusing `rust/` parse | `need-now` | First build target (§7). De-risks COM-from-raw-Rust FFI; unlocks the feel-loop. The deepest single piece. |
+| **Platform/render skeleton** | Window + DirectWrite text + caret + keyboard, end to end, reusing `rust/` parse | `need-now` | First build target (§7). De-risks COM-from-raw-Rust FFI; unlocks the feel-loop. The deepest single piece. **Spec: `SCRIPTORIUM-NATIVE-SKELETON.md`.** |
 | **Text buffer** | Editable document structure (gap buffer · piece table · rope) | `need-now` | The data-structure heart; load-bearing for the "scales to a whole book" story. Naive `Vec<u16>` + whole-section reparse is *measured fine* for now — but the buffer is what keeps it fine as docs grow. Most fun to reason through. |
 | **Input correctness** | Grapheme clusters (UAX #29), line breaking (UAX #14), IME (`WM_IME_*`) | `need-now` | Caret moves by *grapheme*, not codepoint. IME is the sleeper that decides if it "feels right" for non-ASCII. The #1 jank tell. |
 | **Layout/render maturity** | Selection geometry, scrolling, hit-testing on `IDWriteTextLayout` | `need-now` | Build on DWrite's layout object so hit-testing + caret geometry come *free* (`HitTestPoint`/`HitTestTextPosition`); don't re-implement caret math. |
@@ -198,11 +198,11 @@ go deep component-by-component. Rationale: retire the existential FFI/COM risk i
 one; give the feel-loop a substrate immediately; write the deep specs against a real
 skeleton, not speculation. Each phase below spawns its own JIT component spec.
 
-- **N0 — Platform/render walking skeleton.** `[next]` A window, a DirectWrite-rendered
-  buffer of text, a blinking caret, keyboard input, parsing through `rust/` in-process.
-  Hand-roll exactly the Win32 + COM/DWrite bindings this needs. **Exit:** you can type
-  into a real native window and see parsed/rendered prose, and the COM-FFI question is
-  answered. Unlocks the feel-loop.
+- **N0 — Platform/render walking skeleton.** `[spec written → SCRIPTORIUM-NATIVE-SKELETON.md]`
+  A window, a DirectWrite-rendered buffer of text, a blinking caret, keyboard input,
+  parsing through `rust/` in-process. Hand-roll exactly the Win32 + COM/DWrite bindings
+  this needs. **Exit:** you can type into a real native window and see rendered prose
+  with a live AST signal, and the COM-FFI question is answered. Unlocks the feel-loop.
 - **N1 — Text buffer.** Choose + build the buffer (rope vs piece-tree — the real
   decision), with edits, undo-minimal, and the parse re-driven on edit.
 - **N2 — Input correctness.** Grapheme-cluster caret movement, line breaking, IME,

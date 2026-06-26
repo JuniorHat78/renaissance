@@ -25,6 +25,9 @@ roadmap, but they are not the roadmap itself. For overall orientation read
   architecture for a true zero-dep native Windows editor (hand-rolled Win32 +
   DirectWrite FFI, own the text engine, reuse `rust/` in-process). North star +
   living roadmap + decisions ledger; per-component specs spawn from it.
+- `SCRIPTORIUM-NATIVE-SKELETON.md`: **N0** — the platform/render walking skeleton
+  (the first build target): window + DirectWrite text + caret + keyboard + in-process
+  reparse. De-risks the COM-from-raw-Rust FFI.
 
 **Search, recovery, UX:**
 - `ORACLE-SEARCH-SPEC.md`: target AST-native search/index/ranking system for
