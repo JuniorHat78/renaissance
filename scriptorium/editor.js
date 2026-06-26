@@ -6,10 +6,11 @@
 // outline. See docs/specs/SCRIPTORIUM.md.
 //
 // THE SPINE (§2): every preview/diagnostic/outline rides the ONE parse
-// authority. core.js + render.js + parse.js are loaded by editor.html; parse.js
-// registers its parser into core, so RenaissanceAst.parseDocument(text) and
-// RenaissanceAst.renderBlocks(el, ast) here are the exact deploy path. There is
-// no editor-private parser.
+// authority. core.js + render.js are loaded by editor.html; the parser is the
+// Rust core compiled to wasm (wasm-parser.js), loaded at startup after the
+// parse.js cutover (§14.3) — RenaissanceAst.renderBlocks(el, ast) is the exact
+// deploy render path, and ScriptoriumWasmParser.parseDocument(text) is the one
+// parser. There is no editor-private parser and no JS fallback.
 //
 // THE CARET BOUNDARY (§4 — sacred): the editing surface is the <textarea> and
 // nothing else. No contenteditable, no custom caret. The browser owns glyph
@@ -84,12 +85,13 @@
     }
   }
 
-  // Verify the spine is actually present before we pretend to be an editor.
-  // If parse.js failed to load we must NOT silently fall back to anything —
-  // that would be a second parse path, which §2 forbids.
+  // Verify the consume spine (core + render) is present before we pretend to be
+  // an editor. The PARSER is the Rust core compiled to wasm (loaded below) — after
+  // the parse.js cutover (§14.3) there is no JS parser to fall back to; rendering
+  // still runs through render.js.
   function getAstApi() {
     const ast = window.RenaissanceAst;
-    if (!ast || typeof ast.parseDocument !== "function" || typeof ast.renderBlocks !== "function") {
+    if (!ast || typeof ast.renderBlocks !== "function") {
       return null;
     }
     return ast;
@@ -106,21 +108,14 @@
     const commands = window.ScriptoriumCommands || null;
 
     // ----- parse engine (SCRIPTORIUM-RUST-PARSER.md) ----------------------
-    // Default: the ONE JS parse authority (parse.js), exactly the deploy path.
-    // Opt-in via ?engine=wasm: the oracle-validated, byte-identical Rust parser
-    // compiled to wasm. This is NOT a silent second parser (§2) — it is explicit,
-    // and the equivalence oracle proves it yields the identical AST, so preview /
-    // commands / mapping are unaffected. Any load failure leaves us on JS.
-    let parse = function parseJs(source) {
-      return ast.parseDocument(source);
+    // The ONE parser is the Rust core compiled to wasm (the parse.js cutover,
+    // §14.3). It loads asynchronously at the end of start(); until it is ready
+    // `parse` refuses to run — there is no JS fallback, because a second parse
+    // path is exactly what §2 forbids. The equivalence oracle + goldens prove the
+    // wasm AST is byte-identical, so preview / commands / mapping are unaffected.
+    let parse = function parseNotReady() {
+      throw new Error("Scriptorium parser (wasm) is not loaded yet.");
     };
-    function wantsWasmEngine() {
-      try {
-        return new URLSearchParams(window.location.search).get("engine") === "wasm";
-      } catch (error) {
-        return false;
-      }
-    }
 
     const els = {
       essaySelect: document.getElementById("essay-select"),
@@ -137,7 +132,7 @@
     };
 
     if (!ast) {
-      renderFatal(els, "The AST modules did not load (core.js / render.js / parse.js). " +
+      renderFatal(els, "The consume modules did not load (core.js / render.js). " +
         "Scriptorium authors through the one parse authority and refuses to run without it.");
       return;
     }
@@ -1738,34 +1733,36 @@
       /* storage disabled — keep the default theme */
     }
 
-    refreshFromBuffer(); // empty buffer → clean preview/diagnostics baseline
-
-    // Opt-in wasm engine: load asynchronously so the editor is instantly usable
-    // on JS; on success swap `parse` and repaint (the AST is identical, so this
-    // is seamless). A load failure simply leaves us on JS.
-    if (wantsWasmEngine() && window.ScriptoriumWasmParser) {
-      window.ScriptoriumWasmParser.load("scriptorium_parser.wasm").then(function ready() {
-        parse = function parseWasm(source) {
-          return window.ScriptoriumWasmParser.parseDocument(source);
-        };
-        document.body.setAttribute("data-parse-engine", "wasm");
-        refreshFromBuffer();
-        // eslint-disable-next-line no-console
-        console.info("[scriptorium] parse engine: wasm (Rust, oracle-validated byte-identical).");
-      }).catch(function failed(error) {
-        document.body.setAttribute("data-parse-engine", "js (wasm failed)");
-        // eslint-disable-next-line no-console
-        console.warn("[scriptorium] wasm engine failed to load; staying on JS:", error);
-      });
-    } else {
-      document.body.setAttribute("data-parse-engine", "js");
+    // The ONE parser is the Rust core as wasm (§14.3 cutover). Load it before the
+    // editor can author — there is no JS parser to fall back to. Keep the textarea
+    // disabled until it is ready; a load failure is fatal (the editor cannot
+    // author without the parse authority). Once ready, paint the baseline and
+    // pull the essay list.
+    els.editor.disabled = true;
+    if (!window.ScriptoriumWasmParser) {
+      renderFatal(els, "The parser glue did not load (scriptorium/wasm-parser.js).");
+      return;
     }
-
-    loadEssays().catch(function essaysFailed(error) {
-      clearChildren(els.essaySelect);
-      els.essaySelect.appendChild(makeOption("", "Server offline"));
-      els.essaySelect.disabled = true;
-      setStatus("Could not reach the author server: " + error.message, "error");
+    window.ScriptoriumWasmParser.load("scriptorium_parser.wasm").then(function ready() {
+      parse = function parseWasm(source) {
+        return window.ScriptoriumWasmParser.parseDocument(source);
+      };
+      document.body.setAttribute("data-parse-engine", "wasm");
+      els.editor.disabled = false;
+      refreshFromBuffer(); // empty buffer → clean preview/diagnostics baseline
+      loadEssays().catch(function essaysFailed(error) {
+        clearChildren(els.essaySelect);
+        els.essaySelect.appendChild(makeOption("", "Server offline"));
+        els.essaySelect.disabled = true;
+        setStatus("Could not reach the author server: " + error.message, "error");
+      });
+      // eslint-disable-next-line no-console
+      console.info("[scriptorium] parse engine: wasm (Rust, oracle-validated byte-identical).");
+    }).catch(function failed(error) {
+      renderFatal(els, "The Rust parser (scriptorium_parser.wasm) did not load. Build it " +
+        "with `npm run wasm:editor`. Scriptorium has no JS parser fallback after the cutover.");
+      // eslint-disable-next-line no-console
+      console.error("[scriptorium] wasm parser failed to load:", error);
     });
   });
 

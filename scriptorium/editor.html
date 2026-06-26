@@ -16,14 +16,13 @@
     THE SPINE (SCRIPTORIUM.md §2): author through the ONE parse authority.
     core.js  -> the shared AST surface + normalizeAstInput (no parser of its own)
     render.js -> the real consume-side DOM renderer the deploy uses
-    parse.js  -> registers the string parser into core; allowed here because this
-                 is local author tooling, NOT the shipped site (quarantine §6
-                 forbids the site importing scriptorium, not the reverse).
-    These are the site's OWN modules. There is no editor-private parser.
+    The PARSER is the Rust core compiled to wasm (wasm-parser.js below) — after
+    the parse.js cutover (SCRIPTORIUM-RUST-PARSER.md §14.3) there is no JS parser.
+    core.js + render.js are the site's OWN modules; the parser is the shared
+    rust/ core. There is no editor-private parser.
   -->
   <script src="../scripts/ast/core.js" defer></script>
   <script src="../scripts/ast/render.js" defer></script>
-  <script src="../scripts/ast/parse.js" defer></script>
   <!-- Structural layer (SCRIPTORIUM-EDITOR.md): pure offset↔block mapping +
        AST-aware command functions (oracle-verified). Local author tooling,
        requireable in Node for tests; neither forks the parser. -->
@@ -35,9 +34,10 @@
   <script src="find-replace.js" defer></script>
   <script src="block-ops.js" defer></script>
   <script src="list-continue.js" defer></script>
-  <!-- Opt-in parse engine (?engine=wasm): the oracle-validated Rust parser as
-       wasm (SCRIPTORIUM-RUST-PARSER.md R1). Inert until editor.js loads it; the
-       default path stays on parse.js. Build it with `npm run wasm:editor`. -->
+  <!-- The ONE parser: the oracle-validated Rust core compiled to wasm
+       (SCRIPTORIUM-RUST-PARSER.md §14.3). editor.js loads it at startup and the
+       editor refuses to author until it is ready — there is no JS fallback.
+       Build it with `npm run wasm:editor`. -->
   <script src="wasm-parser.js" defer></script>
   <script src="editor.js" defer></script>
 </head>

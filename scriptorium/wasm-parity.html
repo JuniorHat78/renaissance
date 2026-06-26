@@ -4,13 +4,11 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Scriptorium — wasm parity harness</title>
-  <!-- Loads the browser AST authority (core+render+parse) AND the wasm parser,
-       so a Playwright test can parse the same inputs both ways IN A REAL BROWSER
-       and compare (SCRIPTORIUM-RUST-PARSER.md R1, closes SCRIPTORIUM.md §12
-       blocker 1: browser modules vs Node). Not shipped; lives under scriptorium/. -->
-  <script src="../scripts/ast/core.js" defer></script>
-  <script src="../scripts/ast/render.js" defer></script>
-  <script src="../scripts/ast/parse.js" defer></script>
+  <!-- Loads the wasm parser so a Playwright test can parse inputs IN A REAL
+       BROWSER and compare the result to the committed golden snapshot
+       (SCRIPTORIUM-RUST-PARSER.md §14.3; closes SCRIPTORIUM.md §12 blocker 1:
+       browser modules vs Node). After the parse.js cutover there is no
+       browser-JS parser to load — the wasm is the one parser. Not shipped. -->
   <script src="wasm-parser.js" defer></script>
 </head>
 <body>
@@ -19,11 +17,6 @@
     // Runs after the deferred scripts have executed.
     document.addEventListener("DOMContentLoaded", function () {
       var status = document.getElementById("status");
-      if (!window.RenaissanceAst || typeof window.RenaissanceAst.parseDocument !== "function") {
-        window.__parityError = "RenaissanceAst.parseDocument missing (AST modules failed to load)";
-        status.textContent = window.__parityError;
-        return;
-      }
       if (!window.ScriptoriumWasmParser) {
         window.__parityError = "ScriptoriumWasmParser missing";
         status.textContent = window.__parityError;

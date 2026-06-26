@@ -2,14 +2,13 @@
 "use strict";
 
 // R1's last mile (SCRIPTORIUM-RUST-PARSER.md §9; closes SCRIPTORIUM.md §12
-// blocker 1): in a REAL browser, parse a set of inputs with BOTH the browser AST
-// authority (core+render+parse.js globals) and the wasm parser, and assert:
-//   (a) browser-JS ≡ wasm-in-browser  — the editor's two engines agree, and
-//   (b) wasm-in-browser ≡ the committed golden snapshot (§14.3) — in-browser
-//       determinism vs the frozen JS authority, the original browser-vs-Node
-//       concern now anchored to the goldens rather than a live Node parse.
-// Structural comparison (JSON-parsed), same canonical-form contract as the other
-// oracles. Run via run-with-server (serves the project + the built/copied wasm).
+// blocker 1): in a REAL browser, parse a set of inputs with the wasm parser and
+// assert wasm-in-browser ≡ the committed golden snapshot (§14.3) — in-browser
+// determinism vs the frozen JS authority, the original browser-vs-Node concern.
+// After the parse.js cutover there is no browser-JS parser to cross-check; the
+// wasm is the one parser and the goldens are its reference. Structural comparison
+// (JSON-parsed), same canonical-form contract as the other oracles. Run via
+// run-with-server (serves the project + the built/copied wasm).
 
 const path = require("node:path");
 const { browserType, resolveBrowserName } = require("./lib/browser");
@@ -66,26 +65,20 @@ async function main() {
     const results = await page.evaluate((json) => {
       const list = JSON.parse(json);
       return list.map(function (t) {
-        return {
-          js: JSON.stringify(window.RenaissanceAst.parseDocument(t)),
-          wasm: JSON.stringify(window.ScriptoriumWasmParser.parseDocument(t)),
-        };
+        return JSON.stringify(window.ScriptoriumWasmParser.parseDocument(t));
       });
     }, inputsJson);
 
     for (let i = 0; i < inputs.length; i += 1) {
-      const browserJs = JSON.parse(results[i].js);
-      const browserWasm = JSON.parse(results[i].wasm);
+      const browserWasm = JSON.parse(results[i]);
       const golden = goldenTrees[i];
 
-      const dWasm = shared.diffDeep(browserJs, browserWasm, "$");
       const dGolden = shared.diffDeep(golden, browserWasm, "$");
-      if (dWasm || dGolden) {
+      if (dGolden) {
         failures += 1;
         if (failures <= MAX) {
           const region = i < corpus.length ? "corpus" : "adversarial";
-          if (dWasm) console.error("FAIL #" + i + " (" + region + ") browserJS≠wasm at " + dWasm.path + " — " + dWasm.why);
-          if (dGolden) console.error("FAIL #" + i + " (" + region + ") wasm≠golden at " + dGolden.path + " — " + dGolden.why);
+          console.error("FAIL #" + i + " (" + region + ") wasm≠golden at " + dGolden.path + " — " + dGolden.why);
           console.error("  input: " + shared.snippet(inputs[i]));
         }
       }
@@ -101,7 +94,7 @@ async function main() {
   }
   console.log(
     "scriptorium-wasm-browser-parity (" + resolveBrowserName() + "): " + inputs.length +
-    " inputs — browser-JS ≡ wasm-in-browser ≡ golden snapshot."
+    " inputs — wasm-in-browser ≡ golden snapshot."
   );
 }
 
