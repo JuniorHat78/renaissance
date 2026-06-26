@@ -1,16 +1,14 @@
 "use strict";
 
 // Golden reference for the parse-side equivalence oracles after the parse.js
-// cutover (SCRIPTORIUM-RUST-PARSER.md §14.3). Loads the committed JS
-// parseDocument snapshots (scripts/tests/goldens/parse-ast.json, produced by
-// generate-ast-goldens.js) and the index-aligned inputs, so the Rust parser is
-// compared against a frozen snapshot of the (now-retired) JS authority rather
-// than a live parse.js. The live differential already proved Rust ≡ JS; this is
-// the standing regression guard.
-//
-// The golden is index-aligned with shared.allInputs() at a FIXED fuzz count, so
-// we force SCRIPTORIUM_FUZZ to that count while reproducing the inputs (then
-// restore it), regardless of how high CI cranked the live-fuzz knob elsewhere.
+// cutover (SCRIPTORIUM-RUST-PARSER.md §14.3). The committed, FROZEN snapshot
+// (scripts/tests/goldens/parse-ast.json) holds the inputs AND the JS
+// parseDocument output for each, so the Rust parser is compared against a frozen
+// snapshot of the (now-deleted) JS authority rather than a live parse.js. The
+// live differential already proved Rust ≡ JS; this is the standing regression
+// guard, and it is fully self-contained — it no longer reconstructs inputs from
+// raw/, so a later corpus change cannot make it stale (and there is no JS parser
+// left to regenerate it from). See generate-ast-goldens.js (retired with parse.js).
 
 const fs = require("node:fs");
 const path = require("node:path");
@@ -20,41 +18,22 @@ const GOLDEN_PATH = path.join(shared.ROOT, "scripts", "tests", "goldens", "parse
 
 function loadGoldens() {
   if (!fs.existsSync(GOLDEN_PATH)) {
-    throw new Error(
-      "Missing AST goldens at " + path.relative(shared.ROOT, GOLDEN_PATH) +
-      " — generate them: node scripts/tests/generate-ast-goldens.js"
-    );
+    throw new Error("Missing AST goldens at " + path.relative(shared.ROOT, GOLDEN_PATH) + ".");
   }
   const golden = JSON.parse(fs.readFileSync(GOLDEN_PATH, "utf8"));
+  const inputs = golden.inputs;
+  const c = golden.counts;
 
-  // Reproduce exactly the inputs the golden was built from (it baked a fixed
-  // fuzz count); leave the ambient SCRIPTORIUM_FUZZ untouched for other callers.
-  const prev = process.env.SCRIPTORIUM_FUZZ;
-  process.env.SCRIPTORIUM_FUZZ = String(golden.fuzz);
-  let sets;
-  try {
-    sets = shared.allInputs();
-  } finally {
-    if (prev === undefined) {
-      delete process.env.SCRIPTORIUM_FUZZ;
-    } else {
-      process.env.SCRIPTORIUM_FUZZ = prev;
-    }
+  if (!Array.isArray(inputs) || !Array.isArray(golden.asts) || inputs.length !== golden.asts.length) {
+    throw new Error("AST goldens are malformed (inputs/asts length mismatch).");
   }
 
-  if (sets.inputs.length !== golden.asts.length) {
-    throw new Error(
-      "AST goldens are stale: " + golden.asts.length + " snapshots vs " +
-      sets.inputs.length + " inputs (did raw/ change?). Regenerate: " +
-      "node scripts/tests/generate-ast-goldens.js"
-    );
-  }
-
+  // Slice the frozen input list back into its regions via the recorded counts.
   return {
-    corpus: sets.corpus,
-    adversarial: sets.adversarial,
-    fuzz: sets.fuzz,
-    inputs: sets.inputs,
+    corpus: inputs.slice(0, c.corpus),
+    adversarial: inputs.slice(c.corpus, c.corpus + c.adversarial),
+    fuzz: inputs.slice(c.corpus + c.adversarial),
+    inputs: inputs,
     // Parsed reference ASTs (bare parseDocument shape: sourceName === null).
     trees: golden.asts.map(function parse(s) { return JSON.parse(s); }),
     // The compact canonical JSON strings, untouched (some oracles re-project).

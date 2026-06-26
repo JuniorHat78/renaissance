@@ -2,10 +2,12 @@
 //
 // The shared spine and every consume-side projection: type constants, escaping,
 // passage records, searchable-text and legacy projections, plus normalizeAstInput.
-// It never tokenizes text — turning a string or legacy blocks into an AST is
-// delegated to a parser registered by ast/parse.js (absent in the browser, where
-// the reader only ever hands in already-parsed ASTs). Loaded first in the browser
-// shells; in Node it is folded into ast/index.js. See docs/specs/AST-COMPILER.md.
+// It never tokenizes text — turning a string into an AST is delegated to a parser
+// registered at load (in Node, the Rust wasm via ast/parse-wasm.js; absent in the
+// browser, where the reader only ever hands in already-parsed ASTs). Loaded first
+// in the browser shells; in Node it is folded into ast/index.js. The JS parser
+// (parse.js) was retired at the cutover (SCRIPTORIUM-RUST-PARSER.md §14.3). See
+// docs/specs/AST-COMPILER.md.
 (function initRenaissanceAstCore(root, factory) {
   if (typeof module === "object" && module.exports) {
     module.exports = factory();
@@ -374,10 +376,11 @@
   let stringParser = null;
   let legacyConverter = null;
 
-  // parse.js registers these at load. They stay null in the browser (parse.js
-  // is not shipped) — normalizeAstInput then only accepts already-parsed ASTs,
-  // which is exactly the reader's contract. A string/legacy input in the
-  // browser is a programming error and fails loudly.
+  // In Node, ast/parse-wasm.js registers the wasm string parser here at load.
+  // Both stay null in the browser (no parser is shipped) — normalizeAstInput then
+  // only accepts already-parsed ASTs, which is exactly the reader's contract. A
+  // string/legacy input in the browser is a programming error and fails loudly.
+  // (The legacy converter retired with parse.js: nothing registers it anymore.)
   function registerStringParser(fn) {
     stringParser = fn;
   }
@@ -398,7 +401,7 @@
     if (Array.isArray(input)) {
       if (!input.length || isLegacyBlock(input[0])) {
         if (!legacyConverter) {
-          throw new Error("RenaissanceAst: legacy block input requires the parser (ast/parse.js), which is not loaded.");
+          throw new Error("RenaissanceAst: legacy block input requires the legacy converter, which retired with parse.js (no consumer).");
         }
         return legacyConverter(input);
       }
@@ -408,7 +411,7 @@
 
     if (typeof input === "string") {
       if (!stringParser) {
-        throw new Error("RenaissanceAst: string input requires the parser (ast/parse.js), which is not loaded.");
+        throw new Error("RenaissanceAst: string input requires the parser (ast/parse-wasm.js in Node; none in the browser), which is not loaded.");
       }
       return stringParser(input);
     }

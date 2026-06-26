@@ -25,7 +25,6 @@ on:
       - "scripts/tests/scriptorium-wasm-browser-parity.js"
       - "scripts/tests/lib/parser-oracle-corpus.js"
       - "scripts/tests/lib/parse-goldens.js"
-      - "scripts/tests/generate-ast-goldens.js"
       - "scripts/tests/goldens/parse-ast.json"
       - "scripts/tests/rust-content-ast-oracle.js"
       - "scripts/generate-content-ast.js"
@@ -51,7 +50,6 @@ on:
       - "scripts/tests/scriptorium-wasm-browser-parity.js"
       - "scripts/tests/lib/parser-oracle-corpus.js"
       - "scripts/tests/lib/parse-goldens.js"
-      - "scripts/tests/generate-ast-goldens.js"
       - "scripts/tests/goldens/parse-ast.json"
       - "scripts/tests/rust-content-ast-oracle.js"
       - "scripts/generate-content-ast.js"
@@ -199,20 +197,10 @@ jobs:
       - name: Rust search index ≡ JS data/search-index.json
         run: rust/target/release/scriptorium-search-index --check
 
-  # The committed AST goldens must stay current with the corpus + the JS parser
-  # (SCRIPTORIUM-RUST-PARSER.md §14.3). The parse-side oracles compare the Rust
-  # parser against these snapshots, so a stale golden would silently weaken the
-  # guard — this regenerates from parse.js and byte-compares, a deterministic
-  # gate. (Retired together with parse.js + the generator at cutover step f.)
-  goldens:
-    name: AST goldens are current
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - run: node scripts/tests/generate-ast-goldens.js --check
+  # (The `goldens` --check gate retired with parse.js at cutover step f: the
+  # goldens are now a FROZEN, self-contained snapshot of the historical JS parser
+  # — inputs baked in — with no JS parser left to regenerate them from. The
+  # parse-side oracles compare the Rust parser against that frozen snapshot.)
 
   # Heavy seeded fuzz against every wasm oracle (compute is not a constraint).
   heavy-fuzz:

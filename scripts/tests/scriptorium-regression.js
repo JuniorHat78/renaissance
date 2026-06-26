@@ -735,7 +735,6 @@ if (!haveCompiledDir) {
     const at = (needle) => html.indexOf(needle);
     const core = at('src="../scripts/ast/core.js"');
     const render = at('src="../scripts/ast/render.js"');
-    const parse = at('src="../scripts/ast/parse.js"');
     const mapping = at('src="mapping.js"');
     const commands = at('src="commands.js"');
     const wasm = at('src="wasm-parser.js"');
@@ -749,17 +748,20 @@ if (!haveCompiledDir) {
       "list-continue.js": at('src="list-continue.js"'),
     };
 
+    // After the parse.js cutover (§14.3) the editor authors through the ONE parser:
+    // the Rust core as wasm. core.js + render.js are the consume spine; parse.js is
+    // gone and must NOT reappear.
     assert.ok(core !== -1, "editor.html does not load core.js");
     assert.ok(render !== -1, "editor.html does not load render.js");
-    assert.ok(parse !== -1, "editor.html does not load parse.js (the editor authors through the one parser)");
+    assert.ok(wasm !== -1, "editor.html does not load wasm-parser.js (the one parser)");
     assert.ok(editor !== -1, "editor.html does not load editor.js");
+    assert.ok(at('src="../scripts/ast/parse.js"') === -1, "editor.html must NOT load the deleted parse.js");
 
     assert.ok(core < render, "editor.html must load core before render");
-    assert.ok(render < parse, "editor.html must load render before parse");
-    assert.ok(parse < editor, "editor.html must load parse before editor.js");
+    assert.ok(render < editor, "editor.html must load render before editor.js");
+    assert.ok(wasm < editor, "wasm-parser.js must load before editor.js (the parser)");
     if (mapping !== -1) assert.ok(mapping < editor, "mapping.js must load before editor.js");
     if (commands !== -1) assert.ok(commands < editor, "commands.js must load before editor.js");
-    if (wasm !== -1) assert.ok(wasm < editor, "wasm-parser.js must load before editor.js (engine swap)");
     Object.keys(feature).forEach(function each(name) {
       if (feature[name] !== -1) {
         assert.ok(feature[name] < editor, name + " must load before editor.js");

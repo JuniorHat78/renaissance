@@ -13,7 +13,9 @@
 // The author API (/api/*) and all non-GET requests are never intercepted — they
 // must always hit the live server that reads and writes the disk.
 
-const CACHE = "scriptorium-shell-v1";
+// v2: dropped the deleted parse.js, added the wasm parser (glue + .wasm). The
+// new name evicts any stale shell that still lists parse.js.
+const CACHE = "scriptorium-shell-v2";
 const SHELL = [
   "/scriptorium/editor.html",
   "/scriptorium/editor.css",
@@ -24,7 +26,10 @@ const SHELL = [
   "/scriptorium/icon.svg",
   "/scripts/ast/core.js",
   "/scripts/ast/render.js",
-  "/scripts/ast/parse.js",
+  // The parser is the Rust core as wasm (the parse.js cutover, §14.3): precache
+  // the glue + the .wasm so the offline editor can still parse/preview.
+  "/scriptorium/wasm-parser.js",
+  "/scriptorium/scriptorium_parser.wasm",
 ];
 
 self.addEventListener("install", (event) => {

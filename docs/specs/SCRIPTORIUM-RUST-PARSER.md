@@ -797,3 +797,16 @@ JS reference until `parse.js` is deleted at step (f).
 **Coupling introduced:** the Node build/test toolchain now requires the wasm built
 (`npm run build:rust-wasm`) before anything parses. CI builds it in every job that
 runs the parsing suites or `build:artifacts`.
+
+**(3) Step f landed — `parse.js` deleted, goldens frozen.** With every consumer off
+it, `scripts/ast/parse.js` and `generate-ast-goldens.js` are deleted. The golden
+file (`parse-ast.json`) was regenerated one last time with the **raw inputs baked
+in**, so it is a self-contained frozen snapshot of the historical JS parser:
+`parse-goldens.js` reads inputs *and* reference trees from it (no longer
+reconstructing inputs from `raw/`), and the `goldens` `--check` CI gate retired
+(there is no JS parser left to regenerate from). The editor's `sw.js` precache
+swapped `parse.js` for the wasm glue + `.wasm` (cache bumped v2); the editor-load
+regression now asserts `parse.js` is **absent** and the wasm parser present. The
+one parser is the Rust core. (Step e — flipping `build:artifacts`/`pages.yml` to the
+native bins — is the remaining "remove Node from the deploy" move; the build is
+already off the JS *parser*, this removes the JS *generators*.)

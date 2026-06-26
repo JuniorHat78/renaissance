@@ -5,12 +5,12 @@
 // Rust core (rust/), compiled to wasm. This module sources parseDocument from
 // that wasm in Node.
 //
-// It is deliberately self-contained — it does NOT reach into scriptorium/ (the
-// editor app has its own browser glue, scriptorium/wasm-parser.js). Keeping the
-// build/test parser dependent only on rust/ is what lets the §6 quarantine hold:
-// the shipped build needs the Rust core, never the author tooling. The ~20 lines
-// of marshalling below mirror that glue exactly and are held byte-identical to
-// the old JS authority by the equivalence oracles + goldens.
+// It is deliberately self-contained — it depends ONLY on rust/ (the wasm) and
+// never on the editor app, which has its own browser glue. Keeping the build/test
+// parser dependent only on the Rust core is what lets the §6 quarantine hold: the
+// shipped build needs rust/, never the author tooling. The ~20 lines of
+// marshalling below are held byte-identical to the old JS authority by the
+// equivalence oracles + goldens.
 //
 // The wasm is instantiated lazily on the first parse (synchronously, off the
 // browser main thread), so merely requiring ast/index.js for core/render/validate
@@ -27,23 +27,15 @@ const core = require("./core.js");
 const ROOT = path.join(__dirname, "..", "..");
 const decoder = new TextDecoder("utf-8");
 
-// Honour an explicit override (the oracles set this), then the release wasm under
-// the cargo target, then the copy `npm run wasm:editor` drops next to the editor.
+// Honour an explicit override (the oracles set this), else the release wasm under
+// the cargo target. rust/ only — never the editor app's copy, so the build/test
+// parser carries no author-tooling dependency (§6).
 function resolveWasmPath() {
   const override = process.env.SCRIPTORIUM_PARSER_WASM;
   if (override && override.trim()) {
     return path.resolve(override.trim());
   }
-  const candidates = [
-    path.join(ROOT, "rust", "target", "wasm32-unknown-unknown", "release", "scriptorium_parser.wasm"),
-    path.join(ROOT, "scriptorium", "scriptorium_parser.wasm"),
-  ];
-  for (const candidate of candidates) {
-    if (fs.existsSync(candidate)) {
-      return candidate;
-    }
-  }
-  return candidates[0];
+  return path.join(ROOT, "rust", "target", "wasm32-unknown-unknown", "release", "scriptorium_parser.wasm");
 }
 
 let wasmExports = null;
