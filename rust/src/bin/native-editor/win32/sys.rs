@@ -69,6 +69,10 @@ pub fn dpi_per_monitor_aware_v2() -> DPI_AWARENESS_CONTEXT {
     (-4isize) as DPI_AWARENESS_CONTEXT
 }
 
+// EndDraw / Present return this when the device is lost (driver update, RDP, sleep);
+// the render target + its resources must be recreated. HRESULT is signed, so cast.
+pub const D2DERR_RECREATE_TARGET: HRESULT = 0x8899_000Cu32 as i32;
+
 // D2D / DWrite factory enum values + brush/draw options we pass.
 pub const D2D1_FACTORY_TYPE_SINGLE_THREADED: u32 = 0;
 pub const DWRITE_FACTORY_TYPE_SHARED: u32 = 0;
@@ -583,6 +587,8 @@ extern "system" {
         cy: i32,
         flags: u32,
     ) -> BOOL;
+    pub fn SendMessageW(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT;
+    pub fn DestroyWindow(hwnd: HWND) -> BOOL;
 }
 
 #[cfg(windows)]
@@ -610,4 +616,51 @@ extern "system" {
         iid: *const GUID,
         factory: *mut *mut c_void,
     ) -> HRESULT;
+}
+
+// --- ABI layout guards (the deterministic FFI hardening) --------------------
+// The scariest class of COM-from-raw-Rust bug is a *silently* miscounted vtable: a
+// typed method landing at the wrong slot calls the wrong function pointer (UB). These
+// tests assert, against our own `#[repr(C)]` types (no DWrite needed), that every method
+// we call sits at exactly `slot * pointer_size`, and that each by-value struct has its
+// real ABI size. If a placeholder count ever drifts, this fails loudly and locally
+// instead of corrupting at runtime. The slot numbers mirror the `// N` comments above.
+#[cfg(test)]
+mod layout_tests {
+    use super::*;
+    use core::mem::{offset_of, size_of};
+
+    // Vtable slots are pointer-sized; on the 64-bit CI targets this is 8.
+    const P: usize = size_of::<usize>();
+
+    #[test]
+    fn vtable_slots_match_com_order() {
+        assert_eq!(offset_of!(ID2D1FactoryVtbl, create_hwnd_render_target), 14 * P);
+
+        assert_eq!(offset_of!(ID2D1HwndRenderTargetVtbl, create_solid_color_brush), 8 * P);
+        assert_eq!(offset_of!(ID2D1HwndRenderTargetVtbl, fill_rectangle), 17 * P);
+        assert_eq!(offset_of!(ID2D1HwndRenderTargetVtbl, draw_text_layout), 29 * P);
+        assert_eq!(offset_of!(ID2D1HwndRenderTargetVtbl, clear), 48 * P);
+        assert_eq!(offset_of!(ID2D1HwndRenderTargetVtbl, begin_draw), 49 * P);
+        assert_eq!(offset_of!(ID2D1HwndRenderTargetVtbl, end_draw), 50 * P);
+        assert_eq!(offset_of!(ID2D1HwndRenderTargetVtbl, set_dpi), 52 * P);
+        assert_eq!(offset_of!(ID2D1HwndRenderTargetVtbl, resize), 59 * P);
+
+        assert_eq!(offset_of!(IDWriteFactoryVtbl, create_text_format), 15 * P);
+        assert_eq!(offset_of!(IDWriteFactoryVtbl, create_text_layout), 18 * P);
+
+        assert_eq!(offset_of!(IDWriteTextLayoutVtbl, hit_test_text_position), 65 * P);
+    }
+
+    #[test]
+    fn value_struct_sizes_match_abi() {
+        assert_eq!(size_of::<GUID>(), 16);
+        assert_eq!(size_of::<D2D1_COLOR_F>(), 16);
+        assert_eq!(size_of::<D2D_POINT_2F>(), 8);
+        assert_eq!(size_of::<D2D1_RECT_F>(), 16);
+        assert_eq!(size_of::<D2D1_SIZE_U>(), 8);
+        assert_eq!(size_of::<D2D1_PIXEL_FORMAT>(), 8);
+        // 9 four-byte fields, no padding.
+        assert_eq!(size_of::<DWRITE_HIT_TEST_METRICS>(), 36);
+    }
 }
