@@ -19,8 +19,9 @@
 > Builds on the shipped `rust/` core (parser cutover complete; `SCRIPTORIUM-RUST-PARSER.md`
 > §14). The JS⇄wasm boundary is measured and closed (`SCRIPTORIUM-WASM-MARSHALLING.md`).
 >
-> Status: **in design.** First build target: the platform/render walking skeleton (§7).
-> Last refreshed: 2026-06-27.
+> Status: **building — N0 shipped.** The platform/render walking skeleton (§7) is
+> built and CI-validated on real Windows (COM-from-raw-Rust verdict: tolerable — §8);
+> N1 (the text buffer) is next. Last refreshed: 2026-06-27.
 
 ---
 
@@ -198,11 +199,14 @@ go deep component-by-component. Rationale: retire the existential FFI/COM risk i
 one; give the feel-loop a substrate immediately; write the deep specs against a real
 skeleton, not speculation. Each phase below spawns its own JIT component spec.
 
-- **N0 — Platform/render walking skeleton.** `[spec written → SCRIPTORIUM-NATIVE-SKELETON.md]`
+- **N0 — Platform/render walking skeleton.** `[BUILT + CI-validated → SCRIPTORIUM-NATIVE-SKELETON.md]`
   A window, a DirectWrite-rendered buffer of text, a blinking caret, keyboard input,
   parsing through `rust/` in-process. Hand-roll exactly the Win32 + COM/DWrite bindings
   this needs. **Exit:** you can type into a real native window and see rendered prose
   with a live AST signal, and the COM-FFI question is answered. Unlocks the feel-loop.
+  **Done (2026-06-27):** the bin tree links against real d2d1/dwrite/user32/kernel32 on
+  `windows-latest` (stable + beta) and the geometry oracle passes on real DirectWrite —
+  **COM-from-raw-Rust is tolerable** (§8). Next: N1.
 - **N1 — Text buffer.** Choose + build the buffer (rope vs piece-tree — the real
   decision), with edits, undo-minimal, and the parse re-driven on edit.
 - **N2 — Input correctness.** Grapheme-cluster caret movement, line breaking, IME,
@@ -230,6 +234,8 @@ sequencing lives in this section because it is coupled to the architecture.)
 | 2026-06-27 | **Windows-first**, thin platform seam, no speculative cross-platform abstraction | De-risk one platform; leave a seam, don't build the abstraction blind. |
 | 2026-06-27 | Reuse `rust/` parser **in-process**; render path is **new** | Parser is shipped + oracle-validated; `render.rs` (HTML) is not reusable natively. |
 | 2026-06-27 | **Skeleton first** (breadth-thin-then-depth) | Retires the COM-FFI existential risk early; unlocks the feel-loop; makes deep specs real. |
+| 2026-06-27 | **VERDICT — COM-from-raw-Rust is tolerable** (N0 finding) | The hand-rolled vtables (typed only at called slots, IUnknown-first), GUIDs, externs, and by-value `D2D_POINT_2F` link + run correctly on real Windows (stable+beta); the geometry oracle passes on real DirectWrite. The hand-rolled-bindings line (§3) holds in practice. Consume-only COM was the right scope. |
+| 2026-06-27 | N0 renders via **Direct2D `DrawTextLayout`** (consume-only); **CPU-framebuffer surface decision re-opened** | The honest CPU-fb + DWrite path needs an `IDWriteTextRenderer` COM *callback* (the deferred hard risk); N0 took the lowest-risk route to validated pixels instead. This **supersedes the "CPU/software framebuffer to start" row above** as the *starting* surface; the CPU-fb-vs-D2D choice now lands informed by COM-callback difficulty around ~N3, not a-priori. |
 
 ## 9. Open forks (deliberately unresolved)
 

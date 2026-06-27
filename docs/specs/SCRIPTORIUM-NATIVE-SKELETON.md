@@ -12,7 +12,12 @@
 > needs — no more — declared, vendored, and auditable in our own tree (no
 > `windows-sys`; `SCRIPTORIUM-NATIVE-EDITOR.md` §3).
 >
-> Status: **spec / not started.** Last refreshed: 2026-06-27.
+> Status: **built — under CI validation.** The bin tree
+> (`rust/src/bin/native-editor/`) is implemented to this spec and type-checks +
+> clippy-checks clean locally (`cargo check`, the no-link path that still compiles
+> the real Windows `cfg`); the link proof and the live GUI are validated on the
+> `windows-latest` Actions job (`scriptorium-native.yml`), since this laptop has no
+> MSVC linker. Last refreshed: 2026-06-27.
 
 ---
 
