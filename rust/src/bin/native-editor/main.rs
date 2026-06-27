@@ -14,6 +14,10 @@
 
 #![cfg_attr(not(windows), allow(unused))]
 
+// Platform-independent: the rope buffer + its cross-platform fuzz oracle compile and run
+// everywhere (no Win32/DWrite), so it is NOT gated to Windows.
+mod buffer;
+
 #[cfg(windows)]
 mod app;
 #[cfg(windows)]

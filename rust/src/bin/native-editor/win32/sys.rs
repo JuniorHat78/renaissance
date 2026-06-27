@@ -46,11 +46,19 @@ pub const WM_CREATE: u32 = 0x0001;
 pub const WM_DESTROY: u32 = 0x0002;
 pub const WM_SIZE: u32 = 0x0005;
 pub const WM_PAINT: u32 = 0x000F;
+pub const WM_KEYDOWN: u32 = 0x0100;
 pub const WM_CHAR: u32 = 0x0102;
 pub const WM_TIMER: u32 = 0x0113;
 pub const WM_NCCREATE: u32 = 0x0081;
 pub const WM_NCDESTROY: u32 = 0x0082;
 pub const WM_DPICHANGED: u32 = 0x02E0;
+
+// Virtual-key codes for caret movement (delivered by WM_KEYDOWN). Up/Down need
+// layout-aware geometry and are N3; N1 handles only horizontal + line edges.
+pub const VK_END: u32 = 0x23;
+pub const VK_HOME: u32 = 0x24;
+pub const VK_LEFT: u32 = 0x25;
+pub const VK_RIGHT: u32 = 0x27;
 
 pub const SWP_NOZORDER: u32 = 0x0004;
 pub const SWP_NOACTIVATE: u32 = 0x0010;

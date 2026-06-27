@@ -14,7 +14,7 @@ use core::ptr::{null, null_mut};
 
 use sys::*;
 
-use crate::app::App;
+use crate::app::{App, Motion};
 use crate::render::Renderer;
 
 /// Per-window state, owned by the window via GWLP_USERDATA.
@@ -134,6 +134,22 @@ unsafe extern "system" fn wndproc(
             state.caret_visible = true;
             InvalidateRect(hwnd, null(), 0);
             0
+        }
+        WM_KEYDOWN => {
+            let motion = match wparam as u32 {
+                VK_LEFT => Some(Motion::Left),
+                VK_RIGHT => Some(Motion::Right),
+                VK_HOME => Some(Motion::Home),
+                VK_END => Some(Motion::End),
+                _ => None,
+            };
+            if let Some(m) = motion {
+                state.app.move_caret(m);
+                state.caret_visible = true;
+                InvalidateRect(hwnd, null(), 0);
+            }
+            // Let DefWindowProc run too (so system keys still behave).
+            DefWindowProcW(hwnd, msg, wparam, lparam)
         }
         WM_TIMER => {
             if wparam == CARET_TIMER_ID {

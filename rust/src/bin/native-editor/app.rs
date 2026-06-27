@@ -1,76 +1,203 @@
-//! Editor state — the platform-independent half of the seam. No Win32, no COM:
-//! a buffer, a caret, and the last parse signal. `win32` feeds it input events and
-//! `render` reads it; neither leaks OS types in here.
+//! Editor state — the platform-independent half of the seam. No Win32, no COM. It owns
+//! the rope buffer, a movable caret, undo/redo, and the last parse signal; `win32` feeds
+//! it input events (as our own `Motion`/char types, never OS types) and `render` reads it.
 //!
-//! N0's buffer is a naive `Vec<u16>` of UTF-16 code units. A real text buffer
-//! (rope / piece-tree) is N1. The point worth keeping: the buffer is already UTF-16,
-//! so it feeds `parse_document(&[u16])` with ZERO conversion — the native ergonomics
-//! the in-process path was for (SCRIPTORIUM-NATIVE-SKELETON.md §3).
+//! The rope (`buffer`) and a flat materialization (`text`) coexist on purpose
+//! (SCRIPTORIUM-NATIVE-BUFFER.md §7): the rope gives O(1) undo snapshots, O(1) async-ready
+//! views, and native coordinates; `text` is the current materialization that the parser
+//! and renderer consume (both already O(n), so re-materializing per edit is free relative
+//! to the reparse). N1's caret moves by code point; grapheme clusters/IME/selection are N2.
 
+use crate::buffer::{Snapshot, TextBuffer};
 use scriptorium_parser::parse_document;
 use std::time::Instant;
 
-/// The AST-derived signal shown in the status line — the proof the parse loop is
-/// closed end to end (buffer -> rust/ core -> pixels), not a real editor surface yet.
+/// AST-derived signal shown in the status line — proof the parse loop is closed.
 pub struct ParseSignal {
     pub blocks: usize,
     pub words: usize,
     pub parse_micros: u128,
 }
 
+/// A caret motion, expressed in our own terms (the platform layer maps VK codes to these).
+#[derive(Clone, Copy, PartialEq)]
+pub enum Motion {
+    Left,
+    Right,
+    Home,
+    End,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum EditKind {
+    Insert,
+    Delete,
+}
+
+/// One undo/redo checkpoint: an O(1) rope snapshot plus where the caret was.
+struct Checkpoint {
+    snap: Snapshot,
+    caret: usize,
+}
+
 pub struct App {
-    /// UTF-16 code units. N0 only ever appends/pops at `caret` (== end-of-buffer);
-    /// caret movement and selection are N2.
-    pub buffer: Vec<u16>,
-    /// Insertion index into `buffer`. N0 keeps it pinned at `buffer.len()`.
+    buffer: TextBuffer,
+    /// Current materialization of `buffer` — the render/parse feed, refreshed on edit.
+    pub text: Vec<u16>,
+    /// Caret as a UTF-16 offset into `text`.
     pub caret: usize,
-    pub signal: ParseSignal,
+    undo: Vec<Checkpoint>,
+    redo: Vec<Checkpoint>,
+    /// Which kind of edit the current undo group is, if a run is open (for grouping).
+    group: Option<EditKind>,
+    signal: ParseSignal,
+}
+
+fn is_high_surrogate(u: u16) -> bool {
+    (0xD800..=0xDBFF).contains(&u)
+}
+fn is_low_surrogate(u: u16) -> bool {
+    (0xDC00..=0xDFFF).contains(&u)
 }
 
 impl App {
     pub fn new() -> App {
         let mut app = App {
-            buffer: Vec::new(),
+            buffer: TextBuffer::new(),
+            text: Vec::new(),
             caret: 0,
+            undo: Vec::new(),
+            redo: Vec::new(),
+            group: None,
             signal: ParseSignal { blocks: 0, words: 0, parse_micros: 0 },
         };
-        app.reparse();
+        app.refresh();
         app
     }
 
-    /// Translate a `WM_CHAR` code unit into an edit. Printable units are inserted;
-    /// Backspace deletes; Enter inserts a newline; other control units are ignored.
+    /// A `WM_CHAR` code unit: printable inserts, Backspace/Enter edit, Ctrl+Z/Y undo/redo.
     pub fn input_char(&mut self, unit: u16) {
         match unit {
-            0x08 => self.backspace(),       // Backspace
-            0x0D => self.insert_unit(0x0A), // Enter (CR) -> LF newline
-            0x0A => {}                      // lone LF (e.g. Ctrl+Enter) — ignore
-            0x7F => {}                      // DEL (Ctrl+Backspace) — ignore for N0
-            c if c >= 0x20 => self.insert_unit(c),
+            0x08 => self.backspace(),    // Backspace
+            0x0D => self.newline(),      // Enter (CR)
+            0x1A => self.undo(),         // Ctrl+Z
+            0x19 => self.redo(),         // Ctrl+Y
+            0x0A | 0x7F => {}            // lone LF / DEL — ignore
+            c if c >= 0x20 => self.type_unit(c),
             _ => {} // other C0 control units
         }
     }
 
-    fn insert_unit(&mut self, unit: u16) {
-        self.buffer.insert(self.caret, unit);
+    /// Move the caret by one code point (surrogate-pair-aware) or to the line edge. Closes
+    /// the current undo group so the next edit starts a fresh checkpoint.
+    pub fn move_caret(&mut self, motion: Motion) {
+        match motion {
+            Motion::Left => {
+                if self.caret >= 2
+                    && is_low_surrogate(self.text[self.caret - 1])
+                    && is_high_surrogate(self.text[self.caret - 2])
+                {
+                    self.caret -= 2;
+                } else if self.caret > 0 {
+                    self.caret -= 1;
+                }
+            }
+            Motion::Right => {
+                let len = self.text.len();
+                if self.caret + 1 < len
+                    && is_high_surrogate(self.text[self.caret])
+                    && is_low_surrogate(self.text[self.caret + 1])
+                {
+                    self.caret += 2;
+                } else if self.caret < len {
+                    self.caret += 1;
+                }
+            }
+            Motion::Home => {
+                while self.caret > 0 && self.text[self.caret - 1] != 0x000A {
+                    self.caret -= 1;
+                }
+            }
+            Motion::End => {
+                let len = self.text.len();
+                while self.caret < len && self.text[self.caret] != 0x000A {
+                    self.caret += 1;
+                }
+            }
+        }
+        self.group = None;
+    }
+
+    fn type_unit(&mut self, unit: u16) {
+        self.begin_group(EditKind::Insert);
+        self.buffer.insert(self.caret, &[unit]);
         self.caret += 1;
-        self.reparse();
+        self.refresh();
+    }
+
+    fn newline(&mut self) {
+        self.begin_group(EditKind::Insert);
+        self.buffer.insert(self.caret, &[0x000A]);
+        self.caret += 1;
+        self.group = None; // break the undo run at line boundaries
+        self.refresh();
     }
 
     fn backspace(&mut self) {
-        if self.caret > 0 {
-            self.caret -= 1;
-            self.buffer.remove(self.caret);
-            self.reparse();
+        if self.caret == 0 {
+            return;
+        }
+        self.begin_group(EditKind::Delete);
+        let n = if self.caret >= 2
+            && is_low_surrogate(self.text[self.caret - 1])
+            && is_high_surrogate(self.text[self.caret - 2])
+        {
+            2
+        } else {
+            1
+        };
+        self.buffer.delete(self.caret - n..self.caret);
+        self.caret -= n;
+        self.refresh();
+    }
+
+    /// Open a new undo group (push a pre-edit checkpoint) when the edit kind changes.
+    fn begin_group(&mut self, kind: EditKind) {
+        if self.group != Some(kind) {
+            self.undo.push(Checkpoint { snap: self.buffer.snapshot(), caret: self.caret });
+            self.redo.clear();
+            self.group = Some(kind);
         }
     }
 
-    /// Reparse the whole buffer through the `rust/` core in-process and refresh the
-    /// signal. At ~580µs/section (SCRIPTORIUM-WASM-MARSHALLING.md) a synchronous
-    /// reparse-per-keystroke on the UI thread is imperceptible for N0; off-thread is N4.
-    fn reparse(&mut self) {
+    fn undo(&mut self) {
+        if let Some(cp) = self.undo.pop() {
+            self.redo.push(Checkpoint { snap: self.buffer.snapshot(), caret: self.caret });
+            self.buffer.restore(&cp.snap);
+            self.caret = cp.caret.min(self.buffer.len());
+            self.group = None;
+            self.refresh();
+        }
+    }
+
+    fn redo(&mut self) {
+        if let Some(cp) = self.redo.pop() {
+            self.undo.push(Checkpoint { snap: self.buffer.snapshot(), caret: self.caret });
+            self.buffer.restore(&cp.snap);
+            self.caret = cp.caret.min(self.buffer.len());
+            self.group = None;
+            self.refresh();
+        }
+    }
+
+    /// Re-materialize `text` from the rope and re-drive the parse. Clamps the caret.
+    fn refresh(&mut self) {
+        self.text = self.buffer.to_units();
+        if self.caret > self.text.len() {
+            self.caret = self.text.len();
+        }
         let start = Instant::now();
-        let doc = parse_document(&self.buffer);
+        let doc = parse_document(&self.text);
         let parse_micros = start.elapsed().as_micros();
         self.signal = ParseSignal {
             blocks: doc.stats_blocks,
@@ -79,14 +206,18 @@ impl App {
         };
     }
 
-    /// The status-line text: the AST signal + raw buffer size.
+    /// The status line: caret Ln/Col (from the rope's line summary) + the AST signal.
     pub fn status_text(&self) -> String {
+        let line = self.buffer.line_of_offset(self.caret);
+        let col = self.caret - self.buffer.offset_of_line(line);
         format!(
-            "{} blocks \u{00B7} {} words \u{00B7} parsed in {} \u{00B5}s \u{00B7} {} units",
+            "Ln {}, Col {}  \u{00B7}  {} blocks \u{00B7} {} words \u{00B7} parsed in {} \u{00B5}s \u{00B7} {} units",
+            line + 1,
+            col + 1,
             self.signal.blocks,
             self.signal.words,
             self.signal.parse_micros,
-            self.buffer.len()
+            self.text.len()
         )
     }
 }

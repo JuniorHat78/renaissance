@@ -37,6 +37,8 @@ jobs:
       fail-fast: false
       matrix:
         toolchain: [stable, beta]
+    env:
+      SCRIPTORIUM_FUZZ: "50000"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
@@ -52,18 +54,20 @@ jobs:
           restore-keys: ${{ runner.os }}-${{ matrix.toolchain }}-native-
       - name: Build the native editor (proves the hand-rolled externs link)
         run: cargo build --release --manifest-path rust/Cargo.toml --bin scriptorium-native-editor
-      - name: Layout-geometry oracle (monotonic caret x on real DirectWrite)
+      - name: Oracles — geometry (real DirectWrite) + buffer (model-based fuzz)
         run: cargo test --manifest-path rust/Cargo.toml --bin scriptorium-native-editor
 
   # The stub must keep the workspace building where there is no Win32 (Linux/macOS CI
   # builds the wasm + generator bins; the native bin must not break them).
   stub-builds:
-    name: non-windows stub builds (${{ matrix.os }})
+    name: non-windows stub builds + buffer oracle (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
+    env:
+      SCRIPTORIUM_FUZZ: "50000"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -79,3 +83,5 @@ jobs:
         run: |
           cargo build --manifest-path rust/Cargo.toml --bin scriptorium-native-editor
           cargo run --manifest-path rust/Cargo.toml --bin scriptorium-native-editor
+      - name: Buffer oracle (model-based fuzz — pure logic, no DWrite)
+        run: cargo test --manifest-path rust/Cargo.toml --bin scriptorium-native-editor

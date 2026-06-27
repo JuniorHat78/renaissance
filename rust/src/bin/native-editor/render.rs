@@ -181,7 +181,7 @@ impl Renderer {
             let text_w = (dip_w - PAD_DIP * 2.0).max(0.0);
 
             // Main text layout (also the source of caret geometry).
-            let layout = self.make_layout(&app.buffer, self.text_format.as_raw(), text_w, dip_h);
+            let layout = self.make_layout(&app.text, self.text_format.as_raw(), text_w, dip_h);
             if !layout.is_null() {
                 (v.draw_text_layout)(
                     rt,
@@ -191,7 +191,7 @@ impl Renderer {
                     0,
                 );
                 if caret_visible {
-                    if let Some((cx, cy, ch)) = caret_geometry(layout, app.caret, app.buffer.len()) {
+                    if let Some((cx, cy, ch)) = caret_geometry(layout, app.caret, app.text.len()) {
                         let rect = D2D1_RECT_F {
                             left: PAD_DIP + cx,
                             top: PAD_DIP + cy,
@@ -331,7 +331,7 @@ mod tests {
             let mut dw: *mut c_void = null_mut();
             let hr =
                 DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, &IID_IDWRITE_FACTORY, &mut dw);
-            assert!(hr >= 0, "DWriteCreateFactory failed: 0x{:08x}", hr);
+            assert!(hr >= 0, "DWriteCreateFactory failed: 0x{hr:08x}");
             let factory = ComPtr::from_raw(dw as *mut IDWriteFactory);
 
             let format = ComPtr::from_raw(
@@ -358,12 +358,9 @@ mod tests {
                     caret_geometry(layout, i, text.len()).expect("hit-test position");
                 assert!(
                     x + 0.01 >= last_x,
-                    "caret x regressed at index {}: {} < {}",
-                    i,
-                    x,
-                    last_x
+                    "caret x regressed at index {i}: {x} < {last_x}"
                 );
-                assert!(h > 0.0, "caret height should be positive at index {}", i);
+                assert!(h > 0.0, "caret height should be positive at index {i}");
                 last_x = x;
             }
             com_release(layout as *mut c_void);
