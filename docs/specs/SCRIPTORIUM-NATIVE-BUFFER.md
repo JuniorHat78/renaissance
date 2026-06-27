@@ -4,13 +4,15 @@
 > N1; catalog §5 *Text buffer* + *Undo/redo*). N0 stood up the platform/render
 > skeleton with a naive `Vec<u16>` buffer and a caret pinned at end-of-text. N1
 > replaces that with a **real editable document structure** that supports insert and
-> delete at any offset, gives **undo/redo essentially for free**, and re-drives the
-> parse on every edit — while staying small enough to be obviously correct.
+> delete at any offset, gives **O(1) undo/redo via structural sharing**, answers
+> coordinate queries (offset↔line) from the structure itself, and re-drives the parse
+> on every edit.
 >
 > This is the spec that **makes the rope-vs-piece-table decision** the umbrella left
-> open (§9). It commits to a design and the reasoning behind it; build against it.
+> open (§9). It commits to a **persistent, augmented, chunked rope** and to the
+> reasoning behind choosing it over the piece-table. Build against it.
 >
-> Status: **spec / not started.** Last refreshed: 2026-06-27.
+> Status: **spec / building.** Last refreshed: 2026-06-27.
 
 ---
 
@@ -18,250 +20,280 @@
 
 N1 is **done** when:
 
-1. The editor holds a **`TextBuffer`** (not a `Vec<u16>`) whose logical content is a
-   sequence of UTF-16 code units, supporting `insert(at, units)` and `delete(range)`
-   at **any** offset — not just the end.
+1. The editor holds a **`TextBuffer`** (a persistent rope, not a `Vec<u16>`) whose
+   logical content is a sequence of UTF-16 code units, supporting `insert(at, units)`
+   and `delete(range)` at **any** offset.
 2. The caret is a **UTF-16 offset** that can move: typing inserts at the caret,
-   Backspace deletes the unit (code point) before it, and **Left / Right / Home / End**
-   move it (code-point granularity — surrogate-pair-aware; true grapheme movement is N2).
+   Backspace deletes the code point before it, and **Left / Right / Home / End** move it
+   (code-point granularity — surrogate-pair-aware; grapheme movement + Up/Down are N2/N3).
 3. **Undo (Ctrl+Z) and Redo (Ctrl+Y)** work, grouping a contiguous typing run into one
-   step (so Ctrl+Z removes a word-run, not one letter).
-4. Every edit re-drives `parse_document(&[u16])` over the buffer's materialized
+   step, restoring the caret, and capturing each checkpoint in **O(1)** (an `Arc` clone
+   of the rope root — structural sharing, no text copied).
+4. The status line shows **Ln / Col**, computed from the rope's **line summary** (an
+   augmented O(log n) query) — proof the structure carries coordinates natively.
+5. Every edit re-drives `parse_document(&[u16])` over the buffer's materialized
    contents and repaints — the N0 loop, now over a real buffer.
-5. A **model-based buffer oracle** (a `Vec<u16>` reference vs the `TextBuffer` under
+6. A **model-based buffer oracle** (a `Vec<u16>` reference vs the `TextBuffer` under
    seeded random insert/delete/undo/redo) passes in CI **on every platform** (the
-   buffer is pure logic — no Win32, no DWrite), to heavy fuzz.
+   buffer is pure logic — no Win32, no DWrite), to heavy, `SCRIPTORIUM_FUZZ`-scaled fuzz.
 
-The real exit criterion behind those: **the document structure that lets the editor
-scale past a toy is in place and proven correct**, and undo is no longer a hole.
+The real exit criterion behind those: **the document structure that gives the monument
+its async-ready, coordinate-native spine is in place and proven correct**, and undo is
+no longer a hole.
 
 ## 2. Scope fence
 
-**In:** the `TextBuffer` (piece-table, §3–§5), undo/redo with run-grouping (§6),
-a code-point-level movable caret + the input plumbing for it (§7), parse-on-edit over
-the buffer, the model-based oracle (§8).
+**In:** the `TextBuffer` (persistent chunked rope, §3–§5), O(1) snapshot/restore and
+undo/redo with run-grouping (§6), a code-point-level movable caret + the input plumbing
+for it (§7), parse-on-edit over the buffer, the augmented line query for Ln/Col, the
+model-based oracle (§8).
 
 **Out (named so they don't creep in):** grapheme-cluster movement / line breaking /
-IME / selection / click-to-position (all **N2** — N1's caret moves by code point, no
-selection); selection rendering + scrolling + hit-testing (**N3**); a balanced
-order-statistics tree over pieces (**siren** — N1 uses a linear piece list, §9);
-buffer/add-buffer compaction or garbage collection (**siren**); persistent/immutable
-undo history, multi-cursor (**later**); save/load to disk (**siren — durability**).
+IME / selection / click-to-position (**N2** — N1's caret moves by code point, no
+selection); **vertical** caret movement (Up/Down) and scrolling + hit-testing (**N3** —
+they need layout-aware geometry); high-fanout B+-tree nodes / SIMD chunk scans
+(**siren** — §9, a constant-factor upgrade behind the same interface); off-thread parse
+on a snapshot (**N4** — the snapshot API lands now, its *use* is later); incremental
+reparse of only the dirty span (**siren**); save/load to disk (**siren — durability**).
 N1 still edits one in-memory section; files are a later phase.
 
-## 3. The decision: a piece-table
+## 3. The decision: a persistent, augmented, chunked rope
 
-**Chosen: a piece-table** (the VS Code "piece-tree" family), with a **linear piece
-list** now and a balanced tree deferred as a siren. Reasoning — this is the §9 fork,
-resolved:
+**Chosen:** a **rope** — a balanced tree whose leaves are chunks of UTF-16 units and
+whose internal nodes carry an **augmented summary** (subtree length + newline count) —
+built as a **persistent** structure (`Arc` nodes, copy-on-write), so a snapshot is an
+O(1) root clone with structural sharing. This resolves the §9 *rope vs piece-tree* fork
+**toward the rope**, reversing the earlier lean. The reasoning:
 
-The editing workload is *load a section of prose, make sparse edits, undo*. Three
-candidates:
+**The hot operation in an editor is not mutation — it is coordinate translation**
+(offset↔line↔column, char↔utf-16, logical↔visual), run constantly by caret, scrolling,
+hit-testing, decorations. The right structure answers arbitrary coordinate queries
+cheaply *and* edits cheaply: an **order-statistics tree with augmented summaries**, where
+every translation is one O(log n) descent reading subtree summaries. Adding a coordinate
+(graphemes, visual width) later is "add a field to the summary," not a new index.
 
-- **Gap buffer** — what N0's `Vec<u16>` effectively approximated. Dead simple,
-  superb for localized typing, but a caret jump forces an O(n) gap move, it scales to
-  a book poorly, and it has no natural undo or multi-cursor story. Rejected as the
-  primary structure (it is the thing we are replacing).
-- **Rope** — a balanced tree of text chunks; uniform O(log n) insert/delete/index
-  anywhere; the right tool for *huge* buffers with edits scattered everywhere. But it
-  must be a balanced tree from day one to be a rope at all, and its undo wants a
-  *persistent* rope (structural sharing) or full snapshots — more allocation, more
-  machinery, before we need any of it.
-- **Piece-table** — the original text is **immutable**; everything typed is appended
-  to a second **append-only** "add" buffer; the document is a sequence of **pieces**,
-  each a `(source, start, len)` window into one of the two buffers. Edits mutate only
-  the *piece list*, never the text.
+Two properties make the rope the monument choice over the alternatives:
 
-The piece-table wins for **this** project on three axes the others lose:
+1. **Persistence buys async for free, and async is where snappiness is born.** Make the
+   nodes `Arc` + copy-on-write and a **snapshot is O(1) with structural sharing**: clone
+   a root pointer and hand a *frozen, consistent* document to the parser, the saver, the
+   search indexer, a background highlighter — **no locks, no copies** — while the UI
+   thread mutates a new root. This is xi-editor's thesis and why Zed (latency-obsessed,
+   Rust) is built on a `SumTree`/rope, not a piece-table. Our N4 (UI thread sacred,
+   off-thread heavy work) is exactly this; the rope is its foundation, available now.
+2. **Native coordinates from one mechanism.** Offset↔line falls out of the same
+   augmented tree (§5), so the editor's constant coordinate math is O(log n) and uniform,
+   not bolted onto a byte-window index.
 
-1. **Undo falls out almost free** (the umbrella explicitly wanted this — §5 undo note,
-   §9). Because both backing buffers are append-only and never mutated, the *entire*
-   mutable state is the piece list (plus `add.len()`). Undo therefore snapshots **only
-   the piece index — it never copies a single unit of text.** That is the elegant
-   coupling between the buffer and undo, and it is unavailable to a gap buffer and
-   costly for a rope.
-2. **Best correctness-per-line at our scale.** A piece *list* (a `Vec<Piece>`) with
-   append-coalescing (§5) is simple enough to make obviously correct and fuzz to
-   exhaustion (§8). The scaling mechanism — a balanced/order-statistics tree over the
-   pieces — is a *separable* upgrade we can add later behind the same interface. A
-   rope cannot defer its tree.
-3. **It is the purpose-built structure for a text editor** (Bravo → Word → VS Code),
-   and the umbrella flagged the buffer as "the most fun to reason through." Building
-   the right thing for the workload is the monument move.
+**Considered and rejected for N1:**
 
-**When we would reach for a rope instead** (a documented siren-tier "if ever"): if the
-unit of editing stops being a section and becomes *a whole book as one buffer* with
-edits scattered everywhere, the piece count outgrows a linear list, **and** even a
-balanced piece-tree's rebalancing becomes the measured bottleneck — then a rope's
-uniform chunking may win. Not now, and not blindly.
+- **Piece-table** (immutable `original` + append-only `add` + a list/tree of windows).
+  Its two superpowers are (a) **mmap the original** for instant huge-file open and
+  (b) near-free undo from append-only buffers. But **(a) is dead weight for us** — we
+  edit in-memory *sections* (13–55 KB), never mmap a 2 GB file — and **(b) the rope
+  matches via persistence** (O(1) `Arc`-clone snapshots, *better* than cloning a piece
+  list). Meanwhile the piece-table bolts line metadata onto a byte-window structure and
+  its "done right" form (balanced piece-tree + line index + delete-splits + node GC +
+  two-buffer bookkeeping) has *more interacting parts* than a rope's one recursive
+  invariant. Choosing it would have been buying the one feature we don't use while
+  giving up the async/coordinate story the north star needs. (This is the reversal of
+  the prior draft; the honest case is in `SCRIPTORIUM-NATIVE-EDITOR.md` §8.)
+- **Gap buffer** — what N0's `Vec<u16>` approximated. Unbeatable constants and least
+  code, but O(n) caret jumps, a bolted-on line index, whole-buffer copy to snapshot, and
+  external undo. It is the thing we are replacing.
+
+**The one real cost we accept:** we are **crate-free**, so we hand-roll the rope (no
+`Ropey`) — and a correct, balanced, persistent tree is the hardest data structure in
+this project. The mitigation is structural: the **model-based fuzz oracle** (§8) makes
+hand-rolled-rope risk affordable (fuzz to millions of ops against a trivially-correct
+`Vec<u16>` model), and the `TextBuffer` interface makes the structure a **swap point** —
+correctness is the oracle's job, not the structure's cleverness.
 
 ## 4. The data structure
 
 ```
-struct TextBuffer {
-    original: Vec<u16>,   // the loaded section; immutable after construction
-    add:      Vec<u16>,   // everything typed since load; append-only, never edited
-    pieces:   Vec<Piece>, // the document = pieces concatenated, in order
-    // derived/cached:
-    cached:   Option<Vec<u16>>, // materialized contents, rebuilt lazily when dirty (§5)
-    total:    usize,            // sum of piece lens, maintained on edit
-}
+pub struct TextBuffer { root: Link }          // Link = Option<Arc<Node>>; None = empty
+pub struct Snapshot   { root: Link }          // an immutable view; clone is O(1)
 
-struct Piece { source: Source, start: usize, len: usize } // window into a buffer
-enum Source { Original, Add }
+enum Node {
+    Leaf(Vec<u16>),                            // a chunk of UTF-16 units, 1..=MAX_CHUNK
+    Branch { left: Arc<Node>, right: Arc<Node>, summary: Summary, height: u8 },
+}
+struct Summary { len: usize, lines: usize }    // subtree UTF-16 units + newline (0x000A) count
 ```
 
-**Invariants** (the oracle in §8 enforces these by construction):
-- Every `Piece` has `len > 0` (zero-length pieces are never stored; splits that would
-  produce one drop it).
-- `total == Σ pieces[i].len == cached.map(|c| c.len())`.
-- `original` and `add` only ever **grow** (`add`) or stay fixed (`original`); existing
-  units are never overwritten. "Deleted" text simply becomes unreferenced (acceptable
-  garbage; compaction is a siren).
+- **Persistence.** Every node is shared via `Arc`; edits *path-copy* — they allocate
+  O(log n) new nodes along the touched spine and **share every untouched subtree** with
+  the old root. So `snapshot()` is `root.clone()` (one `Arc` bump), and an old snapshot
+  stays valid and immutable forever (until dropped).
+- **Augmentation.** `Summary` is recomputed (cheaply, from children) at every node
+  construction; `len` drives offset indexing/splitting, `lines` drives offset↔line.
+  Extending it (chars, grapheme estimate, visual width) is a one-field change — the
+  `SumTree` property.
+- **Chunked leaves.** Leaves hold up to `MAX_CHUNK` (≈1024) units so the node count is
+  ~`total/MAX_CHUNK` (a 55 KB section ≈ ~27 leaves), keeping the tree shallow and scans
+  cache-friendly. Adjacent small leaves **merge on concat** (§5) so edits don't shatter
+  the rope into one-unit leaves.
 
-## 5. Operations
+**Invariants** (the §8 oracle enforces them by construction): no empty `Leaf`; `Branch`
+`summary.len == left.len + right.len` and `summary.lines == left.lines + right.lines`;
+`height == 1 + max(child heights)`; the empty document is `root == None`, never a
+`Leaf(vec![])`.
 
-- **`from_units(&[u16]) -> TextBuffer`** — `original = units.to_vec()`, `add` empty,
-  `pieces = [Piece{Original,0,len}]` (or empty when `len == 0`). The N1 editor loads a
-  section this way (N0's empty-buffer start is just `from_units(&[])`).
-- **`len() -> usize`** — returns `total` (O(1)).
-- **`insert(at, units)`**:
-  1. `add_start = add.len(); add.extend_from_slice(units)`.
-  2. **Typing fast-path (coalesce):** if `at` falls exactly at the end of an `Add`
-     piece whose `start + len == add_start` (i.e. the previous insert appended here and
-     this one is contiguous), just `piece.len += units.len()`. A typed run becomes **one
-     piece**, not N — this is what keeps the piece count (and undo granularity) sane.
-  3. Otherwise locate the piece + intra-piece offset containing `at` (linear scan
-     accumulating lens), **split** it into `[left, newAddPiece, right]` (dropping any
-     zero-length side), and splice. Inserting exactly on a piece boundary needs no split.
-  4. `total += units.len()`; mark `cached` dirty.
-- **`delete(range)`** — locate the start and end pieces; shorten the boundary pieces
-  (advance a left piece's `start`+shrink `len`, or shrink a right piece's `len`), drop
-  whole pieces fully inside the range, splitting a single straddling piece as needed;
-  `total -= range.len()`; mark dirty.
-- **`contents(&mut self) -> &[u16]`** — return the cached materialization, rebuilding it
-  (walk pieces, `extend_from_slice` each window into a fresh `Vec<u16>`) when dirty. This
-  is the **one** contiguous snapshot both the parser (`parse_document(&[u16])`) and the
-  renderer (`IDWriteTextLayout` wants a contiguous `*const u16`) consume — built once
-  per edit, not once per frame.
+## 5. Operations — `split` + `concat`, and everything from them
 
-Locating an offset is **O(pieces)** (linear scan); the O(log n) order-statistics tree
-is the deferred siren. At section scale with typing-coalescing, the piece count stays
-small, so this is a non-issue — and §9 records *why* it's allowed to be.
+The rope's whole edit algebra is two functions; insert and delete are one-liners over
+them, which is what keeps the correctness surface small.
 
-## 6. Undo / redo — the elegant coupling
+- **`concat(l, r) -> Arc<Node>`** (sequence: all of `l`, then `r`):
+  - **leaf-merge fast path:** if both are leaves and the combined length ≤ `MAX_CHUNK`,
+    return a single merged `Leaf` (this is what makes typing at the end/front coalesce
+    into one growing chunk rather than a spine of tiny leaves).
+  - otherwise build `Branch{l, r}` with a recomputed summary/height, then **rebalance if
+    skewed** (§9): if the height exceeds a small multiple of the ideal for its length,
+    rebuild that subtree balanced from its in-order leaves (an obviously-correct rebuild;
+    balance affects only performance, never content). `concat` of `Link`s threads `None`.
+- **`split(n, at) -> (Link, Link)`** at a UTF-16 offset: descend by subtree `len`; at a
+  leaf, slice the chunk into `[..at]` / `[at..]` (dropping empty sides to `None`); on a
+  `Branch`, recurse into the side containing `at` and `concat` the untouched side back.
+- **`insert(at, units)`** = `let (l, r) = split(root, at); root = concat(concat(l,
+  leaf(units)), r)`.
+- **`delete(a..b)`** = `let (l, rest) = split(root, a); let (_, r) = split(rest, b-a);
+  root = concat(l, r)`.
+- **`to_units() -> Vec<u16>`** — walk leaves in order, extending a fresh `Vec`. The one
+  contiguous materialization the parser (`parse_document(&[u16])`) and renderer
+  (`IDWriteTextLayout`) consume; rebuilt once per edit, not per frame (§7).
+- **Augmented queries:** `line_of_offset(off)` (newlines before `off`) and
+  `offset_of_line(line)` descend reading `summary.lines`/`summary.len` in O(log n) — the
+  Ln/Col source, and the seed of the coordinate layer N3 builds on.
 
-Because the backing buffers are append-only, **a complete undo checkpoint is just a
-clone of `pieces` plus the current `total`** (and `add.len()` is implied — `add` only
-grows, and restoring an old piece list simply stops referencing the tail). No text is
-ever copied into the history.
+Locating/splitting is **O(log n)**; an edit allocates **O(log n)** nodes and shares the
+rest. `snapshot()` / `restore()` are **O(1)**.
 
-- **`UndoStack`**: a `Vec<Checkpoint>` where `Checkpoint { pieces: Vec<Piece>, total,
-  caret }`. A matching **redo** stack, **cleared on any fresh edit**.
-- **Grouping (the "feels right" minimum):** consecutive single-unit **inserts** (a
-  typing run) coalesce into **one** undo step, and consecutive **Backspaces** into one;
-  a caret move, an Enter, a delete-after-insert, or a kind-switch **closes** the current
-  group (pushes a checkpoint). So Ctrl+Z removes a word-ish run, not one letter — minimal,
-  but not maddening.
-- **Minimal-first, honestly.** Cloning `pieces` per group is the "minimal" version the
-  umbrella undo note calls for. It is *already* elegant here (it copies an index, never
-  text); the further-elegant version (store piece-list *deltas*, or a persistent piece
-  tree) is a siren we reach for only if undo memory ever matters. The caret is restored
-  with each checkpoint so undo/redo move the cursor to where the edit was.
+## 6. Undo / redo — O(1) checkpoints via structural sharing
+
+Persistence makes undo nearly trivial and genuinely cheap:
+
+- **`UndoStack`** = `Vec<Checkpoint>` where `Checkpoint { snap: Snapshot, caret: usize }`
+  and `snap` is an **O(1) `Arc`-clone of the rope root** — *no text and no piece list is
+  copied*; the old tree is simply kept alive and shared with the live one. A matching
+  **redo** stack is **cleared on any fresh edit**.
+- **Grouping (the "feels right" minimum):** consecutive single-unit **inserts** (a typing
+  run) coalesce into one undo step, and consecutive **Backspaces** into one; a caret
+  move, an Enter, or a kind-switch **closes** the group (so the *next* edit pushes a
+  fresh pre-edit checkpoint). Ctrl+Z removes a word-ish run, not one letter.
+- **Minimal-first, honestly.** This is the minimal tier and it is *already* optimal in
+  the dimension that matters (checkpoints are O(1) and share structure). A bounded
+  history depth or coalescing of adjacent snapshots is a trivial later refinement; the
+  persistent rope means we will never need the piece-table's "store deltas" complexity to
+  keep undo cheap.
 
 ## 7. Caret & integration (the N1 editing model)
 
-`app.rs` swaps its `Vec<u16>` for a `TextBuffer` and grows a real caret:
+`app.rs` swaps its `Vec<u16>` for a `TextBuffer` plus a flat materialization mirror:
 
-- **State:** `buffer: TextBuffer`, `caret: usize` (UTF-16 offset), `undo`/`redo` stacks.
-- **Edits:** typing → `insert(caret, &[unit]); caret += 1`. Backspace → delete the code
-  point before the caret (one unit, or two if it's a low+high surrogate pair) and move
-  the caret back. Enter → insert `0x000A`.
+- **State:** `buffer: TextBuffer` (the rope — edits + O(1) undo snapshots + coordinate
+  queries), `text: Vec<u16>` (the current materialization, refreshed from the rope after
+  every edit — the render/parse feed), `caret: usize`, `undo`/`redo` stacks, a `group`
+  marker. The rope and the flat mirror coexist *on purpose* (see the perf note below).
+- **Edits:** typing → `buffer.insert(caret, &[unit]); caret += 1`. Backspace → delete the
+  code point before the caret (one unit, or two for a high+low surrogate pair) and move
+  back. Enter → insert `0x000A` (and close the undo group). After every edit:
+  `text = buffer.to_units(); reparse(&text); InvalidateRect`.
 - **Movement (code-point granularity):** Left/Right step over a surrogate pair as one
-  (never land between a high and low surrogate); Home/End go to line start/end (scan to
-  the nearest `0x000A`). **Grapheme clusters, selection, and click-to-position are N2** —
-  N1 deliberately stops at code points so the buffer, not Unicode segmentation, is the
-  subject.
+  (never land between halves); Home/End go to line start/end (via the `text` mirror).
+  **Grapheme clusters, selection, click-to-position, and Up/Down are N2/N3.**
+- **Coordinates:** the status line shows `Ln {line+1}, Col {col+1}` using
+  `buffer.line_of_offset(caret)` / `offset_of_line` — the augmented query in real use.
 - **Input plumbing (`win32`):** movement keys arrive as **`WM_KEYDOWN`** virtual-key
-  codes (`VK_LEFT/RIGHT/HOME/END`), so N1 adds a `WM_KEYDOWN` arm (N0 only handled
-  `WM_CHAR`); undo/redo arrive as the control units **Ctrl+Z = `0x1A`** and
-  **Ctrl+Y = `0x19`** already delivered via `WM_CHAR`. No new externs — these messages
-  already flow through the existing pump; `win32/sys.rs` only gains the `VK_*` + the
-  `WM_KEYDOWN` constants.
-- **Parse/render:** unchanged in shape from N0 — on every edit, reparse
-  `buffer.contents()` and `InvalidateRect`; the renderer builds its layout from the same
-  `contents()` slice. The caret geometry still comes from `HitTestTextPosition` on that
-  layout (N0's `caret_geometry`), now at an arbitrary caret offset, not just the end.
+  codes (`VK_LEFT/RIGHT/HOME/END`), so N1 adds a `WM_KEYDOWN` arm (N0 handled only
+  `WM_CHAR`); typing/Backspace/Enter and **Ctrl+Z = `0x1A`** / **Ctrl+Y = `0x19`** ride
+  `WM_CHAR` as before. No new externs — these messages already flow through the pump;
+  `win32/sys.rs` only gains the `WM_KEYDOWN` + `VK_*` constants.
+- **Render:** unchanged in shape — builds its `IDWriteTextLayout` from `&app.text` and
+  draws the caret via `HitTestTextPosition` at the now-arbitrary caret offset.
 
-**Why the buffer's edit-efficiency doesn't visibly pay off yet (and that's fine).**
-N1 still reparses the *whole* section per keystroke (~580µs — `SCRIPTORIUM-WASM-
-MARSHALLING.md`) and re-materializes the whole `contents()` (~tens of µs). Both are
-O(n), so the piece-table's O(log n)-able edits are *dominated* and invisible for now.
-We build the right structure anyway because (a) **undo needs it now** and the
-piece-table makes undo nearly free, and (b) it is the substrate the **incremental
-parse** and **virtualized layout** sirens require — when those land, the buffer is
-already the right shape and the core isn't rewritten. This is the project's
-measure-gated discipline, stated plainly: correctness + undo now, the latent perf win
-unlocked later without a redo.
+**Why a rope *and* a flat mirror, honestly.** N1 still reparses the whole section
+(~580µs — `SCRIPTORIUM-WASM-MARSHALLING.md`) and re-materializes `text` (~tens of µs) per
+edit; both are O(n), so the rope's O(log n) edits are *dominated and invisible today*.
+The rope earns its place now for the three things that are **not** about today's
+keystroke latency: **O(1) undo** (needed now), **O(1) immutable snapshots for the coming
+off-thread parse/save** (N4 — the API lands now, structurally ready), and **native
+coordinates** (Ln/Col now; the substrate N3's selection/scroll geometry builds on). When
+incremental parse and virtualized layout (sirens) remove the per-edit full materialization,
+the rope is already the right shape and the core is not rewritten. Correctness + the right
+spine now; the latent perf win unlocked later without a redo. This is the project's
+measure-gated discipline, stated plainly.
 
 ## 8. Testing — the buffer oracle
 
 The buffer is **pure logic with no feel component**, so unlike the renderer it is
-*fully* oracle-able — and we hold it to the parser's equivalence-oracle standard:
+*fully* oracle-able — held to the parser's equivalence-oracle standard:
 
-- **Model-based differential fuzz.** A trivially-correct reference model (a `Vec<u16>`
-  with `Vec::insert`/`drain`) is mutated in lockstep with the `TextBuffer` under a
-  seeded random stream of `insert` / `delete` / `undo` / `redo` ops; after **every** op,
-  assert `buffer.contents() == model` (and `len()` agrees). Undo/redo are checked
-  against a model-side history stack. Seed-driven and deterministic, so a failure
-  reproduces from its seed.
-- **Invariant checks** (§4) asserted after each op in the fuzz: no zero-length pieces,
-  `total` consistency, append-only buffers.
-- **Targeted unit cases:** boundary inserts, splits at piece edges, the typing-coalesce
-  fast-path (assert one piece after a run), delete spanning multiple pieces, undo across
-  a group boundary, redo-cleared-on-edit.
+- **Model-based differential fuzz.** A trivially-correct reference (a `Vec<u16>` with
+  `insert`/`drain`, plus a `Vec<(Vec<u16>, caret)>` history for undo/redo) runs in
+  lockstep with the `TextBuffer` under a seeded random stream of `insert` / `delete` /
+  `undo` / `redo`; after **every** op, assert `buffer.to_units() == model` and
+  `buffer.len() == model.len()`. Seed-driven and deterministic — a failure reproduces
+  from its seed.
+- **Augmented-query checks:** after random ops, assert `buffer.line_of_offset(k)` equals
+  the model's newline count in `[0, k)` for sampled `k`, and `offset_of_line` round-trips.
+- **Invariant checks (§4):** no empty leaves, `summary`/`height` consistency, persistence
+  (a snapshot taken earlier still materializes to its old contents after later edits —
+  the structural-sharing guarantee, tested directly).
+- **Targeted unit cases:** boundary inserts/splits at chunk edges, the leaf-merge
+  coalesce (a typed run stays few leaves), delete spanning multiple leaves, undo across a
+  group boundary, redo-cleared-on-edit, surrogate-pair caret steps over astral chars.
 - **Where it runs:** the buffer module is **not** `#[cfg(windows)]` — it compiles and
-  tests on every platform. The oracle runs in the existing `scriptorium-native.yml`
-  Linux/macOS stub jobs (which gain a `cargo test --bin` step) *and* the Windows jobs,
-  with a `SCRIPTORIUM_FUZZ`-scaled iteration count (maximal-CI: crank it). This is N1's
-  real, automatable regression value — and, unlike N0's geometry oracle, it needs no
-  DirectWrite, so the Linux runners exercise it too.
+  tests on **every** platform. The oracle runs in `scriptorium-native.yml` on the
+  Linux/macOS jobs (which gain a `cargo test --bin` step) *and* the Windows jobs, with a
+  `SCRIPTORIUM_FUZZ`-scaled iteration count (maximal-CI: crank it). Unlike N0's
+  DirectWrite geometry oracle, this needs no GPU/DWrite, so every runner exercises it —
+  N1's real, automatable regression value. (Local note: this laptop has no MSVC linker,
+  so the oracle is validated on Actions, not here; `cargo check --tests` type-checks it.)
 
-## 9. Performance posture & the deferred tree
+## 9. Performance posture & the deferred upgrades
 
-- **Piece list, not a tree, now.** Offset-location is O(pieces); with typing-coalescing
-  the piece count tracks the number of *disjoint edit regions*, not keystrokes, so it
-  stays small for real editing. The **order-statistics / red-black tree over pieces**
-  (VS Code's actual "piece-tree") is the scaling upgrade — a **siren**, added behind the
-  unchanged `TextBuffer` interface only when a measured piece count makes the linear
-  scan hurt.
-- **No compaction now.** Deleted/overwritten text lingers as unreferenced garbage in
-  `original`/`add`. At section scale this is bounded and irrelevant; compaction is a
-  siren.
-- **`contents()` caching** keeps parse + paint reading one shared materialization per
-  edit rather than re-walking pieces per consumer.
+- **Binary chunked rope now; high-fanout B+-tree later.** The architecturally-decisive
+  properties — persistence, augmentation, O(log n) edits/queries, O(1) snapshots — are
+  fully delivered by a binary chunked rope. A **high-fanout B+-tree / `SumTree`** (better
+  cache behavior, fewer nodes) is a **constant-factor** upgrade only — and at section-to-
+  book scale the binary rope is asymptotically identical with a far smaller hand-rolled
+  correctness surface. So we build the binary rope and name the B+-tree as the
+  measure-gated escalation behind the unchanged `TextBuffer` interface. (Honest reversal
+  framing: the B-tree is "sheer best" *only* on the constant-factor axis, which is the one
+  axis that is a siren for us.)
+- **Balance by rebuild-on-imbalance for v1.** `concat` rebuilds a subtree from its leaves
+  when height exceeds a small multiple of the ideal — obviously correct, and natural
+  editing rarely triggers it (leaf-merge keeps typing shallow). A join-based balanced
+  `concat` (worst-case O(log n) with no rebuild) is the refinement, same interface.
+- **No leaf compaction / GC beyond merge-on-concat** — unreferenced split fragments are
+  bounded at section scale; periodic rebuild is a siren.
 
 ## 10. Risks / what could actually bite
 
-- **Off-by-one in split/delete boundary math** → corruption the eye might miss. This is
-  exactly what the model-based fuzz (§8) is *for*; it is cheap and merciless. Heavy seed
-  count in CI is the mitigation.
-- **Surrogate pairs at the caret** — moving or backspacing must treat a high+low pair as
-  one code point, or we split a surrogate and write a lone half. Covered by movement unit
-  tests with astral characters.
-- **Undo grouping that feels wrong** — too coarse (a whole paragraph vanishes) or too
-  fine (one letter). The §6 run-grouping is a starting heuristic; it is **feel**, so it
-  is tuned in the loop (the author reacts), not gated.
-- **Piece-list growth under pathological editing** — bounded by §9's siren upgrade; not
-  an N1 correctness risk, only a latent perf one, and named.
+- **A bug in `split`/`concat` boundary math** → silent corruption. This is exactly what
+  the model-based fuzz (§8) exists to catch; heavy seed counts in CI are the mitigation,
+  and it is the reason we can hand-roll a rope at all.
+- **Persistence aliasing** — a path-copy that accidentally mutates a shared `Arc` node
+  (it must not; nodes are immutable, edits build new ones). Tested directly by the
+  "old snapshot still valid after edits" check.
+- **Surrogate pairs at the caret** — movement/backspace must treat a high+low pair as one
+  code point or write a lone half; covered by astral-char movement tests.
+- **Undo grouping feel** — too coarse/fine; it's **feel**, so it's tuned in the loop
+  (the author reacts), not gated.
+- **Hand-rolled-rope time cost** — the real schedule risk; bounded by leaning on the
+  oracle and accepting rebuild-balance for v1 rather than perfecting a join algorithm now.
 
 ## 11. Decisions to feed the umbrella ledger (on completion)
 
-- **Buffer structure = piece-table** (linear piece list now; balanced piece-tree is a
-  siren) — resolves the §9 *rope vs piece-tree* fork.
-- **Undo = piece-list-snapshot checkpoints with typing-run grouping** (text never
-  copied into history) — resolves the §9 *undo model* fork at the minimal-but-elegant
-  tier, with the persistent/delta version named as the next escalation.
-- The **buffer oracle** (model-based differential fuzz) extends the project's
-  equivalence-oracle discipline to the editor core and runs on **all** platforms —
-  a data point for how much of the native editor stays oracle-able below the feel line.
+- **Buffer structure = persistent augmented chunked rope** (binary now; high-fanout
+  B+-tree/`SumTree` is the measure-gated upgrade) — resolves the §9 *rope vs piece-tree*
+  fork toward the rope, and **reverses** the prior piece-table lean (the piece-table's
+  one unique advantage, mmap-the-original, is unused at section scale; the rope's
+  persistence + native coordinates match the snappiness/own-everything north star).
+- **Undo = O(1) snapshot checkpoints via structural sharing**, run-grouped — resolves the
+  §9 *undo model* fork; persistence makes the minimal tier already optimal in cost.
+- The **buffer oracle** (model-based differential fuzz) extends the equivalence-oracle
+  discipline to the editor core and runs on **all** platforms — a data point for how much
+  of the native editor stays oracle-able below the feel line.

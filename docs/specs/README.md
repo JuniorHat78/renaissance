@@ -28,9 +28,10 @@ roadmap, but they are not the roadmap itself. For overall orientation read
 - `SCRIPTORIUM-NATIVE-SKELETON.md`: **N0 (built + CI-validated)** — the platform/render
   walking skeleton: window + DirectWrite text + caret + keyboard + in-process reparse.
   De-risked the COM-from-raw-Rust FFI (verdict: tolerable).
-- `SCRIPTORIUM-NATIVE-BUFFER.md`: **N1** — the text buffer: a **piece-table** (resolving
-  the rope-vs-piece-tree fork) with insert/delete at any offset, undo/redo, a code-point
-  caret, and parse-on-edit. Held by a model-based buffer oracle on every platform.
+- `SCRIPTORIUM-NATIVE-BUFFER.md`: **N1** — the text buffer: a **persistent, augmented,
+  chunked rope** (resolving the rope-vs-piece-tree fork toward the rope) with insert/delete
+  at any offset, O(1) structural-sharing undo, a code-point caret, Ln/Col from the line
+  summary, and parse-on-edit. Held by a model-based buffer oracle on every platform.
 
 **Search, recovery, UX:**
 - `ORACLE-SEARCH-SPEC.md`: target AST-native search/index/ranking system for

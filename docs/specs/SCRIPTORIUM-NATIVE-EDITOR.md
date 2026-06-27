@@ -159,7 +159,7 @@ when we go deep on it. Status tags keep §2.5 honest:
 | Component | What it is | Status | Notes |
 |---|---|---|---|
 | **Platform/render skeleton** | Window + DirectWrite text + caret + keyboard, end to end, reusing `rust/` parse | `need-now` | First build target (§7). De-risks COM-from-raw-Rust FFI; unlocks the feel-loop. The deepest single piece. **Spec: `SCRIPTORIUM-NATIVE-SKELETON.md`.** |
-| **Text buffer** | Editable document structure (gap buffer · piece table · rope) | `need-now` | The data-structure heart; load-bearing for the "scales to a whole book" story. Naive `Vec<u16>` + whole-section reparse is *measured fine* for now — but the buffer is what keeps it fine as docs grow. Most fun to reason through. **Resolved: piece-table (N1) — `SCRIPTORIUM-NATIVE-BUFFER.md`.** |
+| **Text buffer** | Editable document structure (gap buffer · piece table · rope) | `need-now` | The data-structure heart; load-bearing for the "scales to a whole book" story. Naive `Vec<u16>` + whole-section reparse is *measured fine* for now — but the buffer is what keeps it fine as docs grow. Most fun to reason through. **Resolved: a persistent augmented chunked rope (N1) — `SCRIPTORIUM-NATIVE-BUFFER.md`.** |
 | **Input correctness** | Grapheme clusters (UAX #29), line breaking (UAX #14), IME (`WM_IME_*`) | `need-now` | Caret moves by *grapheme*, not codepoint. IME is the sleeper that decides if it "feels right" for non-ASCII. The #1 jank tell. |
 | **Layout/render maturity** | Selection geometry, scrolling, hit-testing on `IDWriteTextLayout` | `need-now` | Build on DWrite's layout object so hit-testing + caret geometry come *free* (`HitTestPoint`/`HitTestTextPosition`); don't re-implement caret math. |
 | **Concurrency / latency** | UI thread sacred; off-thread IO/heavy work; input coalescing | `need-now` | Where snappiness is *born*. Channel/lock-free handoff; never paint a half-updated model; coalesce N keystrokes → 1 reparse+paint. |
@@ -208,9 +208,11 @@ skeleton, not speculation. Each phase below spawns its own JIT component spec.
   `windows-latest` (stable + beta) and the geometry oracle passes on real DirectWrite —
   **COM-from-raw-Rust is tolerable** (§8). Next: N1.
 - **N1 — Text buffer.** `[spec written → SCRIPTORIUM-NATIVE-BUFFER.md]` Choose + build
-  the buffer (rope vs piece-tree — the real decision; **resolved: piece-table**), with
-  edits at any offset, undo/redo (minimal, run-grouped), a code-point caret, and the
-  parse re-driven on edit. Held by a model-based buffer oracle on every platform.
+  the buffer (rope vs piece-tree — the real decision; **resolved: a persistent, augmented,
+  chunked rope** — async-ready via O(1) structural-sharing snapshots, coordinate-native),
+  with edits at any offset, O(1) undo/redo (run-grouped), a code-point caret, Ln/Col from
+  the rope's line summary, and the parse re-driven on edit. Held by a model-based buffer
+  oracle on every platform.
 - **N2 — Input correctness.** Grapheme-cluster caret movement, line breaking, IME,
   selection semantics. The "feels right for real text" pass.
 - **N3 — Layout/render maturity.** Selection rendering, scrolling, hit-testing on
