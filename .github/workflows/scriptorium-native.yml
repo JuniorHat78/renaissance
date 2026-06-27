@@ -1,0 +1,81 @@
+name: scriptorium-native
+
+# N0 walking-skeleton CI (SCRIPTORIUM-NATIVE-SKELETON.md §7). Two deterministic
+# gates (allowed to hard-fail, per the project's CI philosophy — this is link +
+# geometry correctness, not a fickle metric):
+#   - windows-latest: the hand-rolled Win32/COM externs must LINK against the real
+#     system import libs (d2d1/dwrite/user32/kernel32), and the layout-geometry
+#     oracle (monotonic caret x) must hold on real DirectWrite.
+#   - ubuntu-latest: the #[cfg(not(windows))] stub must keep the workspace green.
+# The native editor reuses the parser in-process and adds no crate, so this only
+# fires when the bin (or the manifest, or this workflow) changes.
+
+on:
+  push:
+    branches: [main, feat/scriptorium]
+    paths:
+      - "rust/src/bin/native-editor/**"
+      - "rust/Cargo.toml"
+      - ".github/workflows/scriptorium-native.yml"
+  pull_request:
+    paths:
+      - "rust/src/bin/native-editor/**"
+      - "rust/Cargo.toml"
+      - ".github/workflows/scriptorium-native.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # The real test of the hand-rolled FFI: it must link, and the geometry oracle must
+  # hold on real DWrite. Matrixed over stable + beta (toolchain determinism).
+  windows-link:
+    name: native editor links + geometry oracle (windows / ${{ matrix.toolchain }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        toolchain: [stable, beta]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.toolchain }}
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            rust/target
+          key: ${{ runner.os }}-${{ matrix.toolchain }}-native-${{ hashFiles('rust/src/bin/native-editor/**', 'rust/Cargo.toml') }}
+          restore-keys: ${{ runner.os }}-${{ matrix.toolchain }}-native-
+      - name: Build the native editor (proves the hand-rolled externs link)
+        run: cargo build --release --manifest-path rust/Cargo.toml --bin scriptorium-native-editor
+      - name: Layout-geometry oracle (monotonic caret x on real DirectWrite)
+        run: cargo test --manifest-path rust/Cargo.toml --bin scriptorium-native-editor
+
+  # The stub must keep the workspace building where there is no Win32 (Linux/macOS CI
+  # builds the wasm + generator bins; the native bin must not break them).
+  stub-builds:
+    name: non-windows stub builds (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            rust/target
+          key: ${{ runner.os }}-native-stub-${{ hashFiles('rust/src/bin/native-editor/**', 'rust/Cargo.toml') }}
+          restore-keys: ${{ runner.os }}-native-stub-
+      - name: Build the off-Windows stub (and run it — it just prints guidance)
+        run: |
+          cargo build --manifest-path rust/Cargo.toml --bin scriptorium-native-editor
+          cargo run --manifest-path rust/Cargo.toml --bin scriptorium-native-editor

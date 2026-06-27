@@ -1,0 +1,605 @@
+//! Hand-declared Win32 + COM FFI — exactly what N0 calls, no more (umbrella §3:
+//! no `windows-sys`, graph-zero). This is the surface the skeleton de-risks.
+//!
+//! COM recipe (SCRIPTORIUM-NATIVE-SKELETON.md §5): each interface is a
+//! `#[repr(C)]` object whose first (and only) field is a pointer to its vtable; the
+//! vtable is a `#[repr(C)]` struct of `extern "system"` fn pointers in EXACT COM
+//! order — the three IUnknown slots (QueryInterface/AddRef/Release) first, then the
+//! interface's own methods in declaration order. We type only the slots we call;
+//! every other slot is a `usize` placeholder that holds the layout (named after the
+//! real method so the table is auditable). Getting the order/signatures right is the
+//! correctness risk we accept. Refcounts are released through the universal IUnknown
+//! layout (`com_release`), so brushes/formats we only Release need no full vtable.
+
+#![allow(non_snake_case, non_camel_case_types, dead_code, clippy::upper_case_acronyms)]
+
+use core::ffi::c_void;
+
+// --- scalar/handle aliases --------------------------------------------------
+
+pub type HRESULT = i32;
+pub type BOOL = i32;
+pub type HWND = *mut c_void;
+pub type HINSTANCE = *mut c_void;
+pub type HICON = *mut c_void;
+pub type HCURSOR = *mut c_void;
+pub type HBRUSH = *mut c_void;
+pub type HMENU = *mut c_void;
+pub type HDC = *mut c_void;
+pub type DPI_AWARENESS_CONTEXT = *mut c_void;
+pub type WPARAM = usize;
+pub type LPARAM = isize;
+pub type LRESULT = isize;
+pub type WNDPROC = Option<unsafe extern "system" fn(HWND, u32, WPARAM, LPARAM) -> LRESULT>;
+
+// --- constants --------------------------------------------------------------
+
+pub const CS_VREDRAW: u32 = 0x0001;
+pub const CS_HREDRAW: u32 = 0x0002;
+pub const WS_OVERLAPPEDWINDOW: u32 = 0x00CF_0000;
+pub const CW_USEDEFAULT: i32 = 0x8000_0000u32 as i32;
+pub const SW_SHOW: i32 = 5;
+pub const IDC_ARROW: u16 = 32512;
+pub const GWLP_USERDATA: i32 = -21;
+
+pub const WM_CREATE: u32 = 0x0001;
+pub const WM_DESTROY: u32 = 0x0002;
+pub const WM_SIZE: u32 = 0x0005;
+pub const WM_PAINT: u32 = 0x000F;
+pub const WM_CHAR: u32 = 0x0102;
+pub const WM_TIMER: u32 = 0x0113;
+pub const WM_NCCREATE: u32 = 0x0081;
+pub const WM_NCDESTROY: u32 = 0x0082;
+pub const WM_DPICHANGED: u32 = 0x02E0;
+
+pub const SWP_NOZORDER: u32 = 0x0004;
+pub const SWP_NOACTIVATE: u32 = 0x0010;
+
+// DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 is the sentinel pointer value (HANDLE)-4.
+// Int->ptr casts are illegal in const, so build it at the call site via this helper.
+pub fn dpi_per_monitor_aware_v2() -> DPI_AWARENESS_CONTEXT {
+    (-4isize) as DPI_AWARENESS_CONTEXT
+}
+
+// D2D / DWrite factory enum values + brush/draw options we pass.
+pub const D2D1_FACTORY_TYPE_SINGLE_THREADED: u32 = 0;
+pub const DWRITE_FACTORY_TYPE_SHARED: u32 = 0;
+pub const DWRITE_FONT_WEIGHT_NORMAL: u32 = 400;
+pub const DWRITE_FONT_STYLE_NORMAL: u32 = 0;
+pub const DWRITE_FONT_STRETCH_NORMAL: u32 = 5;
+
+// --- plain structs ----------------------------------------------------------
+
+#[repr(C)]
+pub struct GUID {
+    pub data1: u32,
+    pub data2: u16,
+    pub data3: u16,
+    pub data4: [u8; 8],
+}
+
+#[repr(C)]
+pub struct POINT {
+    pub x: i32,
+    pub y: i32,
+}
+
+#[repr(C)]
+pub struct RECT {
+    pub left: i32,
+    pub top: i32,
+    pub right: i32,
+    pub bottom: i32,
+}
+
+#[repr(C)]
+pub struct MSG {
+    pub hwnd: HWND,
+    pub message: u32,
+    pub wParam: WPARAM,
+    pub lParam: LPARAM,
+    pub time: u32,
+    pub pt: POINT,
+}
+
+#[repr(C)]
+pub struct WNDCLASSEXW {
+    pub cbSize: u32,
+    pub style: u32,
+    pub lpfnWndProc: WNDPROC,
+    pub cbClsExtra: i32,
+    pub cbWndExtra: i32,
+    pub hInstance: HINSTANCE,
+    pub hIcon: HICON,
+    pub hCursor: HCURSOR,
+    pub hbrBackground: HBRUSH,
+    pub lpszMenuName: *const u16,
+    pub lpszClassName: *const u16,
+    pub hIconSm: HICON,
+}
+
+#[repr(C)]
+pub struct PAINTSTRUCT {
+    pub hdc: HDC,
+    pub fErase: BOOL,
+    pub rcPaint: RECT,
+    pub fRestore: BOOL,
+    pub fIncUpdate: BOOL,
+    pub rgbReserved: [u8; 32],
+}
+
+#[repr(C)]
+pub struct CREATESTRUCTW {
+    pub lpCreateParams: *mut c_void,
+    pub hInstance: HINSTANCE,
+    pub hMenu: HMENU,
+    pub hwndParent: HWND,
+    pub cy: i32,
+    pub cx: i32,
+    pub y: i32,
+    pub x: i32,
+    pub style: i32,
+    pub lpszName: *const u16,
+    pub lpszClass: *const u16,
+    pub dwExStyle: u32,
+}
+
+// --- Direct2D / DirectWrite value structs -----------------------------------
+
+#[repr(C)]
+pub struct D2D1_COLOR_F {
+    pub r: f32,
+    pub g: f32,
+    pub b: f32,
+    pub a: f32,
+}
+
+#[repr(C)]
+pub struct D2D_POINT_2F {
+    pub x: f32,
+    pub y: f32,
+}
+
+#[repr(C)]
+pub struct D2D1_RECT_F {
+    pub left: f32,
+    pub top: f32,
+    pub right: f32,
+    pub bottom: f32,
+}
+
+#[repr(C)]
+pub struct D2D1_SIZE_U {
+    pub width: u32,
+    pub height: u32,
+}
+
+#[repr(C)]
+pub struct D2D1_PIXEL_FORMAT {
+    pub format: u32,
+    pub alpha_mode: u32,
+}
+
+#[repr(C)]
+pub struct D2D1_RENDER_TARGET_PROPERTIES {
+    pub r#type: u32,
+    pub pixel_format: D2D1_PIXEL_FORMAT,
+    pub dpi_x: f32,
+    pub dpi_y: f32,
+    pub usage: u32,
+    pub min_level: u32,
+}
+
+#[repr(C)]
+pub struct D2D1_HWND_RENDER_TARGET_PROPERTIES {
+    pub hwnd: HWND,
+    pub pixel_size: D2D1_SIZE_U,
+    pub present_options: u32,
+}
+
+#[repr(C)]
+pub struct DWRITE_HIT_TEST_METRICS {
+    pub text_position: u32,
+    pub length: u32,
+    pub left: f32,
+    pub top: f32,
+    pub width: f32,
+    pub height: f32,
+    pub bidi_level: u32,
+    pub is_text: BOOL,
+    pub is_trimmed: BOOL,
+}
+
+// --- interface GUIDs --------------------------------------------------------
+
+// ID2D1Factory  {06152247-6f50-465a-9245-118bfd3b6007}
+pub const IID_ID2D1FACTORY: GUID = GUID {
+    data1: 0x0615_2247,
+    data2: 0x6f50,
+    data3: 0x465a,
+    data4: [0x92, 0x45, 0x11, 0x8b, 0xfd, 0x3b, 0x60, 0x07],
+};
+
+// IDWriteFactory {b859ee5a-d838-4b5b-a2e8-1adc7d93db48}
+pub const IID_IDWRITE_FACTORY: GUID = GUID {
+    data1: 0xb859_ee5a,
+    data2: 0xd838,
+    data3: 0x4b5b,
+    data4: [0xa2, 0xe8, 0x1a, 0xdc, 0x7d, 0x93, 0xdb, 0x48],
+};
+
+// --- universal IUnknown (for Release of any COM object) ---------------------
+
+#[repr(C)]
+pub struct IUnknownVtbl {
+    pub query_interface:
+        unsafe extern "system" fn(*mut c_void, *const GUID, *mut *mut c_void) -> HRESULT,
+    pub add_ref: unsafe extern "system" fn(*mut c_void) -> u32,
+    pub release: unsafe extern "system" fn(*mut c_void) -> u32,
+}
+
+#[repr(C)]
+pub struct IUnknownObj {
+    pub vtbl: *const IUnknownVtbl,
+}
+
+/// Release any COM object through the universal IUnknown layout (slot 2). Works for
+/// every interface because the first vtable pointer is always QI/AddRef/Release.
+///
+/// # Safety
+/// `p` must be null or a live COM interface pointer this process owns a ref on.
+pub unsafe fn com_release(p: *mut c_void) {
+    if p.is_null() {
+        return;
+    }
+    let obj = p as *mut IUnknownObj;
+    ((*(*obj).vtbl).release)(p);
+}
+
+// --- ID2D1Factory (we call CreateHwndRenderTarget, slot 14) -----------------
+
+#[repr(C)]
+pub struct ID2D1FactoryVtbl {
+    pub query_interface: usize,
+    pub add_ref: usize,
+    pub release: usize,
+    pub reload_system_metrics: usize,          // 3
+    pub get_desktop_dpi: usize,                // 4
+    pub create_rectangle_geometry: usize,      // 5
+    pub create_rounded_rectangle_geometry: usize, // 6
+    pub create_ellipse_geometry: usize,        // 7
+    pub create_geometry_group: usize,          // 8
+    pub create_transformed_geometry: usize,    // 9
+    pub create_path_geometry: usize,           // 10
+    pub create_stroke_style: usize,            // 11
+    pub create_drawing_state_block: usize,     // 12
+    pub create_wic_bitmap_render_target: usize, // 13
+    pub create_hwnd_render_target: unsafe extern "system" fn(
+        *mut ID2D1Factory,
+        *const D2D1_RENDER_TARGET_PROPERTIES,
+        *const D2D1_HWND_RENDER_TARGET_PROPERTIES,
+        *mut *mut ID2D1HwndRenderTarget,
+    ) -> HRESULT, // 14
+}
+
+#[repr(C)]
+pub struct ID2D1Factory {
+    pub vtbl: *const ID2D1FactoryVtbl,
+}
+
+// --- ID2D1HwndRenderTarget --------------------------------------------------
+// : ID2D1RenderTarget : ID2D1Resource : IUnknown. We call CreateSolidColorBrush(8),
+// FillRectangle(17), DrawTextLayout(29), Clear(48), BeginDraw(49), EndDraw(50),
+// SetDpi(52), Resize(59). All other slots are layout placeholders.
+
+#[repr(C)]
+pub struct ID2D1HwndRenderTargetVtbl {
+    pub query_interface: usize, // 0
+    pub add_ref: usize,         // 1
+    pub release: usize,         // 2
+    pub get_factory: usize,     // 3  (ID2D1Resource)
+    pub create_bitmap: usize,   // 4
+    pub create_bitmap_from_wic_bitmap: usize, // 5
+    pub create_shared_bitmap: usize, // 6
+    pub create_bitmap_brush: usize, // 7
+    pub create_solid_color_brush: unsafe extern "system" fn(
+        *mut ID2D1HwndRenderTarget,
+        *const D2D1_COLOR_F,
+        *const c_void, // D2D1_BRUSH_PROPERTIES*, we pass null
+        *mut *mut ID2D1SolidColorBrush,
+    ) -> HRESULT, // 8
+    pub create_gradient_stop_collection: usize, // 9
+    pub create_linear_gradient_brush: usize,    // 10
+    pub create_radial_gradient_brush: usize,    // 11
+    pub create_compatible_render_target: usize, // 12
+    pub create_layer: usize,                    // 13
+    pub create_mesh: usize,                     // 14
+    pub draw_line: usize,                       // 15
+    pub draw_rectangle: usize,                  // 16
+    pub fill_rectangle: unsafe extern "system" fn(
+        *mut ID2D1HwndRenderTarget,
+        *const D2D1_RECT_F,
+        *mut c_void, // ID2D1Brush*
+    ), // 17
+    pub draw_rounded_rectangle: usize, // 18
+    pub fill_rounded_rectangle: usize, // 19
+    pub draw_ellipse: usize,           // 20
+    pub fill_ellipse: usize,           // 21
+    pub draw_geometry: usize,          // 22
+    pub fill_geometry: usize,          // 23
+    pub draw_mesh: usize,              // 24
+    pub fill_mesh: usize,              // 25
+    pub fill_opacity_mask: usize,      // 26
+    pub draw_bitmap: usize,            // 27
+    pub draw_text: usize,              // 28
+    pub draw_text_layout: unsafe extern "system" fn(
+        *mut ID2D1HwndRenderTarget,
+        D2D_POINT_2F, // origin, by value (8-byte aggregate)
+        *mut IDWriteTextLayout,
+        *mut c_void, // ID2D1Brush* default fill
+        u32,         // D2D1_DRAW_TEXT_OPTIONS
+    ), // 29
+    pub draw_glyph_run: usize,          // 30
+    pub set_transform: usize,           // 31
+    pub get_transform: usize,           // 32
+    pub set_antialias_mode: usize,      // 33
+    pub get_antialias_mode: usize,      // 34
+    pub set_text_antialias_mode: usize, // 35
+    pub get_text_antialias_mode: usize, // 36
+    pub set_text_rendering_params: usize, // 37
+    pub get_text_rendering_params: usize, // 38
+    pub set_tags: usize,                // 39
+    pub get_tags: usize,                // 40
+    pub push_layer: usize,              // 41
+    pub pop_layer: usize,               // 42
+    pub flush: usize,                   // 43
+    pub save_drawing_state: usize,      // 44
+    pub restore_drawing_state: usize,   // 45
+    pub push_axis_aligned_clip: usize,  // 46
+    pub pop_axis_aligned_clip: usize,   // 47
+    pub clear: unsafe extern "system" fn(*mut ID2D1HwndRenderTarget, *const D2D1_COLOR_F), // 48
+    pub begin_draw: unsafe extern "system" fn(*mut ID2D1HwndRenderTarget),                 // 49
+    pub end_draw: unsafe extern "system" fn(
+        *mut ID2D1HwndRenderTarget,
+        *mut u64, // tag1
+        *mut u64, // tag2
+    ) -> HRESULT, // 50
+    pub get_pixel_format: usize, // 51
+    pub set_dpi: unsafe extern "system" fn(*mut ID2D1HwndRenderTarget, f32, f32), // 52
+    pub get_dpi: usize,                 // 53
+    pub get_size: usize,                // 54
+    pub get_pixel_size: usize,          // 55
+    pub get_maximum_bitmap_size: usize, // 56
+    pub is_supported: usize,            // 57
+    pub check_window_state: usize,      // 58  (ID2D1HwndRenderTarget)
+    pub resize: unsafe extern "system" fn(*mut ID2D1HwndRenderTarget, *const D2D1_SIZE_U) -> HRESULT, // 59
+}
+
+#[repr(C)]
+pub struct ID2D1HwndRenderTarget {
+    pub vtbl: *const ID2D1HwndRenderTargetVtbl,
+}
+
+// Brushes: we only ever Release them (via com_release) and pass them as ID2D1Brush*.
+#[repr(C)]
+pub struct ID2D1SolidColorBrush {
+    pub vtbl: *const c_void,
+}
+
+// --- IDWriteFactory (we call CreateTextFormat(15), CreateTextLayout(18)) -----
+
+#[repr(C)]
+pub struct IDWriteFactoryVtbl {
+    pub query_interface: usize, // 0
+    pub add_ref: usize,         // 1
+    pub release: usize,         // 2
+    pub get_system_font_collection: usize,        // 3
+    pub create_custom_font_collection: usize,     // 4
+    pub register_font_collection_loader: usize,   // 5
+    pub unregister_font_collection_loader: usize, // 6
+    pub create_font_file_reference: usize,        // 7
+    pub create_custom_font_file_reference: usize, // 8
+    pub create_font_face: usize,                  // 9
+    pub create_rendering_params: usize,           // 10
+    pub create_monitor_rendering_params: usize,   // 11
+    pub create_custom_rendering_params: usize,    // 12
+    pub register_font_file_loader: usize,         // 13
+    pub unregister_font_file_loader: usize,       // 14
+    pub create_text_format: unsafe extern "system" fn(
+        *mut IDWriteFactory,
+        *const u16,  // fontFamilyName
+        *mut c_void, // IDWriteFontCollection*, null
+        u32,         // weight
+        u32,         // style
+        u32,         // stretch
+        f32,         // size
+        *const u16,  // localeName
+        *mut *mut IDWriteTextFormat,
+    ) -> HRESULT, // 15
+    pub create_typography: usize,  // 16
+    pub get_gdi_interop: usize,    // 17
+    pub create_text_layout: unsafe extern "system" fn(
+        *mut IDWriteFactory,
+        *const u16, // string
+        u32,        // stringLength
+        *mut IDWriteTextFormat,
+        f32, // maxWidth
+        f32, // maxHeight
+        *mut *mut IDWriteTextLayout,
+    ) -> HRESULT, // 18
+}
+
+#[repr(C)]
+pub struct IDWriteFactory {
+    pub vtbl: *const IDWriteFactoryVtbl,
+}
+
+// Text format: only Released and passed to CreateTextLayout.
+#[repr(C)]
+pub struct IDWriteTextFormat {
+    pub vtbl: *const c_void,
+}
+
+// --- IDWriteTextLayout (we call HitTestTextPosition, slot 65) ----------------
+// : IDWriteTextFormat : IUnknown. IDWriteTextFormat contributes slots 3..=27,
+// IDWriteTextLayout's own methods begin at 28; HitTestTextPosition is slot 65.
+
+#[repr(C)]
+pub struct IDWriteTextLayoutVtbl {
+    pub query_interface: usize, // 0
+    pub add_ref: usize,         // 1
+    pub release: usize,         // 2
+    // IDWriteTextFormat (3..=27)
+    pub set_text_alignment: usize,         // 3
+    pub set_paragraph_alignment: usize,    // 4
+    pub set_word_wrapping: usize,          // 5
+    pub set_reading_direction: usize,      // 6
+    pub set_flow_direction: usize,         // 7
+    pub set_incremental_tab_stop: usize,   // 8
+    pub set_trimming: usize,               // 9
+    pub set_line_spacing: usize,           // 10
+    pub get_text_alignment: usize,         // 11
+    pub get_paragraph_alignment: usize,    // 12
+    pub get_word_wrapping: usize,          // 13
+    pub get_reading_direction: usize,      // 14
+    pub get_flow_direction: usize,         // 15
+    pub get_incremental_tab_stop: usize,   // 16
+    pub get_trimming: usize,               // 17
+    pub get_line_spacing: usize,           // 18
+    pub get_font_collection_fmt: usize,    // 19
+    pub get_font_family_name_length_fmt: usize, // 20
+    pub get_font_family_name_fmt: usize,   // 21
+    pub get_font_weight_fmt: usize,        // 22
+    pub get_font_style_fmt: usize,         // 23
+    pub get_font_stretch_fmt: usize,       // 24
+    pub get_font_size_fmt: usize,          // 25
+    pub get_locale_name_length_fmt: usize, // 26
+    pub get_locale_name_fmt: usize,        // 27
+    // IDWriteTextLayout (28..)
+    pub set_max_width: usize,        // 28
+    pub set_max_height: usize,       // 29
+    pub set_font_collection: usize,  // 30
+    pub set_font_family_name: usize, // 31
+    pub set_font_weight: usize,      // 32
+    pub set_font_style: usize,       // 33
+    pub set_font_stretch: usize,     // 34
+    pub set_font_size: usize,        // 35
+    pub set_underline: usize,        // 36
+    pub set_strikethrough: usize,    // 37
+    pub set_drawing_effect: usize,   // 38
+    pub set_inline_object: usize,    // 39
+    pub set_typography: usize,       // 40
+    pub set_locale_name: usize,      // 41
+    pub get_max_width: usize,        // 42
+    pub get_max_height: usize,       // 43
+    pub get_font_collection: usize,  // 44
+    pub get_font_family_name_length: usize, // 45
+    pub get_font_family_name: usize, // 46
+    pub get_font_weight: usize,      // 47
+    pub get_font_style: usize,       // 48
+    pub get_font_stretch: usize,     // 49
+    pub get_font_size: usize,        // 50
+    pub get_underline: usize,        // 51
+    pub get_strikethrough: usize,    // 52
+    pub get_drawing_effect: usize,   // 53
+    pub get_inline_object: usize,    // 54
+    pub get_typography: usize,       // 55
+    pub get_locale_name_length: usize, // 56
+    pub get_locale_name: usize,      // 57
+    pub draw: usize,                 // 58
+    pub get_line_metrics: usize,     // 59
+    pub get_metrics: usize,          // 60
+    pub get_overhang_metrics: usize, // 61
+    pub get_cluster_metrics: usize,  // 62
+    pub determine_min_width: usize,  // 63
+    pub hit_test_point: usize,       // 64
+    pub hit_test_text_position: unsafe extern "system" fn(
+        *mut IDWriteTextLayout,
+        u32,  // textPosition
+        BOOL, // isTrailingHit
+        *mut f32, // pointX (out)
+        *mut f32, // pointY (out)
+        *mut DWRITE_HIT_TEST_METRICS, // out
+    ) -> HRESULT, // 65
+}
+
+#[repr(C)]
+pub struct IDWriteTextLayout {
+    pub vtbl: *const IDWriteTextLayoutVtbl,
+}
+
+// --- extern entry points (resolved only on the Windows target) --------------
+
+#[cfg(windows)]
+#[link(name = "user32")]
+extern "system" {
+    pub fn RegisterClassExW(wc: *const WNDCLASSEXW) -> u16;
+    pub fn CreateWindowExW(
+        ex_style: u32,
+        class_name: *const u16,
+        window_name: *const u16,
+        style: u32,
+        x: i32,
+        y: i32,
+        w: i32,
+        h: i32,
+        parent: HWND,
+        menu: HMENU,
+        instance: HINSTANCE,
+        param: *mut c_void,
+    ) -> HWND;
+    pub fn DefWindowProcW(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT;
+    pub fn ShowWindow(hwnd: HWND, cmd: i32) -> BOOL;
+    pub fn UpdateWindow(hwnd: HWND) -> BOOL;
+    pub fn GetMessageW(msg: *mut MSG, hwnd: HWND, min: u32, max: u32) -> BOOL;
+    pub fn TranslateMessage(msg: *const MSG) -> BOOL;
+    pub fn DispatchMessageW(msg: *const MSG) -> LRESULT;
+    pub fn PostQuitMessage(code: i32);
+    pub fn LoadCursorW(instance: HINSTANCE, name: *const u16) -> HCURSOR;
+    pub fn InvalidateRect(hwnd: HWND, rect: *const RECT, erase: BOOL) -> BOOL;
+    pub fn BeginPaint(hwnd: HWND, ps: *mut PAINTSTRUCT) -> HDC;
+    pub fn EndPaint(hwnd: HWND, ps: *const PAINTSTRUCT) -> BOOL;
+    pub fn GetClientRect(hwnd: HWND, rect: *mut RECT) -> BOOL;
+    pub fn SetWindowLongPtrW(hwnd: HWND, index: i32, value: isize) -> isize;
+    pub fn GetWindowLongPtrW(hwnd: HWND, index: i32) -> isize;
+    pub fn SetTimer(hwnd: HWND, id: usize, elapse: u32, proc: *mut c_void) -> usize;
+    pub fn KillTimer(hwnd: HWND, id: usize) -> BOOL;
+    pub fn GetDpiForWindow(hwnd: HWND) -> u32;
+    pub fn SetProcessDpiAwarenessContext(ctx: DPI_AWARENESS_CONTEXT) -> BOOL;
+    pub fn SetWindowPos(
+        hwnd: HWND,
+        insert_after: HWND,
+        x: i32,
+        y: i32,
+        cx: i32,
+        cy: i32,
+        flags: u32,
+    ) -> BOOL;
+}
+
+#[cfg(windows)]
+#[link(name = "kernel32")]
+extern "system" {
+    pub fn GetModuleHandleW(module_name: *const u16) -> HINSTANCE;
+}
+
+#[cfg(windows)]
+#[link(name = "d2d1")]
+extern "system" {
+    pub fn D2D1CreateFactory(
+        factory_type: u32,
+        riid: *const GUID,
+        options: *const c_void,
+        factory: *mut *mut c_void,
+    ) -> HRESULT;
+}
+
+#[cfg(windows)]
+#[link(name = "dwrite")]
+extern "system" {
+    pub fn DWriteCreateFactory(
+        factory_type: u32,
+        iid: *const GUID,
+        factory: *mut *mut c_void,
+    ) -> HRESULT;
+}

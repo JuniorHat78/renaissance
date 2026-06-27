@@ -34,6 +34,14 @@ path = "src/bin/content-ast.rs"
 name = "scriptorium-search-index"
 path = "src/bin/search-index.rs"
 
+# The native desktop editor (N0 walking skeleton) — a co-located bin module tree
+# (SCRIPTORIUM-NATIVE-SKELETON.md). Windows-only GUI; a #[cfg(not(windows))] stub
+# main keeps the workspace green on Linux/macOS CI. Reuses the parser in-process
+# (the UTF-16 buffer feeds parse_document(&[u16]) with zero conversion). No new crate.
+[[bin]]
+name = "scriptorium-native-editor"
+path = "src/bin/native-editor/main.rs"
+
 [profile.release]
 opt-level = 2
 # Abort on panic — no unwinding tables, and a clean import-free wasm module.
