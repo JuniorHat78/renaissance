@@ -19,9 +19,10 @@
 > Builds on the shipped `rust/` core (parser cutover complete; `SCRIPTORIUM-RUST-PARSER.md`
 > §14). The JS⇄wasm boundary is measured and closed (`SCRIPTORIUM-WASM-MARSHALLING.md`).
 >
-> Status: **building — N0 shipped.** The platform/render walking skeleton (§7) is
-> built and CI-validated on real Windows (COM-from-raw-Rust verdict: tolerable — §8);
-> N1 (the text buffer) is next. Last refreshed: 2026-06-27.
+> Status: **building — N0 + N1 shipped.** The platform/render walking skeleton (N0) and
+> the persistent-rope text buffer (N1) are built and CI-validated (COM-from-raw-Rust and
+> the crate-free rope both proven — §8); N2 (input correctness: grapheme movement, IME,
+> selection) is next. Last refreshed: 2026-06-27.
 
 ---
 
@@ -207,12 +208,14 @@ skeleton, not speculation. Each phase below spawns its own JIT component spec.
   **Done (2026-06-27):** the bin tree links against real d2d1/dwrite/user32/kernel32 on
   `windows-latest` (stable + beta) and the geometry oracle passes on real DirectWrite —
   **COM-from-raw-Rust is tolerable** (§8). Next: N1.
-- **N1 — Text buffer.** `[spec written → SCRIPTORIUM-NATIVE-BUFFER.md]` Choose + build
-  the buffer (rope vs piece-tree — the real decision; **resolved: a persistent, augmented,
-  chunked rope** — async-ready via O(1) structural-sharing snapshots, coordinate-native),
-  with edits at any offset, O(1) undo/redo (run-grouped), a code-point caret, Ln/Col from
-  the rope's line summary, and the parse re-driven on edit. Held by a model-based buffer
-  oracle on every platform.
+- **N1 — Text buffer.** `[BUILT + CI-validated → SCRIPTORIUM-NATIVE-BUFFER.md]` The
+  buffer decision (rope vs piece-tree) **resolved to a persistent, augmented, chunked
+  rope** — async-ready via O(1) structural-sharing snapshots, coordinate-native — with
+  edits at any offset, O(1) undo/redo (run-grouped), a code-point caret, Ln/Col from the
+  rope's line summary, and the parse re-driven on edit. **Done (2026-06-27):** the
+  hand-rolled rope passes a 50k-iteration model-based fuzz oracle on Windows + Ubuntu +
+  macOS (content, line queries, undo/redo, and structural-sharing persistence all hold
+  against a `Vec<u16>` reference) — the crate-free rope is correct (§8). Next: N2.
 - **N2 — Input correctness.** Grapheme-cluster caret movement, line breaking, IME,
   selection semantics. The "feels right for real text" pass.
 - **N3 — Layout/render maturity.** Selection rendering, scrolling, hit-testing on
@@ -240,6 +243,8 @@ sequencing lives in this section because it is coupled to the architecture.)
 | 2026-06-27 | **Skeleton first** (breadth-thin-then-depth) | Retires the COM-FFI existential risk early; unlocks the feel-loop; makes deep specs real. |
 | 2026-06-27 | **VERDICT — COM-from-raw-Rust is tolerable** (N0 finding) | The hand-rolled vtables (typed only at called slots, IUnknown-first), GUIDs, externs, and by-value `D2D_POINT_2F` link + run correctly on real Windows (stable+beta); the geometry oracle passes on real DirectWrite. The hand-rolled-bindings line (§3) holds in practice. Consume-only COM was the right scope. |
 | 2026-06-27 | N0 renders via **Direct2D `DrawTextLayout`** (consume-only); **CPU-framebuffer surface decision re-opened** | The honest CPU-fb + DWrite path needs an `IDWriteTextRenderer` COM *callback* (the deferred hard risk); N0 took the lowest-risk route to validated pixels instead. This **supersedes the "CPU/software framebuffer to start" row above** as the *starting* surface; the CPU-fb-vs-D2D choice now lands informed by COM-callback difficulty around ~N3, not a-priori. |
+| 2026-06-27 | Buffer = **persistent, augmented, chunked rope** (N1); **reverses** the brief piece-table lean | The hot op is coordinate translation, not mutation → an augmented order-statistics tree; and **persistence (`Arc`+CoW) gives O(1) structural-sharing snapshots** = lock-free off-thread reads (the N4 snappiness foundation, API available now) + O(1) undo. The piece-table's one unique edge (mmap the immutable original) is dead weight at section scale; the rope's edges (async, native coordinates) match the north star. High-fanout B+-tree/`SumTree` is the measure-gated constant-factor upgrade behind the same interface. Resolves the §9 buffer + undo forks. |
+| 2026-06-27 | **VERDICT — the crate-free hand-rolled rope is correct** (N1 finding) | The persistent rope (split/concat algebra, leaf-merge, augmented summaries) passes a 50k-iteration model-based differential fuzz vs a `Vec<u16>` reference on Windows + Ubuntu + macOS, including the structural-sharing persistence guarantee. The model-based oracle is what makes hand-rolling a rope without `Ropey` safe; it runs on every platform (no DWrite). |
 
 ## 9. Open forks (deliberately unresolved)
 
@@ -254,9 +259,12 @@ measurement or a felt problem, not an a-priori argument.
   we walk through it is unanswered. Windows-first regardless.
 - **GPU / Direct2D rendering.** CPU framebuffer to start; escalate only if a frame-time
   measurement on real content demands it.
-- **Buffer data structure (rope vs piece-tree).** Decided at N1, against the skeleton's
-  real edit patterns — not now.
-- **Undo model (stack vs tree vs persistent).** Couples to the buffer; minimal first.
+- ~~**Buffer data structure (rope vs piece-tree).**~~ **RESOLVED (N1, §8):** a persistent,
+  augmented, chunked rope (`SCRIPTORIUM-NATIVE-BUFFER.md`). High-fanout B+-tree/`SumTree`
+  remains the measure-gated constant-factor upgrade behind the same interface.
+- ~~**Undo model (stack vs tree vs persistent).**~~ **RESOLVED (N1, §8):** persistent —
+  O(1) snapshot checkpoints via the rope's structural sharing, run-grouped. A bounded/
+  delta history is a trivial later refinement, never needed for cheap undo.
 
 ## 10. Relationship to the existing system
 

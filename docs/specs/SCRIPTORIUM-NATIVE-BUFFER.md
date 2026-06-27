@@ -12,7 +12,9 @@
 > open (§9). It commits to a **persistent, augmented, chunked rope** and to the
 > reasoning behind choosing it over the piece-table. Build against it.
 >
-> Status: **spec / building.** Last refreshed: 2026-06-27.
+> Status: **built + CI-validated.** The rope, undo/redo, the caret, and the model-based
+> oracle are implemented (`rust/src/bin/native-editor/buffer.rs` + `app.rs`); the oracle
+> passes a 50k-iteration fuzz on Windows + Ubuntu + macOS. Last refreshed: 2026-06-27.
 
 ---
 
