@@ -339,52 +339,55 @@ pub struct ID2D1HwndRenderTargetVtbl {
     pub fill_ellipse: usize,           // 21
     pub draw_geometry: usize,          // 22
     pub fill_geometry: usize,          // 23
-    pub draw_mesh: usize,              // 24
-    pub fill_mesh: usize,              // 25
-    pub fill_opacity_mask: usize,      // 26
-    pub draw_bitmap: usize,            // 27
-    pub draw_text: usize,              // 28
+    // NB: ID2D1RenderTarget has exactly ONE mesh method — FillMesh. There is no
+    // DrawMesh; an earlier phantom `draw_mesh` slot here shifted every method below it
+    // down by one (so draw_text_layout pointed at DrawGlyphRun, begin_draw at EndDraw …)
+    // → an access violation on the first real draw. Caught by the windowed smoke test.
+    pub fill_mesh: usize,              // 24
+    pub fill_opacity_mask: usize,      // 25
+    pub draw_bitmap: usize,            // 26
+    pub draw_text: usize,              // 27
     pub draw_text_layout: unsafe extern "system" fn(
         *mut ID2D1HwndRenderTarget,
         D2D_POINT_2F, // origin, by value (8-byte aggregate)
         *mut IDWriteTextLayout,
         *mut c_void, // ID2D1Brush* default fill
         u32,         // D2D1_DRAW_TEXT_OPTIONS
-    ), // 29
-    pub draw_glyph_run: usize,          // 30
-    pub set_transform: usize,           // 31
-    pub get_transform: usize,           // 32
-    pub set_antialias_mode: usize,      // 33
-    pub get_antialias_mode: usize,      // 34
-    pub set_text_antialias_mode: usize, // 35
-    pub get_text_antialias_mode: usize, // 36
-    pub set_text_rendering_params: usize, // 37
-    pub get_text_rendering_params: usize, // 38
-    pub set_tags: usize,                // 39
-    pub get_tags: usize,                // 40
-    pub push_layer: usize,              // 41
-    pub pop_layer: usize,               // 42
-    pub flush: usize,                   // 43
-    pub save_drawing_state: usize,      // 44
-    pub restore_drawing_state: usize,   // 45
-    pub push_axis_aligned_clip: usize,  // 46
-    pub pop_axis_aligned_clip: usize,   // 47
-    pub clear: unsafe extern "system" fn(*mut ID2D1HwndRenderTarget, *const D2D1_COLOR_F), // 48
-    pub begin_draw: unsafe extern "system" fn(*mut ID2D1HwndRenderTarget),                 // 49
+    ), // 28
+    pub draw_glyph_run: usize,          // 29
+    pub set_transform: usize,           // 30
+    pub get_transform: usize,           // 31
+    pub set_antialias_mode: usize,      // 32
+    pub get_antialias_mode: usize,      // 33
+    pub set_text_antialias_mode: usize, // 34
+    pub get_text_antialias_mode: usize, // 35
+    pub set_text_rendering_params: usize, // 36
+    pub get_text_rendering_params: usize, // 37
+    pub set_tags: usize,                // 38
+    pub get_tags: usize,                // 39
+    pub push_layer: usize,              // 40
+    pub pop_layer: usize,               // 41
+    pub flush: usize,                   // 42
+    pub save_drawing_state: usize,      // 43
+    pub restore_drawing_state: usize,   // 44
+    pub push_axis_aligned_clip: usize,  // 45
+    pub pop_axis_aligned_clip: usize,   // 46
+    pub clear: unsafe extern "system" fn(*mut ID2D1HwndRenderTarget, *const D2D1_COLOR_F), // 47
+    pub begin_draw: unsafe extern "system" fn(*mut ID2D1HwndRenderTarget),                 // 48
     pub end_draw: unsafe extern "system" fn(
         *mut ID2D1HwndRenderTarget,
         *mut u64, // tag1
         *mut u64, // tag2
-    ) -> HRESULT, // 50
-    pub get_pixel_format: usize, // 51
-    pub set_dpi: unsafe extern "system" fn(*mut ID2D1HwndRenderTarget, f32, f32), // 52
-    pub get_dpi: usize,                 // 53
-    pub get_size: usize,                // 54
-    pub get_pixel_size: usize,          // 55
-    pub get_maximum_bitmap_size: usize, // 56
-    pub is_supported: usize,            // 57
-    pub check_window_state: usize,      // 58  (ID2D1HwndRenderTarget)
-    pub resize: unsafe extern "system" fn(*mut ID2D1HwndRenderTarget, *const D2D1_SIZE_U) -> HRESULT, // 59
+    ) -> HRESULT, // 49
+    pub get_pixel_format: usize, // 50
+    pub set_dpi: unsafe extern "system" fn(*mut ID2D1HwndRenderTarget, f32, f32), // 51
+    pub get_dpi: usize,                 // 52
+    pub get_size: usize,                // 53
+    pub get_pixel_size: usize,          // 54
+    pub get_maximum_bitmap_size: usize, // 55
+    pub is_supported: usize,            // 56
+    pub check_window_state: usize,      // 57  (ID2D1HwndRenderTarget)
+    pub resize: unsafe extern "system" fn(*mut ID2D1HwndRenderTarget, *const D2D1_SIZE_U) -> HRESULT, // 58
 }
 
 #[repr(C)]
@@ -639,12 +642,12 @@ mod layout_tests {
 
         assert_eq!(offset_of!(ID2D1HwndRenderTargetVtbl, create_solid_color_brush), 8 * P);
         assert_eq!(offset_of!(ID2D1HwndRenderTargetVtbl, fill_rectangle), 17 * P);
-        assert_eq!(offset_of!(ID2D1HwndRenderTargetVtbl, draw_text_layout), 29 * P);
-        assert_eq!(offset_of!(ID2D1HwndRenderTargetVtbl, clear), 48 * P);
-        assert_eq!(offset_of!(ID2D1HwndRenderTargetVtbl, begin_draw), 49 * P);
-        assert_eq!(offset_of!(ID2D1HwndRenderTargetVtbl, end_draw), 50 * P);
-        assert_eq!(offset_of!(ID2D1HwndRenderTargetVtbl, set_dpi), 52 * P);
-        assert_eq!(offset_of!(ID2D1HwndRenderTargetVtbl, resize), 59 * P);
+        assert_eq!(offset_of!(ID2D1HwndRenderTargetVtbl, draw_text_layout), 28 * P);
+        assert_eq!(offset_of!(ID2D1HwndRenderTargetVtbl, clear), 47 * P);
+        assert_eq!(offset_of!(ID2D1HwndRenderTargetVtbl, begin_draw), 48 * P);
+        assert_eq!(offset_of!(ID2D1HwndRenderTargetVtbl, end_draw), 49 * P);
+        assert_eq!(offset_of!(ID2D1HwndRenderTargetVtbl, set_dpi), 51 * P);
+        assert_eq!(offset_of!(ID2D1HwndRenderTargetVtbl, resize), 58 * P);
 
         assert_eq!(offset_of!(IDWriteFactoryVtbl, create_text_format), 15 * P);
         assert_eq!(offset_of!(IDWriteFactoryVtbl, create_text_layout), 18 * P);
