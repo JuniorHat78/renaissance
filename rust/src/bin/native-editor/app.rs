@@ -6,9 +6,11 @@
 //! (SCRIPTORIUM-NATIVE-BUFFER.md §7): the rope gives O(1) undo snapshots, O(1) async-ready
 //! views, and native coordinates; `text` is the current materialization that the parser
 //! and renderer consume (both already O(n), so re-materializing per edit is free relative
-//! to the reparse). N1's caret moves by code point; grapheme clusters/IME/selection are N2.
+//! to the reparse). N2 adds a selection (`anchor`/`caret`), grapheme-cluster + word motion
+//! (SCRIPTORIUM-NATIVE-INPUT.md), and selection-aware edits; IME is N2b.
 
 use crate::buffer::{Snapshot, TextBuffer};
+use crate::grapheme;
 use scriptorium_parser::parse_document;
 use std::time::Instant;
 
@@ -20,10 +22,13 @@ pub struct ParseSignal {
 }
 
 /// A caret motion, expressed in our own terms (the platform layer maps VK codes to these).
+/// Left/Right move by a grapheme cluster; WordLeft/WordRight by a word.
 #[derive(Clone, Copy, PartialEq)]
 pub enum Motion {
     Left,
     Right,
+    WordLeft,
+    WordRight,
     Home,
     End,
 }
@@ -44,20 +49,15 @@ pub struct App {
     buffer: TextBuffer,
     /// Current materialization of `buffer` — the render/parse feed, refreshed on edit.
     pub text: Vec<u16>,
-    /// Caret as a UTF-16 offset into `text`.
+    /// Caret as a UTF-16 offset into `text`. The moving end of a selection.
     pub caret: usize,
+    /// Selection anchor (the fixed end). When `anchor == caret` there is no selection.
+    pub anchor: usize,
     undo: Vec<Checkpoint>,
     redo: Vec<Checkpoint>,
     /// Which kind of edit the current undo group is, if a run is open (for grouping).
     group: Option<EditKind>,
     signal: ParseSignal,
-}
-
-fn is_high_surrogate(u: u16) -> bool {
-    (0xD800..=0xDBFF).contains(&u)
-}
-fn is_low_surrogate(u: u16) -> bool {
-    (0xDC00..=0xDFFF).contains(&u)
 }
 
 impl App {
@@ -66,6 +66,7 @@ impl App {
             buffer: TextBuffer::new(),
             text: Vec::new(),
             caret: 0,
+            anchor: 0,
             undo: Vec::new(),
             redo: Vec::new(),
             group: None,
@@ -73,6 +74,28 @@ impl App {
         };
         app.refresh();
         app
+    }
+
+    /// The selection as a half-open `[start, end)` range of UTF-16 offsets (start ≤ end).
+    pub fn selection(&self) -> (usize, usize) {
+        (self.caret.min(self.anchor), self.caret.max(self.anchor))
+    }
+
+    pub fn has_selection(&self) -> bool {
+        self.caret != self.anchor
+    }
+
+    /// The selected units (for Copy/Cut). Empty when there's no selection.
+    pub fn selected_units(&self) -> Vec<u16> {
+        let (s, e) = self.selection();
+        self.text[s..e].to_vec()
+    }
+
+    /// Select the whole document.
+    pub fn select_all(&mut self) {
+        self.anchor = 0;
+        self.caret = self.text.len();
+        self.group = None;
     }
 
     /// A `WM_CHAR` code unit: printable inserts, Backspace/Enter edit, Ctrl+Z/Y undo/redo.
@@ -88,77 +111,130 @@ impl App {
         }
     }
 
-    /// Move the caret by one code point (surrogate-pair-aware) or to the line edge. Closes
-    /// the current undo group so the next edit starts a fresh checkpoint.
-    pub fn move_caret(&mut self, motion: Motion) {
-        match motion {
-            Motion::Left => {
-                if self.caret >= 2
-                    && is_low_surrogate(self.text[self.caret - 1])
-                    && is_high_surrogate(self.text[self.caret - 2])
-                {
-                    self.caret -= 2;
-                } else if self.caret > 0 {
-                    self.caret -= 1;
-                }
-            }
-            Motion::Right => {
-                let len = self.text.len();
-                if self.caret + 1 < len
-                    && is_high_surrogate(self.text[self.caret])
-                    && is_low_surrogate(self.text[self.caret + 1])
-                {
-                    self.caret += 2;
-                } else if self.caret < len {
-                    self.caret += 1;
-                }
-            }
+    /// Move the caret by a grapheme cluster / word / to the line edge. With `extend` the
+    /// anchor stays put (growing the selection); without it the selection collapses — and
+    /// a plain Left/Right with an active selection jumps to the nearer edge (editor
+    /// convention) rather than stepping. Closes the current undo group.
+    pub fn move_caret(&mut self, motion: Motion, extend: bool) {
+        // Unshifted Left/Right on a selection collapses to the edge instead of moving.
+        if !extend && self.has_selection() && matches!(motion, Motion::Left | Motion::Right) {
+            let (s, e) = self.selection();
+            self.caret = if motion == Motion::Left { s } else { e };
+            self.anchor = self.caret;
+            self.group = None;
+            return;
+        }
+
+        let len = self.text.len();
+        let c = self.caret;
+        self.caret = match motion {
+            Motion::Left => grapheme::prev_boundary(&self.text, c),
+            Motion::Right => grapheme::next_boundary(&self.text, c),
+            Motion::WordLeft => grapheme::prev_word(&self.text, c),
+            Motion::WordRight => grapheme::next_word(&self.text, c),
             Motion::Home => {
-                while self.caret > 0 && self.text[self.caret - 1] != 0x000A {
-                    self.caret -= 1;
+                let mut p = c;
+                while p > 0 && self.text[p - 1] != 0x000A {
+                    p -= 1;
                 }
+                p
             }
             Motion::End => {
-                let len = self.text.len();
-                while self.caret < len && self.text[self.caret] != 0x000A {
-                    self.caret += 1;
+                let mut p = c;
+                while p < len && self.text[p] != 0x000A {
+                    p += 1;
                 }
+                p
             }
+        };
+        if !extend {
+            self.anchor = self.caret;
         }
         self.group = None;
     }
 
-    fn type_unit(&mut self, unit: u16) {
-        self.begin_group(EditKind::Insert);
-        self.buffer.insert(self.caret, &[unit]);
-        self.caret += 1;
+    /// Replace the current selection (if any) with `units`, as one undo group of `kind`.
+    /// The delete + insert land in a single checkpoint so typing-over-a-selection is one
+    /// undo step. Collapses to a caret after the replacement.
+    fn replace_selection(&mut self, units: &[u16], kind: EditKind) {
+        self.begin_group(kind);
+        if self.has_selection() {
+            let (s, e) = self.selection();
+            self.buffer.delete(s..e);
+            self.caret = s;
+        }
+        if !units.is_empty() {
+            self.buffer.insert(self.caret, units);
+            self.caret += units.len();
+        }
+        self.anchor = self.caret;
         self.refresh();
+    }
+
+    fn type_unit(&mut self, unit: u16) {
+        self.replace_selection(&[unit], EditKind::Insert);
     }
 
     fn newline(&mut self) {
-        self.begin_group(EditKind::Insert);
-        self.buffer.insert(self.caret, &[0x000A]);
-        self.caret += 1;
+        self.replace_selection(&[0x000A], EditKind::Insert);
         self.group = None; // break the undo run at line boundaries
-        self.refresh();
     }
 
     fn backspace(&mut self) {
+        if self.has_selection() {
+            self.replace_selection(&[], EditKind::Delete);
+            return;
+        }
         if self.caret == 0 {
             return;
         }
         self.begin_group(EditKind::Delete);
-        let n = if self.caret >= 2
-            && is_low_surrogate(self.text[self.caret - 1])
-            && is_high_surrogate(self.text[self.caret - 2])
-        {
-            2
-        } else {
-            1
-        };
-        self.buffer.delete(self.caret - n..self.caret);
-        self.caret -= n;
+        let prev = grapheme::prev_boundary(&self.text, self.caret);
+        self.buffer.delete(prev..self.caret);
+        self.caret = prev;
+        self.anchor = self.caret;
         self.refresh();
+    }
+
+    /// Forward delete (the Delete key): remove the selection, else the next grapheme.
+    pub fn delete_forward(&mut self) {
+        if self.has_selection() {
+            self.replace_selection(&[], EditKind::Delete);
+            return;
+        }
+        let len = self.text.len();
+        if self.caret >= len {
+            return;
+        }
+        self.begin_group(EditKind::Delete);
+        let next = grapheme::next_boundary(&self.text, self.caret);
+        self.buffer.delete(self.caret..next);
+        self.anchor = self.caret;
+        self.refresh();
+    }
+
+    /// Clipboard: the selected units (Copy leaves the buffer untouched).
+    pub fn copy(&self) -> Vec<u16> {
+        self.selected_units()
+    }
+
+    /// Clipboard: take the selected units and remove them (Cut).
+    pub fn cut(&mut self) -> Vec<u16> {
+        let picked = self.selected_units();
+        if !picked.is_empty() {
+            self.replace_selection(&[], EditKind::Delete);
+            self.group = None;
+        }
+        picked
+    }
+
+    /// Clipboard: insert `units` at the caret, replacing any selection (Paste).
+    pub fn paste(&mut self, units: &[u16]) {
+        if units.is_empty() {
+            return;
+        }
+        self.replace_selection(units, EditKind::Insert);
+        self.group = None; // a paste is its own undo step
     }
 
     /// Open a new undo group (push a pre-edit checkpoint) when the edit kind changes.
@@ -175,6 +251,7 @@ impl App {
             self.redo.push(Checkpoint { snap: self.buffer.snapshot(), caret: self.caret });
             self.buffer.restore(&cp.snap);
             self.caret = cp.caret.min(self.buffer.len());
+            self.anchor = self.caret;
             self.group = None;
             self.refresh();
         }
@@ -185,17 +262,18 @@ impl App {
             self.undo.push(Checkpoint { snap: self.buffer.snapshot(), caret: self.caret });
             self.buffer.restore(&cp.snap);
             self.caret = cp.caret.min(self.buffer.len());
+            self.anchor = self.caret;
             self.group = None;
             self.refresh();
         }
     }
 
-    /// Re-materialize `text` from the rope and re-drive the parse. Clamps the caret.
+    /// Re-materialize `text` from the rope and re-drive the parse. Clamps caret + anchor.
     fn refresh(&mut self) {
         self.text = self.buffer.to_units();
-        if self.caret > self.text.len() {
-            self.caret = self.text.len();
-        }
+        let len = self.text.len();
+        self.caret = self.caret.min(len);
+        self.anchor = self.anchor.min(len);
         let start = Instant::now();
         let doc = parse_document(&self.text);
         let parse_micros = start.elapsed().as_micros();
@@ -206,14 +284,22 @@ impl App {
         };
     }
 
-    /// The status line: caret Ln/Col (from the rope's line summary) + the AST signal.
+    /// The status line: caret Ln/Col (from the rope's line summary) + selection size when
+    /// active + the AST signal.
     pub fn status_text(&self) -> String {
         let line = self.buffer.line_of_offset(self.caret);
         let col = self.caret - self.buffer.offset_of_line(line);
+        let sel = if self.has_selection() {
+            let (s, e) = self.selection();
+            format!(" ({} selected)", e - s)
+        } else {
+            String::new()
+        };
         format!(
-            "Ln {}, Col {}  \u{00B7}  {} blocks \u{00B7} {} words \u{00B7} parsed in {} \u{00B5}s \u{00B7} {} units",
+            "Ln {}, Col {}{}  \u{00B7}  {} blocks \u{00B7} {} words \u{00B7} parsed in {} \u{00B5}s \u{00B7} {} units",
             line + 1,
             col + 1,
+            sel,
             self.signal.blocks,
             self.signal.words,
             self.signal.parse_micros,

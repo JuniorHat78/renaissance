@@ -26,6 +26,7 @@ pub type HCURSOR = *mut c_void;
 pub type HBRUSH = *mut c_void;
 pub type HMENU = *mut c_void;
 pub type HDC = *mut c_void;
+pub type HGLOBAL = *mut c_void;
 pub type DPI_AWARENESS_CONTEXT = *mut c_void;
 pub type WPARAM = usize;
 pub type LPARAM = isize;
@@ -53,15 +54,26 @@ pub const WM_NCCREATE: u32 = 0x0081;
 pub const WM_NCDESTROY: u32 = 0x0082;
 pub const WM_DPICHANGED: u32 = 0x02E0;
 
-// Virtual-key codes for caret movement (delivered by WM_KEYDOWN). Up/Down need
-// layout-aware geometry and are N3; N1 handles only horizontal + line edges.
+// Virtual-key codes (delivered by WM_KEYDOWN). Up/Down need layout-aware geometry and
+// are N3; N2 handles horizontal + word + line edges, plus Delete and the Ctrl shortcuts.
+pub const VK_SHIFT: i32 = 0x10;
+pub const VK_CONTROL: i32 = 0x11;
 pub const VK_END: u32 = 0x23;
 pub const VK_HOME: u32 = 0x24;
 pub const VK_LEFT: u32 = 0x25;
 pub const VK_RIGHT: u32 = 0x27;
+pub const VK_DELETE: u32 = 0x2E;
+pub const VK_A: u32 = 0x41;
+pub const VK_C: u32 = 0x43;
+pub const VK_V: u32 = 0x56;
+pub const VK_X: u32 = 0x58;
 
 pub const SWP_NOZORDER: u32 = 0x0004;
 pub const SWP_NOACTIVATE: u32 = 0x0010;
+
+// Clipboard: CF_UNICODETEXT is UTF-16; the clipboard owns a moveable HGLOBAL.
+pub const CF_UNICODETEXT: u32 = 13;
+pub const GMEM_MOVEABLE: u32 = 0x0002;
 
 // DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 is the sentinel pointer value (HANDLE)-4.
 // Int->ptr casts are illegal in const, so build it at the call site via this helper.
@@ -592,12 +604,25 @@ extern "system" {
     ) -> BOOL;
     pub fn SendMessageW(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT;
     pub fn DestroyWindow(hwnd: HWND) -> BOOL;
+    pub fn GetKeyState(vk: i32) -> i16;
+    // Clipboard (the system clipboard is a user32 resource).
+    pub fn OpenClipboard(hwnd: HWND) -> BOOL;
+    pub fn CloseClipboard() -> BOOL;
+    pub fn EmptyClipboard() -> BOOL;
+    pub fn SetClipboardData(format: u32, mem: HGLOBAL) -> HGLOBAL;
+    pub fn GetClipboardData(format: u32) -> HGLOBAL;
+    pub fn IsClipboardFormatAvailable(format: u32) -> BOOL;
 }
 
 #[cfg(windows)]
 #[link(name = "kernel32")]
 extern "system" {
     pub fn GetModuleHandleW(module_name: *const u16) -> HINSTANCE;
+    // Global memory — the clipboard takes ownership of an HGLOBAL of CF_UNICODETEXT.
+    pub fn GlobalAlloc(flags: u32, bytes: usize) -> HGLOBAL;
+    pub fn GlobalLock(mem: HGLOBAL) -> *mut c_void;
+    pub fn GlobalUnlock(mem: HGLOBAL) -> BOOL;
+    pub fn GlobalSize(mem: HGLOBAL) -> usize;
 }
 
 #[cfg(windows)]

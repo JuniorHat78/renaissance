@@ -14,9 +14,11 @@
 
 #![cfg_attr(not(windows), allow(unused))]
 
-// Platform-independent: the rope buffer + its cross-platform fuzz oracle compile and run
-// everywhere (no Win32/DWrite), so it is NOT gated to Windows.
+// Platform-independent: the rope buffer + its cross-platform fuzz oracle, and the
+// grapheme/word boundary logic + its oracle, compile and run everywhere (no Win32/DWrite),
+// so they are NOT gated to Windows.
 mod buffer;
+mod grapheme;
 
 #[cfg(windows)]
 mod app;

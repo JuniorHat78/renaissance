@@ -156,20 +156,47 @@ unsafe fn wndproc_impl(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> 
             0
         }
         WM_KEYDOWN => {
-            let motion = match wparam as u32 {
-                VK_LEFT => Some(Motion::Left),
-                VK_RIGHT => Some(Motion::Right),
-                VK_HOME => Some(Motion::Home),
-                VK_END => Some(Motion::End),
-                _ => None,
-            };
-            if let Some(m) = motion {
-                state.app.move_caret(m);
+            let shift = key_down(VK_SHIFT);
+            let ctrl = key_down(VK_CONTROL);
+            let vk = wparam as u32;
+
+            // Map VK (+ modifiers) to one editor action. `None` => not ours, fall through
+            // to DefWindowProc (so typing still produces WM_CHAR and system keys behave).
+            let mut handled = true;
+            match vk {
+                VK_LEFT => {
+                    let m = if ctrl { Motion::WordLeft } else { Motion::Left };
+                    state.app.move_caret(m, shift);
+                }
+                VK_RIGHT => {
+                    let m = if ctrl { Motion::WordRight } else { Motion::Right };
+                    state.app.move_caret(m, shift);
+                }
+                VK_HOME => state.app.move_caret(Motion::Home, shift),
+                VK_END => state.app.move_caret(Motion::End, shift),
+                VK_DELETE => state.app.delete_forward(),
+                VK_A if ctrl => state.app.select_all(),
+                VK_C if ctrl => clipboard_set(hwnd, &state.app.copy()),
+                VK_X if ctrl => {
+                    let cut = state.app.cut();
+                    clipboard_set(hwnd, &cut);
+                }
+                VK_V if ctrl => {
+                    if let Some(units) = clipboard_get(hwnd) {
+                        state.app.paste(&units);
+                    }
+                }
+                _ => handled = false,
+            }
+
+            if handled {
                 state.caret_visible = true;
                 InvalidateRect(hwnd, null(), 0);
+                0
+            } else {
+                // Let DefWindowProc run (so WM_CHAR is generated for typing, etc.).
+                DefWindowProcW(hwnd, msg, wparam, lparam)
             }
-            // Let DefWindowProc run too (so system keys still behave).
-            DefWindowProcW(hwnd, msg, wparam, lparam)
         }
         WM_TIMER => {
             if wparam == CARET_TIMER_ID {
@@ -243,6 +270,71 @@ fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
+/// Is the high (pressed) bit of this virtual key set right now?
+unsafe fn key_down(vk: i32) -> bool {
+    (GetKeyState(vk) as u16 & 0x8000) != 0
+}
+
+/// Put `units` on the system clipboard as CF_UNICODETEXT (nul-terminated). Best-effort:
+/// on any failure we just close the clipboard and move on — clipboard ops never panic.
+unsafe fn clipboard_set(hwnd: HWND, units: &[u16]) {
+    if OpenClipboard(hwnd) == 0 {
+        return;
+    }
+    EmptyClipboard();
+    let count = units.len() + 1; // + nul terminator
+    let hmem = GlobalAlloc(GMEM_MOVEABLE, count * 2);
+    if !hmem.is_null() {
+        let p = GlobalLock(hmem) as *mut u16;
+        if !p.is_null() {
+            core::ptr::copy_nonoverlapping(units.as_ptr(), p, units.len());
+            *p.add(units.len()) = 0;
+            GlobalUnlock(hmem);
+            // On success the clipboard takes ownership of hmem; we must not free it.
+            SetClipboardData(CF_UNICODETEXT, hmem);
+        }
+    }
+    CloseClipboard();
+}
+
+/// Read CF_UNICODETEXT off the clipboard, normalizing CRLF/CR to our LF-only buffer.
+/// Returns None when there's no text or the clipboard can't be opened.
+unsafe fn clipboard_get(hwnd: HWND) -> Option<Vec<u16>> {
+    if IsClipboardFormatAvailable(CF_UNICODETEXT) == 0 || OpenClipboard(hwnd) == 0 {
+        return None;
+    }
+    let mut out = None;
+    let hmem = GetClipboardData(CF_UNICODETEXT);
+    if !hmem.is_null() {
+        let p = GlobalLock(hmem) as *const u16;
+        if !p.is_null() {
+            let max = GlobalSize(hmem) / 2;
+            let mut v: Vec<u16> = Vec::new();
+            let mut i = 0;
+            while i < max {
+                let u = *p.add(i);
+                if u == 0 {
+                    break;
+                }
+                // CRLF -> LF, lone CR -> LF (the buffer is LF-only).
+                if u == 0x000D {
+                    v.push(0x000A);
+                    if i + 1 < max && *p.add(i + 1) == 0x000A {
+                        i += 1;
+                    }
+                } else {
+                    v.push(u);
+                }
+                i += 1;
+            }
+            GlobalUnlock(hmem);
+            out = Some(v);
+        }
+    }
+    CloseClipboard();
+    out
+}
+
 // --- windowed lifecycle smoke test (feature = "smoke") -----------------------
 // The breadth check the unit oracles can't give: a *real* window, driven through
 // its own WndProc with synthetic input, painted, and torn down — proving the whole
@@ -310,7 +402,7 @@ mod smoke_tests {
             // Type "Hi" — two synchronous WM_CHARs straight into the WndProc.
             SendMessageW(hwnd, WM_CHAR, 'H' as usize, 0);
             SendMessageW(hwnd, WM_CHAR, 'i' as usize, 0);
-            // Move the caret left once.
+            // Move the caret left once (no Shift held → non-extending).
             SendMessageW(hwnd, WM_KEYDOWN, VK_LEFT as usize, 0);
 
             // Exercise resize (incl. the 0x0 minimize guard) and a caret-blink tick.
