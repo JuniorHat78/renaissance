@@ -50,6 +50,7 @@ pub struct Renderer {
     target: ComPtr<ID2D1HwndRenderTarget>,
     text_brush: ComPtr<ID2D1SolidColorBrush>,
     caret_brush: ComPtr<ID2D1SolidColorBrush>,
+    sel_brush: ComPtr<ID2D1SolidColorBrush>,
     text_format: ComPtr<IDWriteTextFormat>,
     status_format: ComPtr<IDWriteTextFormat>,
     // Held only to keep our factory ref alive for the Renderer's lifetime (RAII); the
@@ -68,6 +69,8 @@ pub struct Renderer {
 /// device-loss recovery, so they live as constants rather than inline literals.
 const TEXT_COLOR: D2D1_COLOR_F = D2D1_COLOR_F { r: 0.10, g: 0.10, b: 0.13, a: 1.0 };
 const CARET_COLOR: D2D1_COLOR_F = D2D1_COLOR_F { r: 0.16, g: 0.40, b: 0.85, a: 1.0 };
+// Translucent so the glyphs read through the highlight it sits behind.
+const SEL_COLOR: D2D1_COLOR_F = D2D1_COLOR_F { r: 0.16, g: 0.40, b: 0.85, a: 0.25 };
 
 impl Renderer {
     /// Build the whole object graph for `hwnd`. Returns the HRESULT of the first
@@ -96,7 +99,7 @@ impl Renderer {
             let dwrite_factory = ComPtr::from_raw(dw as *mut IDWriteFactory);
 
             // Device-dependent resources (target + brushes), rebuildable on device loss.
-            let (target, text_brush, caret_brush) =
+            let (target, text_brush, caret_brush, sel_brush) =
                 create_device_resources(d2d_factory.as_raw(), hwnd, dpi)?;
 
             // Text formats.
@@ -109,6 +112,7 @@ impl Renderer {
                 target,
                 text_brush,
                 caret_brush,
+                sel_brush,
                 text_format,
                 status_format,
                 d2d_factory,
@@ -138,10 +142,11 @@ impl Renderer {
     /// (dead) resources in place; the next frame loops back here and retries.
     unsafe fn recreate_device_resources(&mut self) {
         match create_device_resources(self.d2d_factory.as_raw(), self.hwnd, self.dpi) {
-            Ok((target, text_brush, caret_brush)) => {
+            Ok((target, text_brush, caret_brush, sel_brush)) => {
                 self.target = target;
                 self.text_brush = text_brush;
                 self.caret_brush = caret_brush;
+                self.sel_brush = sel_brush;
             }
             Err(hr) => eprintln!("device-resource recreate failed: 0x{hr:08x}"),
         }
@@ -170,9 +175,23 @@ impl Renderer {
             let dip_h = px_h as f32 * scale;
             let text_w = (dip_w - PAD_DIP * 2.0).max(0.0);
 
-            // Main text layout (also the source of caret geometry).
+            // Main text layout (also the source of caret + selection geometry).
             let layout = self.make_layout(&app.text, self.text_format.as_raw(), text_w, dip_h);
             if !layout.is_null() {
+                // Selection highlight sits behind the glyphs.
+                if app.has_selection() {
+                    let (s, e) = app.selection();
+                    fill_selection_range(
+                        rt,
+                        v,
+                        layout,
+                        self.sel_brush.as_raw() as *mut c_void,
+                        PAD_DIP,
+                        PAD_DIP,
+                        s as u32,
+                        (e - s) as u32,
+                    );
+                }
                 (v.draw_text_layout)(
                     rt,
                     D2D_POINT_2F { x: PAD_DIP, y: PAD_DIP },
@@ -242,10 +261,11 @@ impl Renderer {
     }
 }
 
-/// The device-dependent trio rebuilt together on device loss: the hwnd render target
-/// and the text + caret brushes drawn from it (all GPU-device-backed).
+/// The device-dependent resources rebuilt together on device loss: the hwnd render
+/// target and the text / caret / selection brushes drawn from it (all GPU-device-backed).
 type DeviceResources = (
     ComPtr<ID2D1HwndRenderTarget>,
+    ComPtr<ID2D1SolidColorBrush>,
     ComPtr<ID2D1SolidColorBrush>,
     ComPtr<ID2D1SolidColorBrush>,
 );
@@ -292,7 +312,8 @@ unsafe fn create_device_resources(
 
     let text_brush = ComPtr::from_raw(make_brush(target.as_raw(), TEXT_COLOR)?);
     let caret_brush = ComPtr::from_raw(make_brush(target.as_raw(), CARET_COLOR)?);
-    Ok((target, text_brush, caret_brush))
+    let sel_brush = ComPtr::from_raw(make_brush(target.as_raw(), SEL_COLOR)?);
+    Ok((target, text_brush, caret_brush, sel_brush))
 }
 
 /// CreateSolidColorBrush on a render target.
@@ -359,6 +380,73 @@ unsafe fn caret_geometry(
     }
     let height = if m.height > 0.0 { m.height } else { FONT_SIZE_DIP * 1.3 };
     Some((x, m.top, height))
+}
+
+/// Fill the highlight rectangles for the text range `[start, start+length)` of `layout`,
+/// offset by (`origin_x`, `origin_y`) into the render target. DirectWrite returns one
+/// metric per on-screen run (a wrapped/bidi selection is several boxes); we start with a
+/// stack buffer and grow once if the range spans more runs than it holds.
+unsafe fn fill_selection_range(
+    rt: *mut ID2D1HwndRenderTarget,
+    v: &ID2D1HwndRenderTargetVtbl,
+    layout: *mut IDWriteTextLayout,
+    brush: *mut c_void,
+    origin_x: f32,
+    origin_y: f32,
+    start: u32,
+    length: u32,
+) {
+    let lv = &*(*layout).vtbl;
+    let mut metrics: [DWRITE_HIT_TEST_METRICS; 32] = zeroed();
+    let mut actual: u32 = 0;
+    let hr = (lv.hit_test_text_range)(
+        layout,
+        start,
+        length,
+        0.0,
+        0.0,
+        metrics.as_mut_ptr(),
+        metrics.len() as u32,
+        &mut actual,
+    );
+    if hr >= 0 {
+        for m in &metrics[..actual as usize] {
+            fill_metric(rt, v, brush, origin_x, origin_y, m);
+        }
+        return;
+    }
+    // Insufficient buffer: `actual` now holds the count we need. Grow once and retry.
+    if actual > 0 {
+        let mut buf: Vec<DWRITE_HIT_TEST_METRICS> = Vec::new();
+        buf.resize_with(actual as usize, || zeroed());
+        let cap = buf.len() as u32;
+        let mut got: u32 = 0;
+        let hr2 =
+            (lv.hit_test_text_range)(layout, start, length, 0.0, 0.0, buf.as_mut_ptr(), cap, &mut got);
+        if hr2 >= 0 {
+            for m in &buf[..got as usize] {
+                fill_metric(rt, v, brush, origin_x, origin_y, m);
+            }
+        }
+    }
+}
+
+/// Fill one selection-run rectangle (a hit-test metric) with `brush`.
+unsafe fn fill_metric(
+    rt: *mut ID2D1HwndRenderTarget,
+    v: &ID2D1HwndRenderTargetVtbl,
+    brush: *mut c_void,
+    origin_x: f32,
+    origin_y: f32,
+    m: &DWRITE_HIT_TEST_METRICS,
+) {
+    let rect = D2D1_RECT_F {
+        left: origin_x + m.left,
+        top: origin_y + m.top,
+        right: origin_x + m.left + m.width,
+        bottom: origin_y + m.top + m.height,
+    };
+    (v.fill_rectangle)(rt, &rect, brush);
 }
 
 /// A nul-terminated UTF-16 string for the wide Win32/DWrite APIs.

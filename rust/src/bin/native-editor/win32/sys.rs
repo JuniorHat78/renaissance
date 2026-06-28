@@ -548,6 +548,16 @@ pub struct IDWriteTextLayoutVtbl {
         *mut f32, // pointY (out)
         *mut DWRITE_HIT_TEST_METRICS, // out
     ) -> HRESULT, // 65
+    pub hit_test_text_range: unsafe extern "system" fn(
+        *mut IDWriteTextLayout,
+        u32, // textPosition
+        u32, // textLength
+        f32, // originX
+        f32, // originY
+        *mut DWRITE_HIT_TEST_METRICS, // out array (caller-allocated)
+        u32, // maxHitTestMetricsCount
+        *mut u32, // actualHitTestMetricsCount (out)
+    ) -> HRESULT, // 66
 }
 
 #[repr(C)]
@@ -678,6 +688,7 @@ mod layout_tests {
         assert_eq!(offset_of!(IDWriteFactoryVtbl, create_text_layout), 18 * P);
 
         assert_eq!(offset_of!(IDWriteTextLayoutVtbl, hit_test_text_position), 65 * P);
+        assert_eq!(offset_of!(IDWriteTextLayoutVtbl, hit_test_text_range), 66 * P);
     }
 
     #[test]

@@ -415,10 +415,20 @@ mod smoke_tests {
             UpdateWindow(hwnd);
             SendMessageW(hwnd, WM_PAINT, 0, 0);
 
+            // Drive a selection directly (synthetic Shift can't move GetKeyState) and
+            // paint again, so the selection path exercises IDWriteTextLayout::
+            // HitTestTextRange (vtbl slot 66) on real DirectWrite — the same
+            // never-been-called-slot risk that the draw_text_layout AV came from.
+            let stm = &mut *(GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut WindowState);
+            stm.app.select_all();
+            assert!(stm.app.has_selection(), "select_all should select the typed text");
+            InvalidateRect(hwnd, null(), 0);
+            SendMessageW(hwnd, WM_PAINT, 0, 0);
+
             // Read the buffer state back out of the live window before we destroy it.
             let st = &*(GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut WindowState);
             assert_eq!(st.app.text.len(), 2, "expected two typed units");
-            assert_eq!(st.app.caret, 1, "caret should have moved left of 'i'");
+            assert_eq!(st.app.selection(), (0, 2), "whole document should be selected");
 
             // Tear down — WM_DESTROY + WM_NCDESTROY run synchronously and drop the box.
             assert!(DestroyWindow(hwnd) != 0, "DestroyWindow failed");
