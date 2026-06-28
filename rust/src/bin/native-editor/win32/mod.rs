@@ -242,3 +242,95 @@ unsafe fn wndproc_impl(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> 
 fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
 }
+
+// --- windowed lifecycle smoke test (feature = "smoke") -----------------------
+// The breadth check the unit oracles can't give: a *real* window, driven through
+// its own WndProc with synthetic input, painted, and torn down — proving the whole
+// CREATE → input → paint → DESTROY chain (GWLP_USERDATA threading, the box adopt/drop,
+// the message routing) holds together on a live OS. It needs a window station, so it's
+// Windows-only, #[ignore]'d, and gated behind the `smoke` feature so a regression here
+// can't break the main gate. CI runs it informationally (continue-on-error).
+#[cfg(all(test, windows, feature = "smoke"))]
+mod smoke_tests {
+    use super::*;
+
+    #[test]
+    #[ignore = "windowed; run with: cargo test --features smoke -- --ignored"]
+    fn window_lifecycle_survives_synthetic_input() {
+        unsafe {
+            SetProcessDpiAwarenessContext(dpi_per_monitor_aware_v2());
+            let hinstance = GetModuleHandleW(null());
+            let class_name = wide("ScriptoriumSmokeTestN0");
+
+            let wc = WNDCLASSEXW {
+                cbSize: size_of::<WNDCLASSEXW>() as u32,
+                style: CS_HREDRAW | CS_VREDRAW,
+                lpfnWndProc: Some(wndproc),
+                cbClsExtra: 0,
+                cbWndExtra: 0,
+                hInstance: hinstance,
+                hIcon: null_mut(),
+                hCursor: LoadCursorW(null_mut(), IDC_ARROW as usize as *const u16),
+                hbrBackground: null_mut(),
+                lpszMenuName: null(),
+                lpszClassName: class_name.as_ptr(),
+                hIconSm: null_mut(),
+            };
+            assert!(RegisterClassExW(&wc) != 0, "RegisterClassExW failed");
+
+            let state = Box::new(WindowState {
+                app: App::new(),
+                renderer: None,
+                caret_visible: true,
+                dpi: 96,
+            });
+            let state_ptr = Box::into_raw(state);
+
+            let title = wide("smoke");
+            let hwnd = CreateWindowExW(
+                0,
+                class_name.as_ptr(),
+                title.as_ptr(),
+                WS_OVERLAPPEDWINDOW,
+                CW_USEDEFAULT,
+                CW_USEDEFAULT,
+                800,
+                600,
+                null_mut(),
+                null_mut(),
+                hinstance,
+                state_ptr as *mut c_void,
+            );
+            assert!(!hwnd.is_null(), "CreateWindowExW failed");
+
+            // CREATE already ran synchronously; the box pointer is now owned by the
+            // window. Read state back through GWLP_USERDATA from here on.
+            ShowWindow(hwnd, SW_SHOW);
+
+            // Type "Hi" — two synchronous WM_CHARs straight into the WndProc.
+            SendMessageW(hwnd, WM_CHAR, 'H' as usize, 0);
+            SendMessageW(hwnd, WM_CHAR, 'i' as usize, 0);
+            // Move the caret left once.
+            SendMessageW(hwnd, WM_KEYDOWN, VK_LEFT as usize, 0);
+
+            // Exercise resize (incl. the 0x0 minimize guard) and a caret-blink tick.
+            SendMessageW(hwnd, WM_SIZE, 0, (600isize << 16) | 800);
+            SendMessageW(hwnd, WM_SIZE, 0, 0); // minimize: must be a no-op, not a panic.
+            SendMessageW(hwnd, WM_TIMER, CARET_TIMER_ID, 0);
+
+            // Force a paint through the real WM_PAINT path.
+            InvalidateRect(hwnd, null(), 0);
+            UpdateWindow(hwnd);
+            SendMessageW(hwnd, WM_PAINT, 0, 0);
+
+            // Read the buffer state back out of the live window before we destroy it.
+            let st = &*(GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut WindowState);
+            assert_eq!(st.app.text.len(), 2, "expected two typed units");
+            assert_eq!(st.app.caret, 1, "caret should have moved left of 'i'");
+
+            // Tear down — WM_DESTROY + WM_NCDESTROY run synchronously and drop the box.
+            assert!(DestroyWindow(hwnd) != 0, "DestroyWindow failed");
+            // state_ptr is freed now; do not touch it.
+        }
+    }
+}

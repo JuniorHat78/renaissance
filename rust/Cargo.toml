@@ -7,6 +7,14 @@ description = "Crate-free Rust port of the Renaissance AST parser, oracle-valida
 # ZERO third-party dependencies — std only (SCRIPTORIUM-RUST-PARSER.md §7).
 # Do not add a [dependencies] section. No serde, no regex, no wasm-bindgen.
 
+[features]
+# `smoke` gates the windowed lifecycle smoke test for the native editor: it spins up
+# a real window, pumps synthetic WM_CHAR/WM_KEYDOWN, forces a paint, and destroys the
+# window. It's #[ignore]'d and Windows-only, and opt-in so a blind-write regression in
+# this OS-driving test can't break the main gate. CI runs it informationally:
+#   cargo test --features smoke -- --ignored
+smoke = []
+
 [lib]
 name = "scriptorium_parser"
 path = "src/lib.rs"
