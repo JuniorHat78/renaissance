@@ -154,5 +154,22 @@ jobs:
             rust/target
           key: ${{ runner.os }}-native-clippy-${{ hashFiles('rust/src/bin/native-editor/**', 'rust/Cargo.toml') }}
           restore-keys: ${{ runner.os }}-native-clippy-
-      - name: Clippy (all features, incl. tests) — warnings as errors, non-gating
-        run: cargo clippy --manifest-path rust/Cargo.toml --bin scriptorium-native-editor --all-features --tests -- -D warnings
+      # `cargo clippy --bin` compiles the whole crate, so it also lints the shipped,
+      # oracle-validated parser/server/generators — which carry pre-existing, deliberate
+      # style debt (e.g. enum_variant_names on the AST variants, invasive to rename).
+      # Deny warnings so a NEW lint in the native-editor FFI path turns this red, but
+      # `-A` the known parser lints so the signal is about the editor, not old debt.
+      # The native-editor modules themselves are kept clippy-clean.
+      - name: Clippy (all features, incl. tests) — native editor clean; parser debt allowed
+        run: >
+          cargo clippy --manifest-path rust/Cargo.toml --bin scriptorium-native-editor --all-features --tests --
+          -D warnings
+          -A clippy::uninlined_format_args
+          -A clippy::needless_range_loop
+          -A clippy::needless_late_init
+          -A clippy::manual_range_contains
+          -A clippy::manual_flatten
+          -A clippy::manual_find
+          -A clippy::manual_contains
+          -A clippy::manual_clamp
+          -A clippy::enum_variant_names

@@ -242,6 +242,14 @@ impl Renderer {
     }
 }
 
+/// The device-dependent trio rebuilt together on device loss: the hwnd render target
+/// and the text + caret brushes drawn from it (all GPU-device-backed).
+type DeviceResources = (
+    ComPtr<ID2D1HwndRenderTarget>,
+    ComPtr<ID2D1SolidColorBrush>,
+    ComPtr<ID2D1SolidColorBrush>,
+);
+
 /// Build the device-dependent resources: an hwnd render target sized to `hwnd`'s
 /// current client rect (DPI from the window, so we work in DIPs and Direct2D scales to
 /// physical pixels) plus the two brushes drawn from it. Used both at construction and
@@ -250,14 +258,7 @@ unsafe fn create_device_resources(
     d2d_factory: *mut ID2D1Factory,
     hwnd: HWND,
     dpi: u32,
-) -> Result<
-    (
-        ComPtr<ID2D1HwndRenderTarget>,
-        ComPtr<ID2D1SolidColorBrush>,
-        ComPtr<ID2D1SolidColorBrush>,
-    ),
-    HRESULT,
-> {
+) -> Result<DeviceResources, HRESULT> {
     let mut rc: RECT = zeroed();
     GetClientRect(hwnd, &mut rc);
     let size = D2D1_SIZE_U {
