@@ -98,12 +98,32 @@ pub fn run() {
     }
 }
 
+/// The real WndProc, registered with the class. Unwinding a Rust panic across an
+/// `extern "system"` boundary into the OS is undefined behavior, so we catch it
+/// here: every dispatch runs inside `catch_unwind`, and a panic degrades to
+/// `DefWindowProcW` (the window keeps living) instead of corrupting the stack.
+/// The state pointer is `AssertUnwindSafe` — we own it and a poisoned edit at
+/// worst drops a frame, it can't violate memory safety across the catch.
 unsafe extern "system" fn wndproc(
     hwnd: HWND,
     msg: u32,
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        wndproc_impl(hwnd, msg, wparam, lparam)
+    }));
+    match result {
+        Ok(lr) => lr,
+        Err(_) => {
+            // A handler panicked. Don't let it cross into the OS; fall back to the
+            // default proc so the window survives. (stderr already carries the panic.)
+            DefWindowProcW(hwnd, msg, wparam, lparam)
+        }
+    }
+}
+
+unsafe fn wndproc_impl(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     // Adopt the boxed state pointer before anything else needs it.
     if msg == WM_NCCREATE {
         let cs = lparam as *const CREATESTRUCTW;
