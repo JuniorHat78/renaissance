@@ -1,12 +1,22 @@
 name: scriptorium-native
 
-# N0 walking-skeleton CI (SCRIPTORIUM-NATIVE-SKELETON.md §7). Two deterministic
-# gates (allowed to hard-fail, per the project's CI philosophy — this is link +
-# geometry correctness, not a fickle metric):
+# Native-editor CI (SCRIPTORIUM-NATIVE-SKELETON.md §7 + the Windows-FFI hardening
+# sprint). Two tiers, per the project's CI philosophy:
+#
+# DETERMINISTIC GATES (allowed to hard-fail — link + correctness, not fickle metrics):
 #   - windows-latest: the hand-rolled Win32/COM externs must LINK against the real
-#     system import libs (d2d1/dwrite/user32/kernel32), and the layout-geometry
-#     oracle (monotonic caret x) must hold on real DirectWrite.
-#   - ubuntu-latest: the #[cfg(not(windows))] stub must keep the workspace green.
+#     system import libs (d2d1/dwrite/user32/kernel32); the ABI layout assertions
+#     (vtable slot offsets + value-struct sizes) must hold; the geometry oracle
+#     (monotonic caret x) must hold on real DirectWrite; the buffer fuzz oracle must
+#     hold — and all of it in BOTH debug and release (panic=abort changes codegen).
+#   - ubuntu/macos: the #[cfg(not(windows))] stub must keep the workspace green, and
+#     the pure-logic buffer fuzz oracle must hold.
+#
+# INFORMATIVE JOBS (continue-on-error — they inform, they never gate):
+#   - windows-smoke: the windowed lifecycle smoke test on a real window station.
+#   - buffer-miri: the buffer oracle under Miri (UB / aliasing detection on the rope).
+#   - lint: clippy over the real Windows cfg incl. the smoke + test code.
+#
 # The native editor reuses the parser in-process and adds no crate, so this only
 # fires when the bin (or the manifest, or this workflow) changes.
 
@@ -28,10 +38,10 @@ permissions:
   contents: read
 
 jobs:
-  # The real test of the hand-rolled FFI: it must link, and the geometry oracle must
-  # hold on real DWrite. Matrixed over stable + beta (toolchain determinism).
+  # GATE: the hand-rolled FFI must link, the ABI assertions + geometry + buffer
+  # oracles must hold, in debug AND release. Matrixed over stable + beta.
   windows-link:
-    name: native editor links + geometry oracle (windows / ${{ matrix.toolchain }})
+    name: native links + oracles (windows / ${{ matrix.toolchain }})
     runs-on: windows-latest
     strategy:
       fail-fast: false
@@ -54,13 +64,15 @@ jobs:
           restore-keys: ${{ runner.os }}-${{ matrix.toolchain }}-native-
       - name: Build the native editor (proves the hand-rolled externs link)
         run: cargo build --release --manifest-path rust/Cargo.toml --bin scriptorium-native-editor
-      - name: Oracles — geometry (real DirectWrite) + buffer (model-based fuzz)
+      - name: Oracles (debug) — ABI layout + geometry (real DWrite) + buffer fuzz
         run: cargo test --manifest-path rust/Cargo.toml --bin scriptorium-native-editor
+      - name: Oracles (release) — same, with panic=abort codegen
+        run: cargo test --release --manifest-path rust/Cargo.toml --bin scriptorium-native-editor
 
-  # The stub must keep the workspace building where there is no Win32 (Linux/macOS CI
-  # builds the wasm + generator bins; the native bin must not break them).
+  # GATE: the stub must keep the workspace building where there is no Win32, and the
+  # pure-logic buffer fuzz oracle must hold (it is not windows-gated).
   stub-builds:
-    name: non-windows stub builds + buffer oracle (${{ matrix.os }})
+    name: non-windows stub + buffer oracle (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -85,3 +97,62 @@ jobs:
           cargo run --manifest-path rust/Cargo.toml --bin scriptorium-native-editor
       - name: Buffer oracle (model-based fuzz — pure logic, no DWrite)
         run: cargo test --manifest-path rust/Cargo.toml --bin scriptorium-native-editor
+
+  # INFORMATIVE: the windowed lifecycle smoke test on a real window station. Gated
+  # behind the `smoke` feature + #[ignore], so it's opt-in and never blocks the gate.
+  windows-smoke:
+    name: windowed lifecycle smoke (informative)
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            rust/target
+          key: ${{ runner.os }}-native-smoke-${{ hashFiles('rust/src/bin/native-editor/**', 'rust/Cargo.toml') }}
+          restore-keys: ${{ runner.os }}-native-smoke-
+      - name: Smoke — create → synthetic input → paint → destroy a real window
+        run: cargo test --features smoke --manifest-path rust/Cargo.toml --bin scriptorium-native-editor -- --ignored --nocapture
+
+  # INFORMATIVE: the buffer oracle under Miri — undefined-behavior / aliasing detection
+  # on the persistent rope's Arc copy-on-write and raw split/concat. Slow, so a reduced
+  # fuzz budget. Runs on the stub (no FFI) so Miri never meets a system call it can't model.
+  buffer-miri:
+    name: buffer oracle under Miri (informative)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    env:
+      SCRIPTORIUM_FUZZ: "150"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: miri
+      - name: Miri — buffer rope oracle (UB / aliasing under the model fuzz)
+        run: cargo +nightly miri test --manifest-path rust/Cargo.toml --bin scriptorium-native-editor buffer
+
+  # INFORMATIVE: clippy over the REAL Windows cfg, including the smoke + test code, so
+  # FFI-path lints surface for debugging without gating the merge.
+  lint:
+    name: clippy over the Windows cfg (informative)
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            rust/target
+          key: ${{ runner.os }}-native-clippy-${{ hashFiles('rust/src/bin/native-editor/**', 'rust/Cargo.toml') }}
+          restore-keys: ${{ runner.os }}-native-clippy-
+      - name: Clippy (all features, incl. tests) — warnings as errors, non-gating
+        run: cargo clippy --manifest-path rust/Cargo.toml --bin scriptorium-native-editor --all-features --tests -- -D warnings
