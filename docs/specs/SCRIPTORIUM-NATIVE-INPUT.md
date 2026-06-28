@@ -1,6 +1,7 @@
 # SCRIPTORIUM-NATIVE-INPUT — N2: input correctness
 
-**Status:** building. Part of the native-editor umbrella (`SCRIPTORIUM-NATIVE-EDITOR.md`
+**Status:** N2a built + CI-validated (2026-06-28); N2b (IME, our-own line breaking) named
+and pending. Part of the native-editor umbrella (`SCRIPTORIUM-NATIVE-EDITOR.md`
 §7 roadmap, N2). N0 gave us a window + caret + paint; N1 gave us a correct persistent
 rope with a *code-point* caret. N2 makes the editor **feel like a real text editor for
 real text**: selection, grapheme-cluster motion, word motion, and the clipboard — the

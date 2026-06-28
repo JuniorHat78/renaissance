@@ -216,10 +216,18 @@ skeleton, not speculation. Each phase below spawns its own JIT component spec.
   hand-rolled rope passes a 50k-iteration model-based fuzz oracle on Windows + Ubuntu +
   macOS (content, line queries, undo/redo, and structural-sharing persistence all hold
   against a `Vec<u16>` reference) — the crate-free rope is correct (§8). Next: N2.
-- **N2 — Input correctness.** Grapheme-cluster caret movement, line breaking, IME,
-  selection semantics. The "feels right for real text" pass.
-- **N3 — Layout/render maturity.** Selection rendering, scrolling, hit-testing on
-  `IDWriteTextLayout`; the layout oracle stood up alongside.
+- **N2 — Input correctness.** `[N2a BUILT + CI-validated → SCRIPTORIUM-NATIVE-INPUT.md]`
+  The "feels right for real text" pass. **N2a done (2026-06-28):** a real selection
+  (anchor/caret, shift-extend, collapse-to-edge, select-all), grapheme-cluster + word
+  motion (a pragmatic UAX #29 subset — surrogates/CRLF/Extend/ZWJ/regional-indicators,
+  oracle'd on every platform), selection-aware edits in one undo group, forward Delete,
+  a hand-rolled CF_UNICODETEXT clipboard (cut/copy/paste, CRLF→LF), and selection
+  rendering via `HitTestTextRange` behind the glyphs. **N2b (named, next):** IME
+  composition (`WM_IME_*`) and our-own UAX #14 line breaking (when we own wrapping). Then
+  run it and start the feel-loop.
+- **N3 — Layout/render maturity.** Scrolling, full hit-testing (click-to-place,
+  drag-select) on `IDWriteTextLayout`, vertical (Up/Down) caret motion; the layout oracle
+  stood up alongside.
 - **N4 — Concurrency / latency.** Off-thread IO/heavy work, input coalescing, the
   latency tuning where snappiness is born.
 - **N5+ — measure-gated sirens.** Virtualized layout, incremental parse, arenas,
@@ -246,6 +254,9 @@ sequencing lives in this section because it is coupled to the architecture.)
 | 2026-06-27 | Buffer = **persistent, augmented, chunked rope** (N1); **reverses** the brief piece-table lean | The hot op is coordinate translation, not mutation → an augmented order-statistics tree; and **persistence (`Arc`+CoW) gives O(1) structural-sharing snapshots** = lock-free off-thread reads (the N4 snappiness foundation, API available now) + O(1) undo. The piece-table's one unique edge (mmap the immutable original) is dead weight at section scale; the rope's edges (async, native coordinates) match the north star. High-fanout B+-tree/`SumTree` is the measure-gated constant-factor upgrade behind the same interface. Resolves the §9 buffer + undo forks. |
 | 2026-06-27 | **VERDICT — the crate-free hand-rolled rope is correct** (N1 finding) | The persistent rope (split/concat algebra, leaf-merge, augmented summaries) passes a 50k-iteration model-based differential fuzz vs a `Vec<u16>` reference on Windows + Ubuntu + macOS, including the structural-sharing persistence guarantee. The model-based oracle is what makes hand-rolling a rope without `Ropey` safe; it runs on every platform (no DWrite). |
 | 2026-06-28 | **Windows-FFI hardening pass** — make the scariest FFI bug classes deterministic, not luck-of-the-runtime | Hand-rolled COM/Win32 fails in ways unit oracles miss: a miscounted vtable slot, a panic unwinding into the OS, a lost GPU device, a 0×0 minimize. Five deterministic guards: (1) **ABI layout assertions** — `offset_of!`/`size_of` pin every *called* vtable slot's index + every by-value struct's size, so a slot-count error fails `cargo test`, not a user's machine; (2) **`catch_unwind` at the WndProc** — a Rust panic across `extern "system"` is UB, so dispatch runs inside a catch and degrades to `DefWindowProcW`; (3) **device-loss recovery** — split device-independent (factories/formats) from device-dependent (target/brushes) resources, rebuild the latter on `D2DERR_RECREATE_TARGET` from `EndDraw`; (4) **zero-size resize guard** for the minimize `WM_SIZE`; (5) a **windowed lifecycle smoke test** (`smoke` feature, `#[ignore]`) driving a real window through CREATE→synthetic input→paint→DESTROY. CI gains debug+release oracle runs (panic=abort changes codegen) plus informative smoke / Miri / clippy jobs. |
+| 2026-06-28 | **VERDICT — the smoke test catches what assertions can't; ABI asserts ≠ correct slots** (hardening finding) | On its first run the smoke test found a **phantom `draw_mesh` vtable slot** that shifted every render-target method below it down by one → an **access violation on the first real paint**. The ABI assertions could *not* catch it (they encoded the same wrong index); N0's geometry oracle never called the render-*target* slots. Lesson carried into N2: a runtime that **actually calls every newly-typed slot** is the only guard against mis-reading COM order — so when N2 typed `HitTestTextRange` (slot 66), the smoke test was extended to drive select-all + a real paint to exercise it. |
+| 2026-06-28 | **Local validation restored** — the MSVC linker works again; Miri + ASan are local dev tools | The "Actions is the only validator" constraint is lifted. `cargo test`/`--features smoke` link and run locally; the FFI/COM/rope is **ASan-clean** (incl. COM teardown). Working rule: validate locally — ASan/Miri on any FFI change — *before* pushing; CI is the backstop, not the babysitter. |
+| 2026-06-28 | **N2a input correctness** — selection + grapheme/word motion + clipboard + selection rendering | A code-point caret lies on real prose (accents, emoji, flags). N2a adds: a selection (`anchor`/`caret`, shift-extend, collapse-to-edge, select-all); Left/Right by grapheme + Ctrl-arrows by word via a **pragmatic UAX #29 subset** (we own the engine — implement the rules real prose hits, don't vendor the UCD; the boundary fn is the single swap point); selection-aware edits in one undo group; a hand-rolled **CF_UNICODETEXT clipboard** (no `windows-sys`, CRLF→LF on paste); and **selection rendering** via `HitTestTextRange`. IME (`WM_IME_*`) + our-own UAX #14 line breaking are the named **N2b** follow-ups. `prev_boundary` walks from buffer start (clusters straddle newlines) — O(offset), user-paced; virtualize at N3+ if a huge doc makes it felt. |
 
 ## 9. Open forks (deliberately unresolved)
 

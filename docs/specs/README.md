@@ -33,6 +33,11 @@ roadmap, but they are not the roadmap itself. For overall orientation read
   the rope) with insert/delete at any offset, O(1) structural-sharing undo, a code-point
   caret, Ln/Col from the line summary, and parse-on-edit. Proven by a model-based fuzz
   oracle (50k iters) on every platform.
+- `SCRIPTORIUM-NATIVE-INPUT.md`: **N2a (built + CI-validated)** — input correctness: a
+  real selection (anchor/caret, shift-extend, select-all), grapheme-cluster + word motion
+  (a pragmatic UAX #29 subset, oracle'd on every platform), selection-aware edits, a
+  hand-rolled CF_UNICODETEXT clipboard, and selection rendering via `HitTestTextRange`.
+  IME (`WM_IME_*`) and our-own UAX #14 line breaking are the named N2b follow-ups.
 
 **Search, recovery, UX:**
 - `ORACLE-SEARCH-SPEC.md`: target AST-native search/index/ranking system for
