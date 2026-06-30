@@ -122,8 +122,11 @@ the single swap point if it ever matters.)
 - **Click past end-of-line** (in the blank to the right of the last glyph on a wrapped/short
   line): `isInside == false`, but HitTestPoint still returns the nearest cluster — the line's
   last position, trailing → caret at line end (before the newline). Correct and free.
-- **Click below the last line** (in the empty area beneath the text): nearest line is the
-  last; caret → document end. Free.
+- **Click below the last line** (in the empty area beneath the text): DWrite clamps y to the
+  last line and resolves x *within* it — far-right → line end (document end), far-left → line
+  start. (Notepad-style "anywhere-below → document end" would be a deliberate special-case on
+  top; we take DWrite's nearest-x-on-the-last-line, which is the honest free behavior and what
+  the oracle pins.) Free.
 - **Click in the left margin** (`content_x < 0`): nearest is the line-start leading edge →
   caret at line start. Free.
 - **Click above the first line / negative content_y** (only reachable mid-drag with autoscroll

@@ -23,6 +23,10 @@ struct WindowState {
     renderer: Option<Renderer>,
     caret_visible: bool,
     dpi: u32,
+    /// View-space scroll offset (content-space DIPs of the viewport top). Wheel + scrollbar
+    /// move it (N3c); the renderer translates the text by it. Kept here, not in `app`,
+    /// because it is a view quantity, not document state (SCRIPTORIUM-NATIVE-LAYOUT.md §2).
+    scroll_y: f32,
 }
 
 const CARET_TIMER_ID: usize = 1;
@@ -63,6 +67,7 @@ pub fn run() {
             renderer: None,
             caret_visible: true,
             dpi: 96,
+            scroll_y: 0.0,
         });
         let state_ptr = Box::into_raw(state);
 
@@ -243,6 +248,7 @@ unsafe fn wndproc_impl(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> 
                 r.draw(
                     &state.app,
                     state.caret_visible,
+                    state.scroll_y,
                     (rc.right - rc.left).max(0) as u32,
                     (rc.bottom - rc.top).max(0) as u32,
                 );
@@ -375,6 +381,7 @@ mod smoke_tests {
                 renderer: None,
                 caret_visible: true,
                 dpi: 96,
+                scroll_y: 0.0,
             });
             let state_ptr = Box::into_raw(state);
 
@@ -424,6 +431,24 @@ mod smoke_tests {
             assert!(stm.app.has_selection(), "select_all should select the typed text");
             InvalidateRect(hwnd, null(), 0);
             SendMessageW(hwnd, WM_PAINT, 0, 0);
+
+            // Exercise the N3 geometry service on the live renderer + real DirectWrite: this
+            // CALLS the newly-typed HitTestPoint (64) and GetMetrics (60) slots through the
+            // cached layout — the never-been-called-slot guard (the phantom draw_mesh AV).
+            if let Some(r) = stm.renderer.as_mut() {
+                let gen = stm.app.content_gen();
+                assert!(
+                    r.caret_xywh(&stm.app.text, gen, 1).is_some(),
+                    "caret_xywh should resolve on real DWrite"
+                );
+                assert!(
+                    r.content_height(&stm.app.text, gen) > 0.0,
+                    "content_height (GetMetrics) should be positive"
+                );
+                // A click near the top-left should land at/just after the first glyph.
+                let off = r.hit_test_point(&stm.app.text, gen, 18, 18, 0.0);
+                assert!(off <= stm.app.text.len(), "hit-test offset must be in range");
+            }
 
             // Read the buffer state back out of the live window before we destroy it.
             let st = &*(GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut WindowState);

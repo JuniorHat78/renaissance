@@ -234,6 +234,21 @@ pub struct DWRITE_HIT_TEST_METRICS {
     pub is_trimmed: BOOL,
 }
 
+// IDWriteTextLayout::GetMetrics out-param: the whole laid-out text's box. We read
+// `height` (the real content height, for the scroll extent) and `line_count`.
+#[repr(C)]
+pub struct DWRITE_TEXT_METRICS {
+    pub left: f32,
+    pub top: f32,
+    pub width: f32,
+    pub width_including_trailing_whitespace: f32,
+    pub height: f32,
+    pub layout_width: f32,
+    pub layout_height: f32,
+    pub max_bidi_reordering_depth: u32,
+    pub line_count: u32,
+}
+
 // --- interface GUIDs --------------------------------------------------------
 
 // ID2D1Factory  {06152247-6f50-465a-9245-118bfd3b6007}
@@ -467,9 +482,13 @@ pub struct IDWriteTextFormat {
     pub vtbl: *const c_void,
 }
 
-// --- IDWriteTextLayout (we call HitTestTextPosition, slot 65) ----------------
+// --- IDWriteTextLayout (we call GetMetrics 60, HitTestPoint 64, ---------------
+//     HitTestTextPosition 65, HitTestTextRange 66) --------------------------------
 // : IDWriteTextFormat : IUnknown. IDWriteTextFormat contributes slots 3..=27,
-// IDWriteTextLayout's own methods begin at 28; HitTestTextPosition is slot 65.
+// IDWriteTextLayout's own methods begin at 28. GetMetrics (60) gives the content
+// height for the scroll extent; HitTestPoint (64) maps a clicked pixel to a text
+// position (N3 spatial input); HitTestTextPosition (65) and HitTestTextRange (66)
+// give caret + selection geometry.
 
 #[repr(C)]
 pub struct IDWriteTextLayoutVtbl {
@@ -535,11 +554,21 @@ pub struct IDWriteTextLayoutVtbl {
     pub get_locale_name: usize,      // 57
     pub draw: usize,                 // 58
     pub get_line_metrics: usize,     // 59
-    pub get_metrics: usize,          // 60
+    pub get_metrics: unsafe extern "system" fn(
+        *mut IDWriteTextLayout,
+        *mut DWRITE_TEXT_METRICS, // out
+    ) -> HRESULT, // 60
     pub get_overhang_metrics: usize, // 61
     pub get_cluster_metrics: usize,  // 62
     pub determine_min_width: usize,  // 63
-    pub hit_test_point: usize,       // 64
+    pub hit_test_point: unsafe extern "system" fn(
+        *mut IDWriteTextLayout,
+        f32,  // pointX (content space)
+        f32,  // pointY (content space)
+        *mut BOOL, // isTrailingHit (out)
+        *mut BOOL, // isInside (out)
+        *mut DWRITE_HIT_TEST_METRICS, // out
+    ) -> HRESULT, // 64
     pub hit_test_text_position: unsafe extern "system" fn(
         *mut IDWriteTextLayout,
         u32,  // textPosition
@@ -687,6 +716,8 @@ mod layout_tests {
         assert_eq!(offset_of!(IDWriteFactoryVtbl, create_text_format), 15 * P);
         assert_eq!(offset_of!(IDWriteFactoryVtbl, create_text_layout), 18 * P);
 
+        assert_eq!(offset_of!(IDWriteTextLayoutVtbl, get_metrics), 60 * P);
+        assert_eq!(offset_of!(IDWriteTextLayoutVtbl, hit_test_point), 64 * P);
         assert_eq!(offset_of!(IDWriteTextLayoutVtbl, hit_test_text_position), 65 * P);
         assert_eq!(offset_of!(IDWriteTextLayoutVtbl, hit_test_text_range), 66 * P);
     }
@@ -701,5 +732,7 @@ mod layout_tests {
         assert_eq!(size_of::<D2D1_PIXEL_FORMAT>(), 8);
         // 9 four-byte fields, no padding.
         assert_eq!(size_of::<DWRITE_HIT_TEST_METRICS>(), 36);
+        // 7 f32 + 2 u32, no padding.
+        assert_eq!(size_of::<DWRITE_TEXT_METRICS>(), 36);
     }
 }

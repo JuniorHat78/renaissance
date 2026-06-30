@@ -44,6 +44,15 @@ const FONT_SIZE_DIP: f32 = 18.0;
 const STATUS_SIZE_DIP: f32 = 12.0;
 const PAD_DIP: f32 = 16.0;
 const CARET_WIDTH_DIP: f32 = 1.5;
+/// The bottom chrome strip (the status line) — text scrolls *above* this band; the band
+/// is painted over with the background so scrolled glyphs never bleed under the status.
+const STATUS_STRIP_DIP: f32 = 28.0;
+/// The retained layout is laid out to the wrap width but an effectively unbounded height,
+/// so vertical clipping never depends on the window — only width wraps, and `GetMetrics`
+/// reports the true content height for the scroll extent.
+const LAYOUT_MAX_HEIGHT: f32 = 1.0e6;
+/// The window background / clear color (also painted behind the status strip).
+const BG_COLOR: D2D1_COLOR_F = D2D1_COLOR_F { r: 0.99, g: 0.985, b: 0.97, a: 1.0 };
 
 pub struct Renderer {
     // Field order is drop order: brushes/formats/target before the factories.
@@ -51,8 +60,19 @@ pub struct Renderer {
     text_brush: ComPtr<ID2D1SolidColorBrush>,
     caret_brush: ComPtr<ID2D1SolidColorBrush>,
     sel_brush: ComPtr<ID2D1SolidColorBrush>,
+    // Opaque background fill — repaints the status strip so scrolled text can't bleed under
+    // it (the pinned-chrome band, SCRIPTORIUM-NATIVE-LAYOUT.md §6). Device-dependent.
+    bg_brush: ComPtr<ID2D1SolidColorBrush>,
     text_format: ComPtr<IDWriteTextFormat>,
     status_format: ComPtr<IDWriteTextFormat>,
+    // The retained main-text layout: the geometry authority shared by the paint path and
+    // the input path (SCRIPTORIUM-NATIVE-LAYOUT.md §2.1). Rebuilt only when its key —
+    // (content_gen, wrap width) — drifts, so caret motion / scroll / selection never
+    // re-shape text. A DWrite layout is device-independent, so it survives device loss
+    // (unlike the target + brushes). `None` until the first `ensure_layout`.
+    cached_layout: Option<ComPtr<IDWriteTextLayout>>,
+    cached_gen: u64,
+    cached_width: f32,
     // Held only to keep our factory ref alive for the Renderer's lifetime (RAII); the
     // render target keeps its own ref, so we never read this after construction.
     // Kept alive for the Renderer's lifetime AND read on device-loss recovery: the
@@ -99,7 +119,7 @@ impl Renderer {
             let dwrite_factory = ComPtr::from_raw(dw as *mut IDWriteFactory);
 
             // Device-dependent resources (target + brushes), rebuildable on device loss.
-            let (target, text_brush, caret_brush, sel_brush) =
+            let (target, text_brush, caret_brush, sel_brush, bg_brush) =
                 create_device_resources(d2d_factory.as_raw(), hwnd, dpi)?;
 
             // Text formats.
@@ -113,8 +133,12 @@ impl Renderer {
                 text_brush,
                 caret_brush,
                 sel_brush,
+                bg_brush,
                 text_format,
                 status_format,
+                cached_layout: None,
+                cached_gen: 0,
+                cached_width: -1.0, // sentinel: forces the first ensure_layout to build
                 d2d_factory,
                 dwrite_factory,
                 hwnd,
@@ -142,11 +166,12 @@ impl Renderer {
     /// (dead) resources in place; the next frame loops back here and retries.
     unsafe fn recreate_device_resources(&mut self) {
         match create_device_resources(self.d2d_factory.as_raw(), self.hwnd, self.dpi) {
-            Ok((target, text_brush, caret_brush, sel_brush)) => {
+            Ok((target, text_brush, caret_brush, sel_brush, bg_brush)) => {
                 self.target = target;
                 self.text_brush = text_brush;
                 self.caret_brush = caret_brush;
                 self.sel_brush = sel_brush;
+                self.bg_brush = bg_brush;
             }
             Err(hr) => eprintln!("device-resource recreate failed: 0x{hr:08x}"),
         }
@@ -160,14 +185,16 @@ impl Renderer {
         }
     }
 
-    /// Paint one frame: clear, draw the buffer text, draw the caret (if visible),
-    /// draw the status line. `px_w`/`px_h` are the physical client size.
-    pub fn draw(&mut self, app: &App, caret_visible: bool, px_w: u32, px_h: u32) {
+    /// Paint one frame: clear, draw the buffer text (translated by `scroll_y`), the
+    /// selection + caret, then the pinned status strip on top. `px_w`/`px_h` are the
+    /// physical client size; `scroll_y` is the content-space DIP offset of the viewport top
+    /// (SCRIPTORIUM-NATIVE-LAYOUT.md §3 — content→pixel is `+PAD`, `−scroll_y` on y).
+    pub fn draw(&mut self, app: &App, caret_visible: bool, scroll_y: f32, px_w: u32, px_h: u32) {
         unsafe {
             let rt = self.target.as_raw();
             let v = &*(*rt).vtbl;
             (v.begin_draw)(rt);
-            (v.clear)(rt, &D2D1_COLOR_F { r: 0.99, g: 0.985, b: 0.97, a: 1.0 });
+            (v.clear)(rt, &BG_COLOR);
 
             // Physical pixels -> DIPs (the target's coordinate space at this DPI).
             let scale = 96.0 / self.dpi as f32;
@@ -175,8 +202,10 @@ impl Renderer {
             let dip_h = px_h as f32 * scale;
             let text_w = (dip_w - PAD_DIP * 2.0).max(0.0);
 
-            // Main text layout (also the source of caret + selection geometry).
-            let layout = self.make_layout(&app.text, self.text_format.as_raw(), text_w, dip_h);
+            // The retained main-text layout (also the geometry authority for input). The
+            // text origin scrolls: x = PAD, y = PAD − scroll_y.
+            let layout = self.ensure_layout(&app.text, app.content_gen(), text_w);
+            let oy = PAD_DIP - scroll_y;
             if !layout.is_null() {
                 // Selection highlight sits behind the glyphs.
                 if app.has_selection() {
@@ -187,14 +216,14 @@ impl Renderer {
                         layout,
                         self.sel_brush.as_raw() as *mut c_void,
                         PAD_DIP,
-                        PAD_DIP,
+                        oy,
                         s as u32,
                         (e - s) as u32,
                     );
                 }
                 (v.draw_text_layout)(
                     rt,
-                    D2D_POINT_2F { x: PAD_DIP, y: PAD_DIP },
+                    D2D_POINT_2F { x: PAD_DIP, y: oy },
                     layout,
                     self.text_brush.as_raw() as *mut c_void,
                     0,
@@ -203,17 +232,20 @@ impl Renderer {
                     if let Some((cx, cy, ch)) = caret_geometry(layout, app.caret, app.text.len()) {
                         let rect = D2D1_RECT_F {
                             left: PAD_DIP + cx,
-                            top: PAD_DIP + cy,
+                            top: oy + cy,
                             right: PAD_DIP + cx + CARET_WIDTH_DIP,
-                            bottom: PAD_DIP + cy + ch,
+                            bottom: oy + cy + ch,
                         };
                         (v.fill_rectangle)(rt, &rect, self.caret_brush.as_raw() as *mut c_void);
                     }
                 }
-                com_release(layout as *mut c_void);
             }
 
-            // Status line near the bottom.
+            // Pin the status strip: repaint the bottom band with the background so any text
+            // scrolled under it is hidden, then draw the status line on top (no scroll).
+            let strip_top = (dip_h - STATUS_STRIP_DIP).max(0.0);
+            let strip = D2D1_RECT_F { left: 0.0, top: strip_top, right: dip_w, bottom: dip_h };
+            (v.fill_rectangle)(rt, &strip, self.bg_brush.as_raw() as *mut c_void);
             let status: Vec<u16> = app.status_text().encode_utf16().collect();
             let slayout = self.make_layout(&status, self.status_format.as_raw(), text_w, 40.0);
             if !slayout.is_null() {
@@ -230,13 +262,15 @@ impl Renderer {
             // EndDraw reports device loss here rather than failing each draw call. On
             // D2DERR_RECREATE_TARGET the GPU device is gone (driver reset, GPU removed,
             // sleep/resume): drop and rebuild the target + brushes; the next WM_PAINT
-            // repaints cleanly. Other errors are non-fatal for a frame and ignored.
+            // repaints cleanly. The cached DWrite layout is device-independent and is NOT
+            // dropped here. Other errors are non-fatal for a frame and ignored.
             let hr = (v.end_draw)(rt, null_mut(), null_mut());
             if hr == D2DERR_RECREATE_TARGET {
                 self.recreate_device_resources();
             }
         }
     }
+
 
     /// Create an IDWriteTextLayout for `buf`. Caller owns it and must Release.
     /// Returns null on failure (e.g. HRESULT < 0).
@@ -259,12 +293,129 @@ impl Renderer {
             out
         }
     }
+
+    // --- geometry service (SCRIPTORIUM-NATIVE-LAYOUT.md §2) -------------------
+    // The retained-layout choke point and the four queries the input path needs. All go
+    // through `ensure_layout`, so the paint path and the hit-test path can never disagree
+    // about geometry. The layout coords are content-space (origin at the top of the text,
+    // before scroll); callers apply the scroll/padding transform (§3).
+
+    /// The cached main-text layout for `(gen, width)`, rebuilt only on key drift. The single
+    /// place text is (re)shaped. Returns null only if we have no layout at all and the build
+    /// failed (a transient build failure keeps the prior, stale-but-valid layout).
+    unsafe fn ensure_layout(&mut self, text: &[u16], gen: u64, width: f32) -> *mut IDWriteTextLayout {
+        let stale = self.cached_layout.is_none()
+            || self.cached_gen != gen
+            || (self.cached_width - width).abs() > 0.5;
+        if stale {
+            let raw = self.make_layout(text, self.text_format.as_raw(), width, LAYOUT_MAX_HEIGHT);
+            if !raw.is_null() {
+                // Assigning drops the previous ComPtr → releases the old layout.
+                self.cached_layout = Some(ComPtr::from_raw(raw));
+                self.cached_gen = gen;
+                self.cached_width = width;
+            }
+        }
+        self.cached_layout.as_ref().map(|c| c.as_raw()).unwrap_or(null_mut())
+    }
+
+    /// The wrap width in DIPs for the current client rect (client width − 2·padding).
+    unsafe fn layout_width(&self) -> f32 {
+        let mut rc: RECT = zeroed();
+        GetClientRect(self.hwnd, &mut rc);
+        let scale = 96.0 / self.dpi as f32;
+        let dip_w = (rc.right - rc.left).max(0) as f32 * scale;
+        (dip_w - PAD_DIP * 2.0).max(0.0)
+    }
+
+    /// The scrollable viewport height in DIPs: the text band between the top padding and the
+    /// pinned status strip (SCRIPTORIUM-NATIVE-LAYOUT.md §6).
+    pub fn viewport_height(&self) -> f32 {
+        unsafe {
+            let mut rc: RECT = zeroed();
+            GetClientRect(self.hwnd, &mut rc);
+            let scale = 96.0 / self.dpi as f32;
+            let dip_h = (rc.bottom - rc.top).max(0) as f32 * scale;
+            (dip_h - PAD_DIP - STATUS_STRIP_DIP).max(0.0)
+        }
+    }
+
+    /// Map a clicked **physical pixel** (client-relative) to a UTF-16 caret offset, honoring
+    /// the trailing-edge rule (§4). Out-of-bounds pixels clamp to the nearest position.
+    pub fn hit_test_point(&mut self, text: &[u16], gen: u64, px: i32, py: i32, scroll_y: f32) -> usize {
+        let scale = 96.0 / self.dpi as f32;
+        let cx = px as f32 * scale - PAD_DIP;
+        let cy = py as f32 * scale - PAD_DIP + scroll_y;
+        self.hit_test_content(text, gen, cx, cy)
+    }
+
+    /// Map a **content-space** point (DIPs, pre-scroll) to a UTF-16 caret offset. Used both
+    /// by `hit_test_point` and directly by Up/Down (which already work in content space).
+    pub fn hit_test_content(&mut self, text: &[u16], gen: u64, cx: f32, cy: f32) -> usize {
+        unsafe {
+            let layout = self.ensure_layout(text, gen, self.layout_width());
+            if layout.is_null() {
+                return 0;
+            }
+            let mut trailing: BOOL = 0;
+            let mut inside: BOOL = 0;
+            let mut m: DWRITE_HIT_TEST_METRICS = zeroed();
+            let hr = ((*(*layout).vtbl).hit_test_point)(layout, cx, cy, &mut trailing, &mut inside, &mut m);
+            if hr < 0 {
+                return 0;
+            }
+            // offset = textPosition + (isTrailingHit ? cluster length : 0): clicking the
+            // right half of a glyph lands the caret after the whole cluster. `isInside` is
+            // ignored on purpose — honoring `trailing` regardless is what makes clicks past
+            // EOL / below the last line / in the margin all land where a user expects (§4).
+            let mut off = m.text_position as usize;
+            if trailing != 0 {
+                off += m.length as usize;
+            }
+            off.min(text.len())
+        }
+    }
+
+    /// Caret geometry (x, top, height) in **content space** for a UTF-16 offset, or None.
+    pub fn caret_xywh(&mut self, text: &[u16], gen: u64, offset: usize) -> Option<(f32, f32, f32)> {
+        unsafe {
+            let layout = self.ensure_layout(text, gen, self.layout_width());
+            if layout.is_null() {
+                return None;
+            }
+            caret_geometry(layout, offset, text.len())
+        }
+    }
+
+    /// The total laid-out text height in DIPs (the scroll extent), via `GetMetrics`.
+    pub fn content_height(&mut self, text: &[u16], gen: u64) -> f32 {
+        unsafe {
+            let layout = self.ensure_layout(text, gen, self.layout_width());
+            if layout.is_null() {
+                return 0.0;
+            }
+            let mut tm: DWRITE_TEXT_METRICS = zeroed();
+            let hr = ((*(*layout).vtbl).get_metrics)(layout, &mut tm);
+            if hr < 0 {
+                0.0
+            } else {
+                tm.height
+            }
+        }
+    }
+
+    /// The line height in DIPs (the caret height at the document start), for wheel + Up/Down
+    /// stepping. Falls back to a font-derived estimate if the layout/hit-test is unavailable.
+    pub fn line_height(&mut self, text: &[u16], gen: u64) -> f32 {
+        self.caret_xywh(text, gen, 0).map(|(_, _, h)| h).unwrap_or(FONT_SIZE_DIP * 1.3)
+    }
 }
 
-/// The device-dependent resources rebuilt together on device loss: the hwnd render
-/// target and the text / caret / selection brushes drawn from it (all GPU-device-backed).
+/// The device-dependent resources rebuilt together on device loss: the hwnd render target
+/// and the text / caret / selection / background brushes drawn from it (all GPU-device-backed).
 type DeviceResources = (
     ComPtr<ID2D1HwndRenderTarget>,
+    ComPtr<ID2D1SolidColorBrush>,
     ComPtr<ID2D1SolidColorBrush>,
     ComPtr<ID2D1SolidColorBrush>,
     ComPtr<ID2D1SolidColorBrush>,
@@ -313,7 +464,8 @@ unsafe fn create_device_resources(
     let text_brush = ComPtr::from_raw(make_brush(target.as_raw(), TEXT_COLOR)?);
     let caret_brush = ComPtr::from_raw(make_brush(target.as_raw(), CARET_COLOR)?);
     let sel_brush = ComPtr::from_raw(make_brush(target.as_raw(), SEL_COLOR)?);
-    Ok((target, text_brush, caret_brush, sel_brush))
+    let bg_brush = ComPtr::from_raw(make_brush(target.as_raw(), BG_COLOR)?);
+    Ok((target, text_brush, caret_brush, sel_brush, bg_brush))
 }
 
 /// CreateSolidColorBrush on a render target.
@@ -462,44 +614,131 @@ fn wide(s: &str) -> Vec<u16> {
 mod tests {
     use super::*;
 
+    /// Build a real DWrite factory + format + layout for `text` at `width`, returning them
+    /// (the factory + format must outlive the layout, so the caller holds all three) plus the
+    /// UTF-16 units. No window needed — this is the layout-oracle substrate.
+    unsafe fn build_layout(
+        text: &str,
+        width: f32,
+    ) -> (
+        ComPtr<IDWriteFactory>,
+        ComPtr<IDWriteTextFormat>,
+        *mut IDWriteTextLayout,
+        Vec<u16>,
+    ) {
+        let mut dw: *mut c_void = null_mut();
+        let hr = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, &IID_IDWRITE_FACTORY, &mut dw);
+        assert!(hr >= 0, "DWriteCreateFactory failed: 0x{hr:08x}");
+        let factory = ComPtr::from_raw(dw as *mut IDWriteFactory);
+        let format =
+            ComPtr::from_raw(make_text_format(factory.as_raw(), FONT_SIZE_DIP).expect("text format"));
+        let units: Vec<u16> = text.encode_utf16().collect();
+        let f = factory.as_raw();
+        let mut layout: *mut IDWriteTextLayout = null_mut();
+        let hr = ((*(*f).vtbl).create_text_layout)(
+            f,
+            units.as_ptr(),
+            units.len() as u32,
+            format.as_raw(),
+            width,
+            LAYOUT_MAX_HEIGHT,
+            &mut layout,
+        );
+        assert!(hr >= 0 && !layout.is_null(), "CreateTextLayout failed: 0x{hr:08x}");
+        (factory, format, layout, units)
+    }
+
+    /// Resolve a content-space point to a caret offset via the raw HitTestPoint slot (the
+    /// same logic as `Renderer::hit_test_content`, but against a bare layout).
+    unsafe fn hit(layout: *mut IDWriteTextLayout, x: f32, y: f32, len: usize) -> usize {
+        let mut trailing: BOOL = 0;
+        let mut inside: BOOL = 0;
+        let mut m: DWRITE_HIT_TEST_METRICS = zeroed();
+        let hr = ((*(*layout).vtbl).hit_test_point)(layout, x, y, &mut trailing, &mut inside, &mut m);
+        assert!(hr >= 0, "HitTestPoint failed: 0x{hr:08x}");
+        let mut off = m.text_position as usize;
+        if trailing != 0 {
+            off += m.length as usize;
+        }
+        off.min(len)
+    }
+
     #[test]
     fn caret_x_is_monotonic() {
         unsafe {
-            let mut dw: *mut c_void = null_mut();
-            let hr =
-                DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, &IID_IDWRITE_FACTORY, &mut dw);
-            assert!(hr >= 0, "DWriteCreateFactory failed: 0x{hr:08x}");
-            let factory = ComPtr::from_raw(dw as *mut IDWriteFactory);
-
-            let format = ComPtr::from_raw(
-                make_text_format(factory.as_raw(), FONT_SIZE_DIP).expect("text format"),
-            );
-
-            let text: Vec<u16> = "The quick brown fox".encode_utf16().collect();
-            let f = factory.as_raw();
-            let mut layout: *mut IDWriteTextLayout = null_mut();
-            let hr = ((*(*f).vtbl).create_text_layout)(
-                f,
-                text.as_ptr(),
-                text.len() as u32,
-                format.as_raw(),
-                1000.0,
-                1000.0,
-                &mut layout,
-            );
-            assert!(hr >= 0 && !layout.is_null(), "CreateTextLayout failed");
-
+            let (_factory, _format, layout, text) = build_layout("The quick brown fox", 1000.0);
             let mut last_x = f32::NEG_INFINITY;
             for i in 0..=text.len() {
                 let (x, _y, h) =
                     caret_geometry(layout, i, text.len()).expect("hit-test position");
-                assert!(
-                    x + 0.01 >= last_x,
-                    "caret x regressed at index {i}: {x} < {last_x}"
-                );
+                assert!(x + 0.01 >= last_x, "caret x regressed at index {i}: {x} < {last_x}");
                 assert!(h > 0.0, "caret height should be positive at index {i}");
                 last_x = x;
             }
+            com_release(layout as *mut c_void);
+        }
+    }
+
+    /// The inverse guard to caret geometry: probing the leading quarter of each glyph round-
+    /// trips back to that glyph's offset; the trailing quarter rounds up to the next. This
+    /// exercises the newly-typed HitTestPoint slot (64) on real DirectWrite and pins the
+    /// trailing-edge rule (SCRIPTORIUM-NATIVE-LAYOUT.md §4) that all spatial input depends on.
+    #[test]
+    fn point_position_round_trips() {
+        unsafe {
+            // Single ASCII line in a monospace font: a clean, non-wrapping geometry.
+            let (_factory, _format, layout, text) = build_layout("The quick brown fox", 4000.0);
+            let len = text.len();
+            for i in 0..len {
+                let (x0, y, h) = caret_geometry(layout, i, len).unwrap();
+                let (x1, _, _) = caret_geometry(layout, i + 1, len).unwrap();
+                let mid_y = y + h * 0.5;
+                // Leading quarter of glyph i -> offset i (trailing hit false).
+                let lead = hit(layout, x0 + (x1 - x0) * 0.25, mid_y, len);
+                assert_eq!(lead, i, "leading-quarter probe of glyph {i} should map to {i}");
+                // Trailing quarter of glyph i -> offset i+1 (trailing hit true).
+                let trail = hit(layout, x0 + (x1 - x0) * 0.75, mid_y, len);
+                assert_eq!(trail, i + 1, "trailing-quarter probe of glyph {i} should map to {}", i + 1);
+            }
+            com_release(layout as *mut c_void);
+        }
+    }
+
+    /// The out-of-bounds edges (§4): DWrite clamps an out-of-range point to the nearest line
+    /// and resolves x *within* that line, so honoring isTrailingHit (regardless of isInside)
+    /// lands every edge where a user expects — no per-edge special-casing.
+    #[test]
+    fn out_of_bounds_clicks_clamp() {
+        unsafe {
+            let (_factory, _format, layout, text) = build_layout("hello", 4000.0);
+            let len = text.len();
+            let (_, y, h) = caret_geometry(layout, 0, len).unwrap();
+            let mid_y = y + h * 0.5;
+            // On the line: past the last glyph -> end; left of the margin -> start.
+            assert_eq!(hit(layout, 100_000.0, mid_y, len), len, "click past EOL -> line end");
+            assert_eq!(hit(layout, -100_000.0, mid_y, len), 0, "click left of margin -> line start");
+            // Below the last line: y clamps to the last line, x then picks the position in
+            // it — far right -> its end, far left -> its start (here, the single line = doc).
+            assert_eq!(hit(layout, 100_000.0, 100_000.0, len), len, "below + right -> last line end");
+            assert_eq!(hit(layout, -100_000.0, 100_000.0, len), 0, "below + left -> last line start");
+            // Above the first line clamps the same way (reachable only mid-drag/over-scroll).
+            assert_eq!(hit(layout, -100_000.0, -100_000.0, len), 0, "above + left -> doc start");
+            com_release(layout as *mut c_void);
+        }
+    }
+
+    /// Exercise the newly-typed GetMetrics slot (60) on real DirectWrite: a single
+    /// non-wrapping ASCII line reports one line and a positive content height (the scroll
+    /// extent source).
+    #[test]
+    fn get_metrics_reports_content_height() {
+        unsafe {
+            let (_factory, _format, layout, _text) = build_layout("one line of text", 4000.0);
+            let mut tm: DWRITE_TEXT_METRICS = zeroed();
+            let hr = ((*(*layout).vtbl).get_metrics)(layout, &mut tm);
+            assert!(hr >= 0, "GetMetrics failed: 0x{hr:08x}");
+            assert_eq!(tm.line_count, 1, "single line expected");
+            assert!(tm.height > 0.0, "content height should be positive");
             com_release(layout as *mut c_void);
         }
     }

@@ -58,6 +58,10 @@ pub struct App {
     /// Which kind of edit the current undo group is, if a run is open (for grouping).
     group: Option<EditKind>,
     signal: ParseSignal,
+    /// Monotonic content generation, bumped on every edit (`refresh`). The renderer keys
+    /// its cached `IDWriteTextLayout` on this so it rebuilds only when the text actually
+    /// changed (N3 layout cache), and N4 will use it to discard a stale off-thread parse.
+    content_gen: u64,
 }
 
 impl App {
@@ -71,9 +75,16 @@ impl App {
             redo: Vec::new(),
             group: None,
             signal: ParseSignal { blocks: 0, words: 0, parse_micros: 0 },
+            content_gen: 0,
         };
         app.refresh();
         app
+    }
+
+    /// The current content generation (bumped on every edit). The renderer's layout cache
+    /// key — a mismatch means the cached layout is stale and must be rebuilt.
+    pub fn content_gen(&self) -> u64 {
+        self.content_gen
     }
 
     /// The selection as a half-open `[start, end)` range of UTF-16 offsets (start ≤ end).
@@ -150,6 +161,29 @@ impl App {
         if !extend {
             self.anchor = self.caret;
         }
+        self.group = None;
+    }
+
+    /// Place the caret at an absolute UTF-16 `offset` (clamped to the buffer). With
+    /// `extend` the anchor stays put (the selection grows to the new caret); without it the
+    /// selection collapses. This is the geometry-free primitive the platform layer drives
+    /// from spatial input — a click's hit-test result, or the offset one visual line away
+    /// for Up/Down (SCRIPTORIUM-NATIVE-LAYOUT.md §2: `app` stays logical, the renderer owns
+    /// the geometry). Callers are responsible for clearing/maintaining the goal column.
+    pub fn set_caret(&mut self, offset: usize, extend: bool) {
+        self.caret = offset.min(self.text.len());
+        if !extend {
+            self.anchor = self.caret;
+        }
+        self.group = None;
+    }
+
+    /// Set both ends of the selection explicitly (clamped). Used by word/line select
+    /// (double/triple-click), where the anchor and caret are both placed at once.
+    pub fn set_selection(&mut self, anchor: usize, caret: usize) {
+        let len = self.text.len();
+        self.anchor = anchor.min(len);
+        self.caret = caret.min(len);
         self.group = None;
     }
 
@@ -268,9 +302,11 @@ impl App {
         }
     }
 
-    /// Re-materialize `text` from the rope and re-drive the parse. Clamps caret + anchor.
+    /// Re-materialize `text` from the rope and re-drive the parse. Clamps caret + anchor,
+    /// and bumps the content generation so the renderer's layout cache invalidates.
     fn refresh(&mut self) {
         self.text = self.buffer.to_units();
+        self.content_gen = self.content_gen.wrapping_add(1);
         let len = self.text.len();
         self.caret = self.caret.min(len);
         self.anchor = self.anchor.min(len);
