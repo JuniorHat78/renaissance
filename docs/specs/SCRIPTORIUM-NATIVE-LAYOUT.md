@@ -1,6 +1,9 @@
 # SCRIPTORIUM-NATIVE-LAYOUT — N3: layout, geometry & spatial input
 
-**Status:** building (spec-first). Part of the native-editor umbrella
+**Status:** BUILT + CI-validated (2026-07-05) — N3a–N3d landed across four checkpoints; 28
+geometry oracles (debug + release) + windowed smoke on real DirectWrite, ASan-clean. See the
+umbrella §7/§8 for the verdict and the one spec'd deviation (`word_at` vs `prev_word..next_word`,
+§4). Part of the native-editor umbrella
 (`SCRIPTORIUM-NATIVE-EDITOR.md` §7 roadmap, N3). N0 gave a window + caret + paint; N1 a
 persistent rope; N2a selection + grapheme/word motion + clipboard. N3 makes the editor
 **spatial**: the mouse can place and drag the caret, the wheel scrolls, Up/Down move by

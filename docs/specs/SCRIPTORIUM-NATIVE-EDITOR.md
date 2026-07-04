@@ -19,10 +19,13 @@
 > Builds on the shipped `rust/` core (parser cutover complete; `SCRIPTORIUM-RUST-PARSER.md`
 > §14). The JS⇄wasm boundary is measured and closed (`SCRIPTORIUM-WASM-MARSHALLING.md`).
 >
-> Status: **building — N0 + N1 shipped.** The platform/render walking skeleton (N0) and
-> the persistent-rope text buffer (N1) are built and CI-validated (COM-from-raw-Rust and
-> the crate-free rope both proven — §8); N2 (input correctness: grapheme movement, IME,
-> selection) is next. Last refreshed: 2026-06-27.
+> Status: **building — N0, N1, N2a, N3 shipped.** The platform/render walking skeleton (N0),
+> the persistent-rope text buffer (N1), input correctness N2a (selection + grapheme/word motion
+> + clipboard), and N3 (layout maturity: retained-layout geometry service, vertical motion,
+> scrolling, mouse click/drag/double/triple + autoscroll) are built and CI-validated
+> (COM-from-raw-Rust, the crate-free rope, and the geometry oracle all proven — §8). Named
+> next: **N2b** (IME `WM_IME_*` + our-own UAX #14 line breaking) and **N4** (concurrency /
+> latency). Last refreshed: 2026-07-05.
 
 ---
 
@@ -225,11 +228,22 @@ skeleton, not speculation. Each phase below spawns its own JIT component spec.
   rendering via `HitTestTextRange` behind the glyphs. **N2b (named, next):** IME
   composition (`WM_IME_*`) and our-own UAX #14 line breaking (when we own wrapping). Then
   run it and start the feel-loop.
-- **N3 — Layout/render maturity.** Scrolling, full hit-testing (click-to-place,
-  drag-select) on `IDWriteTextLayout`, vertical (Up/Down) caret motion; the layout oracle
-  stood up alongside.
+- **N3 — Layout/render maturity.** `[BUILT + CI-validated → SCRIPTORIUM-NATIVE-LAYOUT.md]`
+  The editor becomes **spatial**, all of it driven by the *same* retained `IDWriteTextLayout`
+  the renderer paints, so caret math is never re-implemented. **Done (2026-07-05)**, in four
+  checkpoints: **N3a** — the layout becomes a retained, cache-invalidated COM object owned by
+  the renderer (the geometry authority), keyed on `(content_gen, width)`, feeding paint and
+  input through one `ensure_layout` choke point; **N3b** — Up/Down/PageUp/PageDown with a
+  sticky goal column (the drift-free vertical mechanic) + doc-edge snap; **N3c** — wheel
+  scrolling with fractional accumulation, scroll-follows-caret + caret-follows-scroll, clamp,
+  and a real `WS_VSCROLL` scrollbar; **N3d** — mouse click-to-place, drag-select, double-click
+  word / triple-click line, and drag-past-the-edge autoscroll (`SetCapture`). Geometry oracle
+  extended throughout (point↔position round-trip, goal-column stickiness, scroll invariants,
+  drag granularity) + the smoke test drives synthetic click/vertical/wheel/scrollbar through
+  the real WndProc on real DirectWrite. Next: N2b, then N4.
 - **N4 — Concurrency / latency.** Off-thread IO/heavy work, input coalescing, the
-  latency tuning where snappiness is born.
+  latency tuning where snappiness is born. (`content_gen`, introduced in N3a as the layout
+  cache key, is the forward-aligned primitive N4 uses to discard a stale off-thread parse.)
 - **N5+ — measure-gated sirens.** Virtualized layout, incremental parse, arenas,
   durability/WAL, search — each only when a number demands it.
 
@@ -257,6 +271,9 @@ sequencing lives in this section because it is coupled to the architecture.)
 | 2026-06-28 | **VERDICT — the smoke test catches what assertions can't; ABI asserts ≠ correct slots** (hardening finding) | On its first run the smoke test found a **phantom `draw_mesh` vtable slot** that shifted every render-target method below it down by one → an **access violation on the first real paint**. The ABI assertions could *not* catch it (they encoded the same wrong index); N0's geometry oracle never called the render-*target* slots. Lesson carried into N2: a runtime that **actually calls every newly-typed slot** is the only guard against mis-reading COM order — so when N2 typed `HitTestTextRange` (slot 66), the smoke test was extended to drive select-all + a real paint to exercise it. |
 | 2026-06-28 | **Local validation restored** — the MSVC linker works again; Miri + ASan are local dev tools | The "Actions is the only validator" constraint is lifted. `cargo test`/`--features smoke` link and run locally; the FFI/COM/rope is **ASan-clean** (incl. COM teardown). Working rule: validate locally — ASan/Miri on any FFI change — *before* pushing; CI is the backstop, not the babysitter. |
 | 2026-06-28 | **N2a input correctness** — selection + grapheme/word motion + clipboard + selection rendering | A code-point caret lies on real prose (accents, emoji, flags). N2a adds: a selection (`anchor`/`caret`, shift-extend, collapse-to-edge, select-all); Left/Right by grapheme + Ctrl-arrows by word via a **pragmatic UAX #29 subset** (we own the engine — implement the rules real prose hits, don't vendor the UCD; the boundary fn is the single swap point); selection-aware edits in one undo group; a hand-rolled **CF_UNICODETEXT clipboard** (no `windows-sys`, CRLF→LF on paste); and **selection rendering** via `HitTestTextRange`. IME (`WM_IME_*`) + our-own UAX #14 line breaking are the named **N2b** follow-ups. `prev_boundary` walks from buffer start (clusters straddle newlines) — O(offset), user-paced; virtualize at N3+ if a huge doc makes it felt. |
+| 2026-07-05 | **N3 seam — the retained layout is the geometry authority, owned by the renderer** | Hit-testing and Up/Down need geometry *during input handling*, not just paint, but the layout was ephemeral (built + dropped inside `draw`). Decision: the `IDWriteTextLayout` becomes a **retained, cache-invalidated COM object** owned by the renderer, exposing a small geometry service (`hit_test_point`/`caret_xywh`/`content_height`/`line_height`) that both `draw` and the input path call through one `ensure_layout` choke point — so paint and input can never disagree about geometry, and DWrite owns the *geometry* while we own the *semantics* (what a click means, when to scroll, how a goal column persists). Invalidation key = `(content_gen, layout_width)`; scroll/caret/selection apply at translate time and never re-shape text. The seam stays clean: `app` stays logical (one new primitive, `set_caret(offset, extend)`); view-space state (`scroll_y`, `goal_x`) lives in `WindowState`; `win32` is the sole conductor holding both handles. |
+| 2026-07-05 | **N3 stayed on Direct2D `DrawTextLayout`; the CPU-fb-vs-D2D surface decision remains deferred** | The 2026-06-27 row predicted the surface choice would "land informed around ~N3." Finding: N3's whole value (retained-layout geometry service, hit-testing, caret/selection geometry) sits *above* the surface and came free from `IDWriteTextLayout` regardless of how pixels reach the glass — so N3 gave no new reason to pay the `IDWriteTextRenderer` COM-callback cost. Decision: **stay on consume-only Direct2D through N3**; the CPU-framebuffer escalation stays measure-gated (§9, unchanged), now with more evidence that it buys nothing the editor currently needs. |
+| 2026-07-05 | **VERDICT — the geometry oracle scales; `content_gen` is the N4 bridge; one spec'd deviation** | N3's four checkpoints landed 28 oracles (debug + release) + the windowed smoke driving synthetic click/vertical/wheel/scrollbar/drag on real DirectWrite, all ASan-clean. The layout-oracle discipline (§6) held: geometry is deterministic and every mechanic got a golden test (point↔position round-trip, sticky-goal-column round trip, scroll clamp/reveal invariants, drag granularity) with the *feel* half (scroll weight, blink, click tolerances) left for the human loop. **`content_gen`** (the N3a layout-cache key) was introduced forward-aligned as the exact primitive N4 needs to discard a stale off-thread parse — not throwaway. **One deliberate deviation from N3's spec (§4):** double-click uses a class-run `word_at` (the word *under* the point, no trailing whitespace) rather than the literal `[prev_word..next_word]`, which — like Ctrl+Arrow motion — swallows the trailing space; the deviation honors the spec's stated intent while keeping keyboard/mouse agreement on what a "word" is. |
 
 ## 9. Open forks (deliberately unresolved)
 

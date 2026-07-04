@@ -38,6 +38,13 @@ roadmap, but they are not the roadmap itself. For overall orientation read
   (a pragmatic UAX #29 subset, oracle'd on every platform), selection-aware edits, a
   hand-rolled CF_UNICODETEXT clipboard, and selection rendering via `HitTestTextRange`.
   IME (`WM_IME_*`) and our-own UAX #14 line breaking are the named N2b follow-ups.
+- `SCRIPTORIUM-NATIVE-LAYOUT.md`: **N3 (built + CI-validated)** — layout/render maturity,
+  making the editor **spatial** off the *same* retained `IDWriteTextLayout` the renderer
+  paints (geometry authority, cache-keyed on `(content_gen, width)`): sticky-goal-column
+  Up/Down/PageUp/Down, wheel + `WS_VSCROLL` scrolling with scroll-follows-caret, and mouse
+  click-to-place / drag-select / double-word / triple-line / drag-past-edge autoscroll. 28
+  geometry oracles + windowed smoke on real DirectWrite, ASan-clean. N4 (concurrency/latency)
+  is next after N2b.
 
 **Search, recovery, UX:**
 - `ORACLE-SEARCH-SPEC.md`: target AST-native search/index/ranking system for
