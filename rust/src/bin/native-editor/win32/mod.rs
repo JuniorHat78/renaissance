@@ -99,7 +99,7 @@ pub fn run() {
             0,
             class_name.as_ptr(),
             title.as_ptr(),
-            WS_OVERLAPPEDWINDOW,
+            WS_OVERLAPPEDWINDOW | WS_VSCROLL,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
             1000,
@@ -281,6 +281,14 @@ unsafe fn wndproc_impl(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> 
             InvalidateRect(hwnd, null(), 0);
             0
         }
+        WM_VSCROLL => {
+            // The scrollbar: LOWORD is the SB_ request (line/page/thumb/top/bottom). Same view-
+            // only semantics as the wheel; the bar itself is re-synced from scroll_y on paint.
+            let code = (wparam & 0xffff) as u32;
+            vscroll(state, hwnd, code);
+            InvalidateRect(hwnd, null(), 0);
+            0
+        }
         WM_SIZE => {
             if let Some(r) = state.renderer.as_mut() {
                 let w = (lparam & 0xffff) as u32;
@@ -327,6 +335,10 @@ unsafe fn wndproc_impl(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> 
                     (rc.bottom - rc.top).max(0) as u32,
                 );
             }
+            // Re-sync the scrollbar thumb from the current geometry + scroll_y every frame. We
+            // invalidate after every state change, so paint is the one place guaranteed to see
+            // the latest extent (an edit changed content_height, a wheel changed scroll_y).
+            update_scrollbar(hwnd, state);
             EndPaint(hwnd, &ps);
             0
         }
@@ -487,6 +499,63 @@ unsafe fn reclamp_scroll(state: &mut WindowState) {
     state.scroll_y = clamp_scroll(state.scroll_y, content, viewport);
 }
 
+/// Apply one `WM_VSCROLL` request (line / page / thumb / top / bottom) to `scroll_y`, then
+/// clamp. Thumb drags read the 32-bit `nTrackPos` via `GetScrollInfo` because the message's own
+/// thumb field is only 16 bits — too narrow for a tall document (§6). No-op without a renderer.
+unsafe fn vscroll(state: &mut WindowState, hwnd: HWND, code: u32) {
+    let r = match state.renderer.as_mut() {
+        Some(r) => r,
+        None => return,
+    };
+    let gen = state.app.content_gen();
+    let viewport = r.viewport_height();
+    let content = r.content_height(&state.app.text, gen);
+    let line = r.line_height(&state.app.text, gen);
+    let target = match code {
+        SB_LINEUP => state.scroll_y - line,
+        SB_LINEDOWN => state.scroll_y + line,
+        SB_PAGEUP => state.scroll_y - viewport,
+        SB_PAGEDOWN => state.scroll_y + viewport,
+        SB_TOP => 0.0,
+        SB_BOTTOM => (content - viewport).max(0.0),
+        SB_THUMBTRACK | SB_THUMBPOSITION => {
+            let mut si: SCROLLINFO = zeroed();
+            si.cbSize = size_of::<SCROLLINFO>() as u32;
+            si.fMask = SIF_TRACKPOS;
+            if GetScrollInfo(hwnd, SB_VERT, &mut si) != 0 {
+                si.nTrackPos as f32
+            } else {
+                state.scroll_y
+            }
+        }
+        _ => return, // SB_ENDSCROLL and friends: nothing to do
+    };
+    state.scroll_y = clamp_scroll(target, content, viewport);
+}
+
+/// Mirror `scroll_y` and the document extent onto the vertical scrollbar so the thumb's size
+/// and position track the view. Range is `[0, content]` in integer DIPs, page = viewport (so a
+/// short doc shows a full/disabled bar); `nPos = scroll_y`. Called each frame from paint.
+unsafe fn update_scrollbar(hwnd: HWND, state: &mut WindowState) {
+    let r = match state.renderer.as_mut() {
+        Some(r) => r,
+        None => return,
+    };
+    let gen = state.app.content_gen();
+    let viewport = r.viewport_height();
+    let content = r.content_height(&state.app.text, gen);
+    let si = SCROLLINFO {
+        cbSize: size_of::<SCROLLINFO>() as u32,
+        fMask: SIF_RANGE | SIF_PAGE | SIF_POS,
+        nMin: 0,
+        nMax: content.ceil() as i32,
+        nPage: viewport.max(0.0) as u32,
+        nPos: state.scroll_y as i32,
+        nTrackPos: 0,
+    };
+    SetScrollInfo(hwnd, SB_VERT, &si, 1);
+}
+
 /// Put `units` on the system clipboard as CF_UNICODETEXT (nul-terminated). Best-effort:
 /// on any failure we just close the clipboard and move on — clipboard ops never panic.
 unsafe fn clipboard_set(hwnd: HWND, units: &[u16]) {
@@ -641,7 +710,7 @@ mod smoke_tests {
                 0,
                 class_name.as_ptr(),
                 title.as_ptr(),
-                WS_OVERLAPPEDWINDOW,
+                WS_OVERLAPPEDWINDOW | WS_VSCROLL, // a real bar for Set/GetScrollInfo to drive
                 CW_USEDEFAULT,
                 CW_USEDEFAULT,
                 800,
@@ -671,6 +740,11 @@ mod smoke_tests {
             // SystemParametersInfoW + content_height/line_height on real DWrite. Short text
             // fits, so max_scroll is 0 and it clamps to 0 — the path runs, must not panic.
             SendMessageW(hwnd, WM_MOUSEWHEEL, (WHEEL_DELTA as usize) << 16, 0);
+            // The scrollbar path: a line-down request and a thumb-track (the latter reads the
+            // 32-bit nTrackPos via GetScrollInfo). update_scrollbar (SetScrollInfo) runs on the
+            // WM_PAINT below. Exercises the new Set/GetScrollInfo FFI on a real WS_VSCROLL bar.
+            SendMessageW(hwnd, WM_VSCROLL, SB_LINEDOWN as usize, 0);
+            SendMessageW(hwnd, WM_VSCROLL, SB_THUMBTRACK as usize, 0);
 
             // Exercise resize (incl. the 0x0 minimize guard) and a caret-blink tick.
             SendMessageW(hwnd, WM_SIZE, 0, (600isize << 16) | 800);

@@ -38,6 +38,7 @@ pub type WNDPROC = Option<unsafe extern "system" fn(HWND, u32, WPARAM, LPARAM) -
 pub const CS_VREDRAW: u32 = 0x0001;
 pub const CS_HREDRAW: u32 = 0x0002;
 pub const WS_OVERLAPPEDWINDOW: u32 = 0x00CF_0000;
+pub const WS_VSCROLL: u32 = 0x0020_0000;
 pub const CW_USEDEFAULT: i32 = 0x8000_0000u32 as i32;
 pub const SW_SHOW: i32 = 5;
 pub const IDC_ARROW: u16 = 32512;
@@ -62,6 +63,23 @@ pub const WM_DPICHANGED: u32 = 0x02E0;
 pub const WHEEL_DELTA: i32 = 120;
 pub const SPI_GETWHEELSCROLLLINES: u32 = 0x0068;
 pub const WHEEL_PAGESCROLL: u32 = 0xFFFF_FFFF;
+
+// Scrollbar (WS_VSCROLL): SetScrollInfo mirrors scroll_y as an integer-DIP thumb; WM_VSCROLL
+// carries an SB_ request in its low word (the 16-bit thumb pos in the high word is too narrow
+// for a tall doc, so a thumb drag reads the 32-bit nTrackPos via GetScrollInfo/SIF_TRACKPOS).
+pub const SB_VERT: i32 = 1;
+pub const SIF_RANGE: u32 = 0x0001;
+pub const SIF_PAGE: u32 = 0x0002;
+pub const SIF_POS: u32 = 0x0004;
+pub const SIF_TRACKPOS: u32 = 0x0010;
+pub const SB_LINEUP: u32 = 0;
+pub const SB_LINEDOWN: u32 = 1;
+pub const SB_PAGEUP: u32 = 2;
+pub const SB_PAGEDOWN: u32 = 3;
+pub const SB_THUMBPOSITION: u32 = 4;
+pub const SB_THUMBTRACK: u32 = 5;
+pub const SB_TOP: u32 = 6;
+pub const SB_BOTTOM: u32 = 7;
 
 // Virtual-key codes (delivered by WM_KEYDOWN). N2 handles horizontal + word + line edges,
 // plus Delete and the Ctrl shortcuts; N3b adds the vertical family (Up/Down/PageUp/PageDown),
@@ -165,6 +183,17 @@ pub struct PAINTSTRUCT {
     pub fRestore: BOOL,
     pub fIncUpdate: BOOL,
     pub rgbReserved: [u8; 32],
+}
+
+#[repr(C)]
+pub struct SCROLLINFO {
+    pub cbSize: u32,
+    pub fMask: u32,
+    pub nMin: i32,
+    pub nMax: i32,
+    pub nPage: u32,
+    pub nPos: i32,
+    pub nTrackPos: i32,
 }
 
 #[repr(C)]
@@ -649,6 +678,9 @@ extern "system" {
     pub fn SetProcessDpiAwarenessContext(ctx: DPI_AWARENESS_CONTEXT) -> BOOL;
     // Wheel tuning: reads the user's lines-per-notch into a UINT via pvParam.
     pub fn SystemParametersInfoW(action: u32, ui_param: u32, pv_param: *mut c_void, win_ini: u32) -> BOOL;
+    // Vertical scrollbar: mirror scroll_y out (Set) and read the 32-bit thumb track pos in (Get).
+    pub fn SetScrollInfo(hwnd: HWND, bar: i32, info: *const SCROLLINFO, redraw: BOOL) -> i32;
+    pub fn GetScrollInfo(hwnd: HWND, bar: i32, info: *mut SCROLLINFO) -> BOOL;
     pub fn SetWindowPos(
         hwnd: HWND,
         insert_after: HWND,
@@ -751,5 +783,7 @@ mod layout_tests {
         assert_eq!(size_of::<DWRITE_HIT_TEST_METRICS>(), 36);
         // 7 f32 + 2 u32, no padding.
         assert_eq!(size_of::<DWRITE_TEXT_METRICS>(), 36);
+        // 7 four-byte fields (cbSize is read by Set/GetScrollInfo to version the struct).
+        assert_eq!(size_of::<SCROLLINFO>(), 28);
     }
 }
