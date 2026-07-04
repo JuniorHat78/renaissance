@@ -37,7 +37,15 @@ roadmap, but they are not the roadmap itself. For overall orientation read
   real selection (anchor/caret, shift-extend, select-all), grapheme-cluster + word motion
   (a pragmatic UAX #29 subset, oracle'd on every platform), selection-aware edits, a
   hand-rolled CF_UNICODETEXT clipboard, and selection rendering via `HitTestTextRange`.
-  IME (`WM_IME_*`) and our-own UAX #14 line breaking are the named N2b follow-ups.
+  N2b (IME) landed as its own spec below; UAX #14 line breaking resolved as a deferral.
+- `SCRIPTORIUM-NATIVE-IME.md`: **N2b (built spec-correct — feel NOT implementer-validated)** —
+  IME composition: the provisional string lives **outside the rope** until commit (buffer/
+  parser/undo never see half-composed text), the full `WM_IME_*` + imm32 lifecycle (result
+  double-insert prevention, focus-loss finalize), inline rendering (spliced display layout,
+  composition underline + target-clause emphasis, caret-within-composition) and candidate-window
+  placement at the caret. Pure state-machine + splice oracles + a crash/leak smoke guard on real
+  DirectWrite, ASan-clean. **Its feel is queued for the author to judge on a real IME** (§8);
+  our-own UAX #14 line breaking is a named deferral (DWrite wraps correctly).
 - `SCRIPTORIUM-NATIVE-LAYOUT.md`: **N3 (built + CI-validated)** — layout/render maturity,
   making the editor **spatial** off the *same* retained `IDWriteTextLayout` the renderer
   paints (geometry authority, cache-keyed on `(content_gen, width)`): sticky-goal-column

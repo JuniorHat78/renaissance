@@ -19,13 +19,16 @@
 > Builds on the shipped `rust/` core (parser cutover complete; `SCRIPTORIUM-RUST-PARSER.md`
 > §14). The JS⇄wasm boundary is measured and closed (`SCRIPTORIUM-WASM-MARSHALLING.md`).
 >
-> Status: **building — N0, N1, N2a, N3 shipped.** The platform/render walking skeleton (N0),
-> the persistent-rope text buffer (N1), input correctness N2a (selection + grapheme/word motion
-> + clipboard), and N3 (layout maturity: retained-layout geometry service, vertical motion,
-> scrolling, mouse click/drag/double/triple + autoscroll) are built and CI-validated
-> (COM-from-raw-Rust, the crate-free rope, and the geometry oracle all proven — §8). Named
-> next: **N2b** (IME `WM_IME_*` + our-own UAX #14 line breaking) and **N4** (concurrency /
-> latency). Last refreshed: 2026-07-05.
+> Status: **building — N0, N1, N2a, N3 shipped; N2b built spec-correct (feel unvalidated).**
+> The platform/render walking skeleton (N0), the persistent-rope text buffer (N1), input
+> correctness N2a (selection + grapheme/word motion + clipboard), and N3 (layout maturity:
+> retained-layout geometry service, vertical motion, scrolling, mouse click/drag/double/triple
+> + autoscroll) are built and CI-validated (COM-from-raw-Rust, the crate-free rope, and the
+> geometry oracle all proven — §8). **N2b** (IME composition: `WM_IME_*` + imm32, provisional-
+> not-in-rope, inline rendering, candidate window) is built to **spec-correct** with pure
+> state-machine/splice oracles + a crash/leak smoke guard — but its *feel* is un-oracle-able by
+> the implementer and **queued for the author** to judge on a real IME (§8, `SCRIPTORIUM-NATIVE-IME.md`).
+> Named next: **N4** (concurrency / latency). Last refreshed: 2026-07-05.
 
 ---
 
@@ -219,15 +222,21 @@ skeleton, not speculation. Each phase below spawns its own JIT component spec.
   hand-rolled rope passes a 50k-iteration model-based fuzz oracle on Windows + Ubuntu +
   macOS (content, line queries, undo/redo, and structural-sharing persistence all hold
   against a `Vec<u16>` reference) — the crate-free rope is correct (§8). Next: N2.
-- **N2 — Input correctness.** `[N2a BUILT + CI-validated → SCRIPTORIUM-NATIVE-INPUT.md]`
+- **N2 — Input correctness.** `[N2a + N2b BUILT → SCRIPTORIUM-NATIVE-INPUT.md, SCRIPTORIUM-NATIVE-IME.md]`
   The "feels right for real text" pass. **N2a done (2026-06-28):** a real selection
   (anchor/caret, shift-extend, collapse-to-edge, select-all), grapheme-cluster + word
   motion (a pragmatic UAX #29 subset — surrogates/CRLF/Extend/ZWJ/regional-indicators,
   oracle'd on every platform), selection-aware edits in one undo group, forward Delete,
   a hand-rolled CF_UNICODETEXT clipboard (cut/copy/paste, CRLF→LF), and selection
-  rendering via `HitTestTextRange` behind the glyphs. **N2b (named, next):** IME
-  composition (`WM_IME_*`) and our-own UAX #14 line breaking (when we own wrapping). Then
-  run it and start the feel-loop.
+  rendering via `HitTestTextRange` behind the glyphs. **N2b done spec-correct (2026-07-05 →
+  `SCRIPTORIUM-NATIVE-IME.md`):** IME composition — the provisional string lives *outside* the
+  rope until commit (§2), the full `WM_IME_*` + imm32 lifecycle with result double-insert
+  prevention and focus-loss finalize (§3/§4), inline rendering (spliced display layout,
+  composition underline + target-clause emphasis, caret-within-composition) and candidate-window
+  placement at the caret (§5/§6). Pure state-machine + splice oracles and a crash/leak smoke
+  guard; **its feel is the author's to judge on a real IME — explicitly *not* implementer-
+  validated** (§8). Our-own UAX #14 line breaking is resolved as a deferral (DWrite owns wrapping
+  and does it correctly — ledger §8). Then run it and feel it.
 - **N3 — Layout/render maturity.** `[BUILT + CI-validated → SCRIPTORIUM-NATIVE-LAYOUT.md]`
   The editor becomes **spatial**, all of it driven by the *same* retained `IDWriteTextLayout`
   the renderer paints, so caret math is never re-implemented. **Done (2026-07-05)**, in four
@@ -274,6 +283,9 @@ sequencing lives in this section because it is coupled to the architecture.)
 | 2026-07-05 | **N3 seam — the retained layout is the geometry authority, owned by the renderer** | Hit-testing and Up/Down need geometry *during input handling*, not just paint, but the layout was ephemeral (built + dropped inside `draw`). Decision: the `IDWriteTextLayout` becomes a **retained, cache-invalidated COM object** owned by the renderer, exposing a small geometry service (`hit_test_point`/`caret_xywh`/`content_height`/`line_height`) that both `draw` and the input path call through one `ensure_layout` choke point — so paint and input can never disagree about geometry, and DWrite owns the *geometry* while we own the *semantics* (what a click means, when to scroll, how a goal column persists). Invalidation key = `(content_gen, layout_width)`; scroll/caret/selection apply at translate time and never re-shape text. The seam stays clean: `app` stays logical (one new primitive, `set_caret(offset, extend)`); view-space state (`scroll_y`, `goal_x`) lives in `WindowState`; `win32` is the sole conductor holding both handles. |
 | 2026-07-05 | **N3 stayed on Direct2D `DrawTextLayout`; the CPU-fb-vs-D2D surface decision remains deferred** | The 2026-06-27 row predicted the surface choice would "land informed around ~N3." Finding: N3's whole value (retained-layout geometry service, hit-testing, caret/selection geometry) sits *above* the surface and came free from `IDWriteTextLayout` regardless of how pixels reach the glass — so N3 gave no new reason to pay the `IDWriteTextRenderer` COM-callback cost. Decision: **stay on consume-only Direct2D through N3**; the CPU-framebuffer escalation stays measure-gated (§9, unchanged), now with more evidence that it buys nothing the editor currently needs. |
 | 2026-07-05 | **VERDICT — the geometry oracle scales; `content_gen` is the N4 bridge; one spec'd deviation** | N3's four checkpoints landed 28 oracles (debug + release) + the windowed smoke driving synthetic click/vertical/wheel/scrollbar/drag on real DirectWrite, all ASan-clean. The layout-oracle discipline (§6) held: geometry is deterministic and every mechanic got a golden test (point↔position round-trip, sticky-goal-column round trip, scroll clamp/reveal invariants, drag granularity) with the *feel* half (scroll weight, blink, click tolerances) left for the human loop. **`content_gen`** (the N3a layout-cache key) was introduced forward-aligned as the exact primitive N4 needs to discard a stale off-thread parse — not throwaway. **One deliberate deviation from N3's spec (§4):** double-click uses a class-run `word_at` (the word *under* the point, no trailing whitespace) rather than the literal `[prev_word..next_word]`, which — like Ctrl+Arrow motion — swallows the trailing space; the deviation honors the spec's stated intent while keeping keyboard/mouse agreement on what a "word" is. |
+| 2026-07-05 | **N2b seam — the IME composition is provisional and lives OUTSIDE the rope until commit** | Half-composed text must never reach the document/parser/undo. Decision (`SCRIPTORIUM-NATIVE-IME.md` §2): `App` holds `comp: Option<Composition>`; the renderer splices it into the *display* layout only (`text[..lo] ++ comp ++ text[hi..]`), the buffer stays untouched until `commit_composition` (`GCS_RESULTSTR`) folds it in as one `replace_selection` undo step. This makes the two headline edges *free*: **cancel = zero document change** (nothing was written, so nothing to undo) and **commit = one undo step** (delete+insert already grouped). The OS's IMM subsystem owns the composition *logic* (candidate lists, conversion); we own the *semantics* (where provisional text lives, how it renders, when it becomes an edit) — the same delegation line as glyph rasterization. The layout cache key gains a `comp_sig` so the spliced layout rebuilds per keystroke and reverts to the committed layout the instant composition ends (`content_gen` is unchanged while composing). |
+| 2026-07-05 | **N2b result double-insert prevention; UAX #14 line breaking resolved as a deferral** | The classic IME bug: `DefWindowProc(WM_IME_COMPOSITION)` with `GCS_RESULTSTR` synthesizes a `WM_IME_CHAR`/`WM_CHAR`, so handling the result *and* forwarding inserts it twice. Rule (§4): when we handle `GCS_RESULTSTR` we do **not** forward the message, and we swallow `WM_IME_CHAR`; focus loss finalizes via `ImmNotifyIME(CPS_COMPLETE)`. Separately, N2a named "our-own UAX #14 line breaking" for N2b — **now resolved as a named `siren` deferral (§7):** we do NOT own wrapping, DirectWrite does and does UAX #14 correctly (same delegation as glyph rasterization); a custom wrapper is only needed for a no-wrap/h-scroll mode, virtualized layout, or a felt breaking bug — none present. So N2b is, in practice, the IME node. |
+| 2026-07-05 | **VERDICT — IME correctness is oracle-able but its *feel* is not; N2b is spec-correct, NOT feel-validated** | N2b splits cleanly (§8): the composition **state machine** (commit/cancel/replace + undo grouping) and the **display splice** are deterministic and pinned by pure oracles (no IMM/DWrite); the smoke test drives the `WM_IME_*` handlers + composition render on real DirectWrite as a crash/leak guard, ASan-clean. But whether a real Microsoft Pinyin/Japanese/Korean IME drives our handlers as expected — and whether composing *feels* right — cannot be synthesized (a synthetic message doesn't populate the IMC) and is the **author's to judge on a real IME**. Per the autonomous mandate, N2b ships built-to-spec and is **explicitly not marked feel-validated by the implementer** — that verdict is queued for the author's return. This is the first node whose correctness the implementer cannot fully close alone. |
 
 ## 9. Open forks (deliberately unresolved)
 

@@ -1,7 +1,9 @@
 # SCRIPTORIUM-NATIVE-INPUT — N2: input correctness
 
-**Status:** N2a built + CI-validated (2026-06-28); N2b (IME, our-own line breaking) named
-and pending. Part of the native-editor umbrella (`SCRIPTORIUM-NATIVE-EDITOR.md`
+**Status:** N2a built + CI-validated (2026-06-28); **N2b built spec-correct (2026-07-05 →
+`SCRIPTORIUM-NATIVE-IME.md`)** — IME composition, feel queued for the author; our-own UAX #14
+line breaking resolved as a deferral (DWrite wraps). Part of the native-editor umbrella
+(`SCRIPTORIUM-NATIVE-EDITOR.md`
 §7 roadmap, N2). N0 gave us a window + caret + paint; N1 gave us a correct persistent
 rope with a *code-point* caret. N2 makes the editor **feel like a real text editor for
 real text**: selection, grapheme-cluster motion, word motion, and the clipboard — the
@@ -34,15 +36,17 @@ actually *run* and react to (the feel-loop, umbrella §6).
 - **Selection rendering** — fill the selected range's geometry (via
   `IDWriteTextLayout::HitTestTextRange`) behind the text.
 
-**Deferred to N2b (named, not built):**
+**N2b (built spec-correct, 2026-07-05 → `SCRIPTORIUM-NATIVE-IME.md`):**
 - **IME composition** (`WM_IME_STARTCOMPOSITION` / `WM_IME_COMPOSITION` /
-  `WM_IME_ENDCOMPOSITION`, candidate-window positioning). It's a genuinely large
-  sub-system (composition string, clause segmentation, caret-follows-composition) and
-  earns its own checkpoint. N2a deliberately lands the Latin-prose feel first; CJK/IME
-  is the next slice.
-- **Line breaking (UAX #14)** for *our own* wrapping. Today DirectWrite wraps the layout
-  for display; we don't yet need our own break opportunities until we own wrapping/virtual
-  layout (that's N3 territory). Named here so it isn't forgotten.
+  `WM_IME_ENDCOMPOSITION` + imm32) — the provisional string lives outside the rope until
+  commit, rendered inline (spliced display layout, composition underline + target-clause
+  emphasis, caret-within-composition) with the candidate window at the caret; result
+  double-insert prevention and focus-loss finalize handled. Built to spec-correct; **its feel is
+  the author's to judge on a real IME — not implementer-validated** (that spec's §8).
+- **Line breaking (UAX #14)** — **resolved as a deferral** (that spec's §7): DirectWrite owns
+  wrapping and does UAX #14 correctly (the same delegation as glyph rasterization). Our-own
+  break logic is a `siren`, gated on a custom wrapper (no-wrap/h-scroll mode, virtualized
+  layout, or a felt breaking bug) — none present, so not built.
 
 ## 3. The seam stays clean (umbrella §4)
 

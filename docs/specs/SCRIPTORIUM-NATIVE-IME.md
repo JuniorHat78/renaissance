@@ -1,6 +1,10 @@
 # SCRIPTORIUM-NATIVE-IME — N2b: IME composition & line-breaking scope
 
-**Status:** building (spec-first). Part of the native-editor umbrella
+**Status:** BUILT spec-correct (2026-07-05); **feel NOT implementer-validated** — queued for the
+author on a real IME (§8, the deliberate limit). N2b-a (composition state machine) + N2b-b
+(`WM_IME_*` + imm32 wiring) + N2b-c (inline splice rendering + candidate window) landed with
+pure state-machine/splice oracles + a crash/leak smoke guard on real DirectWrite, ASan-clean.
+Part of the native-editor umbrella
 (`SCRIPTORIUM-NATIVE-EDITOR.md` §7 roadmap, N2b — the deferred half of N2). N2a made the
 editor feel right for **Latin** prose (selection, grapheme/word motion, clipboard); N3 made
 it **spatial** (retained-layout geometry, scrolling, mouse). N2b makes it feel right for the
