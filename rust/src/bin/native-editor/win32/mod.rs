@@ -27,6 +27,23 @@ struct WindowState {
     /// move it (N3c); the renderer translates the text by it. Kept here, not in `app`,
     /// because it is a view quantity, not document state (SCRIPTORIUM-NATIVE-LAYOUT.md §2).
     scroll_y: f32,
+    /// The sticky goal column for vertical caret motion: the content-space x (DIP) the caret
+    /// aims for on Up/Down/PageUp/PageDown. `None` means "not currently in a vertical run" —
+    /// the first vertical move seeds it from the caret's current x and later ones reuse it, so
+    /// walking through a short line and back keeps the column. Any horizontal/word/Home/End
+    /// motion or edit clears it (SCRIPTORIUM-NATIVE-LAYOUT.md §5). A view quantity (pixels),
+    /// so it lives here, not in `app`.
+    goal_x: Option<f32>,
+}
+
+/// One vertical caret step. Up/Down move by a visual line; the Page variants by a viewport
+/// height. All four share the sticky-goal-column mechanic (SCRIPTORIUM-NATIVE-LAYOUT.md §5).
+#[derive(Clone, Copy, PartialEq)]
+enum VStep {
+    Up,
+    Down,
+    PageUp,
+    PageDown,
 }
 
 const CARET_TIMER_ID: usize = 1;
@@ -68,6 +85,7 @@ pub fn run() {
             caret_visible: true,
             dpi: 96,
             scroll_y: 0.0,
+            goal_x: None,
         });
         let state_ptr = Box::into_raw(state);
 
@@ -155,6 +173,9 @@ unsafe fn wndproc_impl(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> 
         }
         WM_CHAR => {
             state.app.input_char(wparam as u16);
+            // An edit is a horizontal move: it ends any vertical run, so the next Up/Down
+            // re-seeds the goal column from the caret's new x (§5).
+            state.goal_x = None;
             // An edit makes the caret solid again so it's visible right after typing.
             state.caret_visible = true;
             InvalidateRect(hwnd, null(), 0);
@@ -167,7 +188,10 @@ unsafe fn wndproc_impl(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> 
 
             // Map VK (+ modifiers) to one editor action. `None` => not ours, fall through
             // to DefWindowProc (so typing still produces WM_CHAR and system keys behave).
+            // Vertical moves keep the goal column; every other handled key clears it (§5),
+            // done once after the match so each arm doesn't have to remember.
             let mut handled = true;
+            let mut is_vertical = false;
             match vk {
                 VK_LEFT => {
                     let m = if ctrl { Motion::WordLeft } else { Motion::Left };
@@ -176,6 +200,22 @@ unsafe fn wndproc_impl(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> 
                 VK_RIGHT => {
                     let m = if ctrl { Motion::WordRight } else { Motion::Right };
                     state.app.move_caret(m, shift);
+                }
+                VK_UP => {
+                    is_vertical = true;
+                    vertical_motion(state, VStep::Up, shift);
+                }
+                VK_DOWN => {
+                    is_vertical = true;
+                    vertical_motion(state, VStep::Down, shift);
+                }
+                VK_PRIOR => {
+                    is_vertical = true;
+                    vertical_motion(state, VStep::PageUp, shift);
+                }
+                VK_NEXT => {
+                    is_vertical = true;
+                    vertical_motion(state, VStep::PageDown, shift);
                 }
                 VK_HOME => state.app.move_caret(Motion::Home, shift),
                 VK_END => state.app.move_caret(Motion::End, shift),
@@ -195,6 +235,11 @@ unsafe fn wndproc_impl(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> 
             }
 
             if handled {
+                // End the vertical run on any non-vertical motion so the next Up/Down
+                // re-seeds the goal column from the caret's current x (§5).
+                if !is_vertical {
+                    state.goal_x = None;
+                }
                 state.caret_visible = true;
                 InvalidateRect(hwnd, null(), 0);
                 0
@@ -279,6 +324,58 @@ fn wide(s: &str) -> Vec<u16> {
 /// Is the high (pressed) bit of this virtual key set right now?
 unsafe fn key_down(vk: i32) -> bool {
     (GetKeyState(vk) as u16 & 0x8000) != 0
+}
+
+/// Move the caret one visual line (Up/Down) or one viewport page (PageUp/PageDown) in the
+/// step's direction, aiming at the sticky goal column, then place it via `app.set_caret`
+/// (extending the selection when `extend`). This is the win32 conductor for vertical motion
+/// (SCRIPTORIUM-NATIVE-LAYOUT.md §5): the renderer owns the *geometry* (where a column lands
+/// on the neighbouring line), `app` stays logical (it only learns the resulting offset), and
+/// `goal_x` (a pixel column) lives in the view. A no-op until the renderer exists.
+unsafe fn vertical_motion(state: &mut WindowState, step: VStep, extend: bool) {
+    let r = match state.renderer.as_mut() {
+        Some(r) => r,
+        None => return,
+    };
+    let gen = state.app.content_gen();
+    // The caret's current geometry seeds the run and gives the line height for a one-line
+    // step. This borrows `app.text` immutably; the `set_caret` below re-borrows `app` mutably
+    // only after all geometry work is done — disjoint in time (NLL), and on a different field
+    // from the `renderer` borrow held by `r`.
+    let (x, y, h) = match r.caret_xywh(&state.app.text, gen, state.app.caret) {
+        Some(g) => g,
+        None => return,
+    };
+    // The first vertical move seeds the goal column from the caret's x; later moves in the
+    // same run reuse it, so walking through a short line and back keeps the column.
+    let gx = *state.goal_x.get_or_insert(x);
+    // Aim a hair into the neighbouring line: `−1` sits just above this line's top (Up), `+h`
+    // just past its bottom (Down); a page steps a full viewport. Using the caret's own line
+    // height (`h`) keeps the one-line step robust to mixed line heights.
+    let ty = match step {
+        VStep::Up => y - 1.0,
+        VStep::Down => y + h,
+        VStep::PageUp => y - r.viewport_height(),
+        VStep::PageDown => y + r.viewport_height(),
+    };
+    let mut offset = r.hit_test_content(&state.app.text, gen, gx, ty);
+    // A vertical move that can't cross to a new line snaps to the document edge (§5): Down on
+    // the last line → doc end, Up on the first → doc start — the Notepad convention. HitTestPoint
+    // does NOT do this for us: it clamps `ty` to the nearest line and still resolves `gx`
+    // horizontally, so an over-shoot lands at the goal column on the *same* line, not the edge.
+    // We detect "didn't cross" by the target offset resolving to a line no further in `step`'s
+    // direction than the current one. The doc-edge snap keeps `goal_x` (untouched here), so a
+    // reversing move returns to the column.
+    let down = matches!(step, VStep::Down | VStep::PageDown);
+    let crossed = r.caret_xywh(&state.app.text, gen, offset).map_or(false, |(_, ny, _)| {
+        if down { ny > y + 0.5 } else { ny < y - 0.5 }
+    });
+    if !crossed {
+        offset = if down { state.app.text.len() } else { 0 };
+    }
+    state.app.set_caret(offset, extend);
+    // `ensure_caret_visible` (scroll-follows-caret) lands in N3c; until then `scroll_y` stays
+    // 0, so a caret driven below the fold on a tall doc is simply not yet followed.
 }
 
 /// Put `units` on the system clipboard as CF_UNICODETEXT (nul-terminated). Best-effort:
@@ -382,6 +479,7 @@ mod smoke_tests {
                 caret_visible: true,
                 dpi: 96,
                 scroll_y: 0.0,
+                goal_x: None,
             });
             let state_ptr = Box::into_raw(state);
 
@@ -411,6 +509,11 @@ mod smoke_tests {
             SendMessageW(hwnd, WM_CHAR, 'i' as usize, 0);
             // Move the caret left once (no Shift held → non-extending).
             SendMessageW(hwnd, WM_KEYDOWN, VK_LEFT as usize, 0);
+            // Drive the vertical family through the real WndProc so `vertical_motion` runs its
+            // caret_xywh → hit_test_content geometry on real DirectWrite (single-line text, so
+            // these clamp rather than move). Exercises the N3b path end-to-end; must not panic.
+            SendMessageW(hwnd, WM_KEYDOWN, VK_DOWN as usize, 0);
+            SendMessageW(hwnd, WM_KEYDOWN, VK_UP as usize, 0);
 
             // Exercise resize (incl. the 0x0 minimize guard) and a caret-blink tick.
             SendMessageW(hwnd, WM_SIZE, 0, (600isize << 16) | 800);

@@ -54,14 +54,20 @@ pub const WM_NCCREATE: u32 = 0x0081;
 pub const WM_NCDESTROY: u32 = 0x0082;
 pub const WM_DPICHANGED: u32 = 0x02E0;
 
-// Virtual-key codes (delivered by WM_KEYDOWN). Up/Down need layout-aware geometry and
-// are N3; N2 handles horizontal + word + line edges, plus Delete and the Ctrl shortcuts.
+// Virtual-key codes (delivered by WM_KEYDOWN). N2 handles horizontal + word + line edges,
+// plus Delete and the Ctrl shortcuts; N3b adds the vertical family (Up/Down/PageUp/PageDown),
+// which is layout-aware — the offset one visual line away comes from the renderer's geometry
+// service, not from `app` (SCRIPTORIUM-NATIVE-LAYOUT.md §5).
 pub const VK_SHIFT: i32 = 0x10;
 pub const VK_CONTROL: i32 = 0x11;
+pub const VK_PRIOR: u32 = 0x21; // Page Up
+pub const VK_NEXT: u32 = 0x22; // Page Down
 pub const VK_END: u32 = 0x23;
 pub const VK_HOME: u32 = 0x24;
 pub const VK_LEFT: u32 = 0x25;
+pub const VK_UP: u32 = 0x26;
 pub const VK_RIGHT: u32 = 0x27;
+pub const VK_DOWN: u32 = 0x28;
 pub const VK_DELETE: u32 = 0x2E;
 pub const VK_A: u32 = 0x41;
 pub const VK_C: u32 = 0x43;

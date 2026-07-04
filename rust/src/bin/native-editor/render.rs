@@ -727,6 +727,65 @@ mod tests {
         }
     }
 
+    /// Replicate `win32::vertical_motion`'s one-line geometry against a bare layout (no window
+    /// needed): step the caret one visual line at the fixed goal column `gx`, returning the new
+    /// offset. Mirrors the conductor's core (SCRIPTORIUM-NATIVE-LAYOUT.md §5) minus the view
+    /// plumbing — including the Down doc-end snap.
+    unsafe fn vstep(
+        layout: *mut IDWriteTextLayout,
+        caret: usize,
+        gx: f32,
+        down: bool,
+        len: usize,
+    ) -> usize {
+        let (_, y, h) = caret_geometry(layout, caret, len).unwrap();
+        let ty = if down { y + h } else { y - 1.0 };
+        let off = hit(layout, gx, ty, len);
+        // Snap to the doc edge when we couldn't cross to a new line (already on the first/last
+        // visual line): Down → end, Up → start. HitTestPoint clamps y but keeps the goal column
+        // on the same line, so the over-shoot must be detected explicitly (§5).
+        let crossed = caret_geometry(layout, off, len).map_or(false, |(_, ny, _)| {
+            if down { ny > y + 0.5 } else { ny < y - 0.5 }
+        });
+        if !crossed {
+            return if down { len } else { 0 };
+        }
+        off
+    }
+
+    /// The sticky-goal-column oracle (§5): the most-fumbled vertical mechanic. Walking Down
+    /// through a *short* line and back Up must return to the original column — the column is
+    /// held in `goal_x`, not re-derived per line (which would drift). Plus the two edges: Up on
+    /// the first line clamps to doc start, Down on the last snaps to doc end.
+    #[test]
+    fn vertical_motion_keeps_goal_column() {
+        unsafe {
+            // Long / short / long: the middle line is too short to hold the goal column.
+            let (_factory, _format, layout, text) =
+                build_layout("aaaaaaaaaaaa\nbb\ncccccccccccc", 4000.0);
+            let len = text.len();
+            let start = 8; // column 8 of the long first line
+            let gx = caret_geometry(layout, start, len).unwrap().0;
+
+            // Down onto the short line clamps to its end; Down again lands back at column 8 on
+            // the third line *because gx was preserved* (the whole point).
+            let a = vstep(layout, start, gx, true, len);
+            let b = vstep(layout, a, gx, true, len);
+            assert!(a < b, "the clamped short-line offset must precede the full-column offset");
+
+            // Walking back Up returns through the short line to the exact starting column.
+            let c = vstep(layout, b, gx, false, len);
+            let d = vstep(layout, c, gx, false, len);
+            assert_eq!(d, start, "Down·Down·Up·Up at a fixed goal column returns to the start column");
+
+            // Edges: Down on the last line → doc end; Up on the first line → doc start.
+            assert_eq!(vstep(layout, b, gx, true, len), len, "Down on the last line snaps to doc end");
+            assert_eq!(vstep(layout, start, gx, false, len), 0, "Up on the first line clamps to doc start");
+
+            com_release(layout as *mut c_void);
+        }
+    }
+
     /// Exercise the newly-typed GetMetrics slot (60) on real DirectWrite: a single
     /// non-wrapping ASCII line reports one line and a positive content height (the scroll
     /// extent source).
