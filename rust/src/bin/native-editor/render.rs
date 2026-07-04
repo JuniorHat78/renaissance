@@ -421,6 +421,24 @@ impl Renderer {
         }
     }
 
+    /// The caret's on-screen position for `offset` in **client pixels** — the point the IME
+    /// candidate window pins to (SCRIPTORIUM-NATIVE-IME.md §6). Content→viewport (`+PAD`,
+    /// `−scroll_y`) then DIP→px; returns the caret's *bottom*-left so the candidate list sits
+    /// just below the caret. None if the geometry is unavailable.
+    pub fn caret_client_px(
+        &mut self,
+        text: &[u16],
+        gen: u64,
+        offset: usize,
+        scroll_y: f32,
+    ) -> Option<(i32, i32)> {
+        let (cx, cy, ch) = self.caret_xywh(text, gen, offset)?;
+        let scale = self.dpi as f32 / 96.0;
+        let vx = (PAD_DIP + cx) * scale;
+        let vy = (PAD_DIP + cy - scroll_y + ch) * scale;
+        Some((vx as i32, vy as i32))
+    }
+
     /// The total laid-out text height in DIPs (the scroll extent), via `GetMetrics`.
     pub fn content_height(&mut self, text: &[u16], gen: u64) -> f32 {
         unsafe {

@@ -27,6 +27,7 @@ pub type HBRUSH = *mut c_void;
 pub type HMENU = *mut c_void;
 pub type HDC = *mut c_void;
 pub type HGLOBAL = *mut c_void;
+pub type HIMC = *mut c_void; // an Input Method Context handle (imm32)
 pub type DPI_AWARENESS_CONTEXT = *mut c_void;
 pub type WPARAM = usize;
 pub type LPARAM = isize;
@@ -57,9 +58,28 @@ pub const WM_MOUSEMOVE: u32 = 0x0200;
 pub const WM_LBUTTONDOWN: u32 = 0x0201;
 pub const WM_LBUTTONUP: u32 = 0x0202;
 pub const WM_CAPTURECHANGED: u32 = 0x0215;
+pub const WM_KILLFOCUS: u32 = 0x0008;
+pub const WM_IME_STARTCOMPOSITION: u32 = 0x010D;
+pub const WM_IME_ENDCOMPOSITION: u32 = 0x010E;
+pub const WM_IME_COMPOSITION: u32 = 0x010F;
+pub const WM_IME_CHAR: u32 = 0x0286;
 pub const WM_NCCREATE: u32 = 0x0081;
 pub const WM_NCDESTROY: u32 = 0x0082;
 pub const WM_DPICHANGED: u32 = 0x02E0;
+
+// IME composition (imm32). GCS_* select which slice of the composition ImmGetCompositionStringW
+// returns; CFS_* style the candidate window placement; ATTR_TARGET_* mark the converting clause;
+// NI_COMPOSITIONSTR + CPS_COMPLETE force a commit on focus loss (SCRIPTORIUM-NATIVE-IME.md §3/§4).
+pub const GCS_COMPSTR: u32 = 0x0008;
+pub const GCS_COMPATTR: u32 = 0x0010;
+pub const GCS_CURSORPOS: u32 = 0x0080;
+pub const GCS_RESULTSTR: u32 = 0x0800;
+pub const CFS_POINT: u32 = 0x0002;
+pub const CFS_FORCE_POSITION: u32 = 0x0020;
+pub const ATTR_TARGET_CONVERTED: u8 = 0x01;
+pub const ATTR_TARGET_NOTCONVERTED: u8 = 0x03;
+pub const NI_COMPOSITIONSTR: u32 = 0x0015;
+pub const CPS_COMPLETE: u32 = 0x01;
 
 // Mouse: MK_LBUTTON marks a drag in WM_MOUSEMOVE's wParam; SM_C?DOUBLECLK is the click-count
 // hit-box (we track click count ourselves — the class has no CS_DBLCLKS — to also catch triple).
@@ -204,6 +224,15 @@ pub struct SCROLLINFO {
     pub nPage: u32,
     pub nPos: i32,
     pub nTrackPos: i32,
+}
+
+/// Placement of the IME candidate window (`ImmSetCompositionWindow`): with `CFS_POINT` the
+/// candidate list is pinned at `ptCurrentPos` (client pixels) — the caret (§6).
+#[repr(C)]
+pub struct COMPOSITIONFORM {
+    pub dwStyle: u32,
+    pub ptCurrentPos: POINT,
+    pub rcArea: RECT,
 }
 
 #[repr(C)]
@@ -751,6 +780,20 @@ extern "system" {
     ) -> HRESULT;
 }
 
+#[cfg(windows)]
+#[link(name = "imm32")]
+extern "system" {
+    // The IME composition surface (SCRIPTORIUM-NATIVE-IME.md §3). ImmGetCompositionStringW
+    // returns a byte count: called with a null buffer it reports the size to allocate, then
+    // fills WCHARs (GCS_COMPSTR/RESULTSTR) or attribute bytes (GCS_COMPATTR), or returns the
+    // caret unit-index directly (GCS_CURSORPOS).
+    pub fn ImmGetContext(hwnd: HWND) -> HIMC;
+    pub fn ImmReleaseContext(hwnd: HWND, himc: HIMC) -> BOOL;
+    pub fn ImmGetCompositionStringW(himc: HIMC, index: u32, buf: *mut c_void, len: u32) -> i32;
+    pub fn ImmSetCompositionWindow(himc: HIMC, form: *const COMPOSITIONFORM) -> BOOL;
+    pub fn ImmNotifyIME(himc: HIMC, action: u32, index: u32, value: u32) -> BOOL;
+}
+
 // --- ABI layout guards (the deterministic FFI hardening) --------------------
 // The scariest class of COM-from-raw-Rust bug is a *silently* miscounted vtable: a
 // typed method landing at the wrong slot calls the wrong function pointer (UB). These
@@ -802,5 +845,7 @@ mod layout_tests {
         assert_eq!(size_of::<DWRITE_TEXT_METRICS>(), 36);
         // 7 four-byte fields (cbSize is read by Set/GetScrollInfo to version the struct).
         assert_eq!(size_of::<SCROLLINFO>(), 28);
+        // DWORD(4) + POINT(8) + RECT(16), no padding — passed by pointer to ImmSetCompositionWindow.
+        assert_eq!(size_of::<COMPOSITIONFORM>(), 28);
     }
 }

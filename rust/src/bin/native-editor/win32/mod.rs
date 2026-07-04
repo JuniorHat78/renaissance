@@ -359,6 +359,47 @@ unsafe fn wndproc_impl(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> 
             end_drag(state, hwnd);
             0
         }
+        WM_IME_STARTCOMPOSITION => {
+            // A composition session begins. We draw the composition inline ourselves, so pin the
+            // candidate window at the caret and return 0 WITHOUT DefWindowProc — that suppresses
+            // the OS's default gray composition box (SCRIPTORIUM-NATIVE-IME.md §3).
+            let himc = ImmGetContext(hwnd);
+            if !himc.is_null() {
+                set_ime_candidate_pos(state, hwnd, himc);
+                ImmReleaseContext(hwnd, himc);
+            }
+            0
+        }
+        WM_IME_COMPOSITION => {
+            ime_composition(state, hwnd, lparam as u32);
+            // Handled — do NOT DefWindowProc: forwarding a GCS_RESULTSTR would synthesize a
+            // WM_IME_CHAR and insert the result a second time (§4, the double-insert edge).
+            0
+        }
+        WM_IME_ENDCOMPOSITION => {
+            // A commit already fired via GCS_RESULTSTR if there was one; a bare end is a cancel.
+            state.app.clear_composition();
+            InvalidateRect(hwnd, null(), 0);
+            0
+        }
+        WM_IME_CHAR => {
+            // The result already committed via GCS_RESULTSTR; swallow so it can't insert twice.
+            0
+        }
+        WM_KILLFOCUS => {
+            // Finalize a composition-in-progress so focus loss never strands provisional text:
+            // ask the IME to complete (it commits via a synchronous GCS_RESULTSTR), then clear.
+            if state.app.composition().is_some() {
+                let himc = ImmGetContext(hwnd);
+                if !himc.is_null() {
+                    ImmNotifyIME(himc, NI_COMPOSITIONSTR, CPS_COMPLETE, 0);
+                    ImmReleaseContext(hwnd, himc);
+                }
+                state.app.clear_composition();
+                InvalidateRect(hwnd, null(), 0);
+            }
+            DefWindowProcW(hwnd, msg, wparam, lparam)
+        }
         WM_SIZE => {
             if let Some(r) = state.renderer.as_mut() {
                 let w = (lparam & 0xffff) as u32;
@@ -836,6 +877,111 @@ unsafe fn end_drag(state: &mut WindowState, hwnd: HWND) {
     }
 }
 
+// --- IME composition (SCRIPTORIUM-NATIVE-IME.md §3) ---------------------------
+
+/// Handle one `WM_IME_COMPOSITION`: commit the finalized string (`GCS_RESULTSTR`) and/or update
+/// the provisional one (`GCS_COMPSTR` + caret + target clause), then follow the caret and repaint.
+/// `gcs` is the lParam flag mask.
+unsafe fn ime_composition(state: &mut WindowState, hwnd: HWND, gcs: u32) {
+    let himc = ImmGetContext(hwnd);
+    if himc.is_null() {
+        return;
+    }
+    // A single message can carry both (an IME can commit one clause while composing the next):
+    // handle the result first, then the in-progress string.
+    if gcs & GCS_RESULTSTR != 0 {
+        let result = ime_get_string(himc, GCS_RESULTSTR);
+        state.app.commit_composition(&result);
+        state.goal_x = None; // a commit is a horizontal placement (§5-adjacent, cf. N3b §5)
+    }
+    if gcs & GCS_COMPSTR != 0 {
+        let comp = ime_get_string(himc, GCS_COMPSTR);
+        if comp.is_empty() {
+            state.app.clear_composition();
+        } else {
+            let caret = ImmGetCompositionStringW(himc, GCS_CURSORPOS, null_mut(), 0);
+            let caret_units = if caret < 0 { 0 } else { caret as usize };
+            let attrs = ime_get_attrs(himc);
+            state.app.set_composition(&comp, caret_units, target_clause(&attrs));
+        }
+        set_ime_candidate_pos(state, hwnd, himc);
+    }
+    ImmReleaseContext(hwnd, himc);
+    state.caret_visible = true;
+    ensure_caret_visible(state);
+    InvalidateRect(hwnd, null(), 0);
+}
+
+/// Read a UTF-16 composition slice (`GCS_COMPSTR` / `GCS_RESULTSTR`). ImmGetCompositionStringW
+/// with a null buffer returns the byte size; call again to fill, then halve for the unit count.
+unsafe fn ime_get_string(himc: HIMC, index: u32) -> Vec<u16> {
+    let bytes = ImmGetCompositionStringW(himc, index, null_mut(), 0);
+    if bytes <= 0 {
+        return Vec::new();
+    }
+    let units = bytes as usize / 2;
+    let mut buf = vec![0u16; units];
+    let got = ImmGetCompositionStringW(himc, index, buf.as_mut_ptr() as *mut c_void, bytes as u32);
+    if got < 0 {
+        return Vec::new();
+    }
+    buf.truncate((got as usize / 2).min(units));
+    buf
+}
+
+/// Read the per-unit attribute bytes (`GCS_COMPATTR`) — one `ATTR_*` per composition unit.
+unsafe fn ime_get_attrs(himc: HIMC) -> Vec<u8> {
+    let bytes = ImmGetCompositionStringW(himc, GCS_COMPATTR, null_mut(), 0);
+    if bytes <= 0 {
+        return Vec::new();
+    }
+    let mut buf = vec![0u8; bytes as usize];
+    let got = ImmGetCompositionStringW(himc, GCS_COMPATTR, buf.as_mut_ptr() as *mut c_void, bytes as u32);
+    if got < 0 {
+        return Vec::new();
+    }
+    buf.truncate((got as usize).min(buf.len()));
+    buf
+}
+
+/// The target clause `[start, end)` — the maximal run of target attributes (converting or
+/// not-yet-converted), the segment the candidate list acts on. `(0, 0)` when there is none.
+fn target_clause(attrs: &[u8]) -> (usize, usize) {
+    let mut start = None;
+    let mut end = 0;
+    for (i, &a) in attrs.iter().enumerate() {
+        if a == ATTR_TARGET_CONVERTED || a == ATTR_TARGET_NOTCONVERTED {
+            if start.is_none() {
+                start = Some(i);
+            }
+            end = i + 1;
+        }
+    }
+    match start {
+        Some(s) => (s, end),
+        None => (0, 0),
+    }
+}
+
+/// Pin the IME candidate window at the caret in client pixels (`CFS_POINT | CFS_FORCE_POSITION`),
+/// so the candidate list appears under the caret rather than the window origin (§6).
+unsafe fn set_ime_candidate_pos(state: &mut WindowState, hwnd: HWND, himc: HIMC) {
+    let pt = match state.renderer.as_mut() {
+        Some(r) => r.caret_client_px(&state.app.text, state.app.content_gen(), state.app.caret, state.scroll_y),
+        None => None,
+    };
+    if let Some((x, y)) = pt {
+        let mut rc: RECT = zeroed();
+        GetClientRect(hwnd, &mut rc);
+        let form = COMPOSITIONFORM {
+            dwStyle: CFS_POINT | CFS_FORCE_POSITION,
+            ptCurrentPos: POINT { x, y },
+            rcArea: rc,
+        };
+        ImmSetCompositionWindow(himc, &form);
+    }
+}
+
 /// Put `units` on the system clipboard as CF_UNICODETEXT (nul-terminated). Best-effort:
 /// on any failure we just close the clipboard and move on — clipboard ops never panic.
 unsafe fn clipboard_set(hwnd: HWND, units: &[u16]) {
@@ -1090,6 +1236,15 @@ mod smoke_tests {
             SendMessageW(hwnd, WM_LBUTTONDOWN, 0, lp(30, 18));
             SendMessageW(hwnd, WM_MOUSEMOVE, MK_LBUTTON, lp(10, 18));
             SendMessageW(hwnd, WM_LBUTTONUP, 0, lp(10, 18));
+            // IME: drive the composition handlers through the real WndProc. Without a real IME
+            // installed the IMC carries no composition, so ImmGetCompositionStringW returns empty
+            // and these are effectively no-ops — but they exercise the imm32 FFI (ImmGetContext /
+            // GetCompositionStringW / SetCompositionWindow / ReleaseContext) crash-free. The IMM
+            // round-trip + feel need a human on a real IME (SCRIPTORIUM-NATIVE-IME.md §8).
+            SendMessageW(hwnd, WM_IME_STARTCOMPOSITION, 0, 0);
+            SendMessageW(hwnd, WM_IME_COMPOSITION, 0, GCS_COMPSTR as isize);
+            SendMessageW(hwnd, WM_IME_COMPOSITION, 0, GCS_RESULTSTR as isize);
+            SendMessageW(hwnd, WM_IME_ENDCOMPOSITION, 0, 0);
 
             // Exercise resize (incl. the 0x0 minimize guard) and a caret-blink tick.
             SendMessageW(hwnd, WM_SIZE, 0, (600isize << 16) | 800);
