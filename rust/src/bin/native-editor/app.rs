@@ -21,6 +21,21 @@ pub struct ParseSignal {
     pub parse_micros: u128,
 }
 
+/// A provisional IME composition (SCRIPTORIUM-NATIVE-IME.md §2): the in-progress string the
+/// user is composing through an Input Method Editor. It is shown inline by the renderer,
+/// spliced over the current selection, but is **never in the rope** until `commit_composition` —
+/// so the buffer/parser/undo never see half-composed text, and cancelling is zero-change.
+pub struct Composition {
+    /// The provisional units, displayed inline (from `GCS_COMPSTR`).
+    pub text: Vec<u16>,
+    /// The caret's position *within* `text`, in UTF-16 units (from `GCS_CURSORPOS`).
+    pub caret_units: usize,
+    /// The target clause `[start, end)` within `text` — the segment the IME is actively
+    /// converting (from `GCS_COMPATTR`), styled distinctly. `start == end` means no target.
+    pub target_start: usize,
+    pub target_end: usize,
+}
+
 /// A caret motion, expressed in our own terms (the platform layer maps VK codes to these).
 /// Left/Right move by a grapheme cluster; WordLeft/WordRight by a word.
 #[derive(Clone, Copy, PartialEq)]
@@ -62,6 +77,10 @@ pub struct App {
     /// its cached `IDWriteTextLayout` on this so it rebuilds only when the text actually
     /// changed (N3 layout cache), and N4 will use it to discard a stale off-thread parse.
     content_gen: u64,
+    /// The provisional IME composition, if a session is active (SCRIPTORIUM-NATIVE-IME.md §2).
+    /// `Some` only between `WM_IME_STARTCOMPOSITION` and its end; the rope stays untouched
+    /// while it lives. The renderer reads it to splice the inline preview.
+    comp: Option<Composition>,
 }
 
 impl App {
@@ -76,6 +95,7 @@ impl App {
             group: None,
             signal: ParseSignal { blocks: 0, words: 0, parse_micros: 0 },
             content_gen: 0,
+            comp: None,
         };
         app.refresh();
         app
@@ -185,6 +205,49 @@ impl App {
         self.anchor = anchor.min(len);
         self.caret = caret.min(len);
         self.group = None;
+    }
+
+    // --- IME composition (SCRIPTORIUM-NATIVE-IME.md §2) -----------------------
+    // The provisional string is spliced over the current selection by the renderer and never
+    // touches the rope until `commit_composition`, so a cancel is guaranteed zero-change and a
+    // commit reuses `replace_selection` for one-undo-group semantics.
+
+    /// The active provisional composition, if any — read by the renderer for the inline splice.
+    pub fn composition(&self) -> Option<&Composition> {
+        self.comp.as_ref()
+    }
+
+    /// Begin or update the provisional composition. Purely provisional: the rope is **not**
+    /// touched, so this is safe to call on every `WM_IME_COMPOSITION`/`GCS_COMPSTR`. `caret_units`
+    /// is the caret within `units`; `target` is the converting clause `[start, end)`.
+    pub fn set_composition(&mut self, units: &[u16], caret_units: usize, target: (usize, usize)) {
+        let n = units.len();
+        let target_start = target.0.min(n);
+        let target_end = target.1.clamp(target_start, n);
+        self.comp = Some(Composition {
+            text: units.to_vec(),
+            caret_units: caret_units.min(n),
+            target_start,
+            target_end,
+        });
+    }
+
+    /// Commit the finalized composition `units` (from `GCS_RESULTSTR`): replace the selection
+    /// (or insert at the caret) as **one** undo step, and clear the provisional string. Forcing
+    /// the group closed first keeps the commit from coalescing into prior typing.
+    pub fn commit_composition(&mut self, units: &[u16]) {
+        self.comp = None;
+        if !units.is_empty() {
+            self.group = None; // isolate: a committed composition is its own undo step
+            self.replace_selection(units, EditKind::Insert);
+            self.group = None;
+        }
+    }
+
+    /// Cancel the composition (Escape / a bare `WM_IME_ENDCOMPOSITION` with no result). The rope
+    /// was never touched, so this is zero document change — the selection, if any, is intact.
+    pub fn clear_composition(&mut self) {
+        self.comp = None;
     }
 
     /// Replace the current selection (if any) with `units`, as one undo group of `kind`.
@@ -341,5 +404,83 @@ impl App {
             self.signal.parse_micros,
             self.text.len()
         )
+    }
+}
+
+// --- IME composition state-machine oracle (SCRIPTORIUM-NATIVE-IME.md §8) ------
+// The deterministic half of N2b: the provisional-string lifecycle (commit / cancel / replace)
+// and its undo grouping, pinned without any IMM or DWrite. The IMM round-trip + feel are the
+// author's to judge (§8) — these guard everything we actually own.
+#[cfg(test)]
+mod ime_tests {
+    use super::*;
+
+    fn s(app: &App) -> String {
+        String::from_utf16(&app.text).unwrap()
+    }
+
+    fn typed(text: &str) -> App {
+        let mut app = App::new();
+        for c in text.encode_utf16() {
+            app.input_char(c);
+        }
+        app
+    }
+
+    #[test]
+    fn set_composition_does_not_touch_the_rope() {
+        let mut app = typed("ab");
+        let before = app.text.clone();
+        app.set_composition(&[0x597D, 0x597E], 2, (0, 2));
+        assert!(app.composition().is_some(), "composition should be active");
+        // The provisional string is NOT materialized into `text` — the buffer is untouched.
+        assert_eq!(app.text, before, "the rope must not change while composing");
+    }
+
+    #[test]
+    fn commit_composition_inserts_once_as_one_undo_step() {
+        let mut app = typed("ab");
+        app.set_composition(&[0x597D], 1, (0, 1));
+        app.commit_composition(&[0x597D]);
+        assert!(app.composition().is_none(), "commit clears the provisional string");
+        assert_eq!(s(&app), "ab\u{597D}", "the committed char lands exactly once");
+        // One undo removes the whole committed composition (not one-per-keystroke), and does
+        // NOT coalesce with the prior "ab" typing.
+        app.input_char(0x1A); // Ctrl+Z
+        assert_eq!(s(&app), "ab", "commit is its own single undo step");
+    }
+
+    #[test]
+    fn compose_over_selection_replaces_in_one_step() {
+        let mut app = typed("abcXYdef");
+        app.set_selection(3, 5); // select "XY"
+        app.set_composition(&[0x597D], 1, (0, 1));
+        app.commit_composition(&[0x597D]);
+        assert_eq!(s(&app), "abc\u{597D}def", "the selection is replaced by the commit");
+        app.input_char(0x1A); // undo
+        assert_eq!(s(&app), "abcXYdef", "delete + insert are one undo step");
+    }
+
+    #[test]
+    fn cancel_composition_is_zero_change() {
+        let mut app = typed("ab");
+        let before = app.text.clone();
+        app.set_composition(&[0x597D, 0x597E], 2, (0, 2));
+        app.clear_composition();
+        assert!(app.composition().is_none());
+        assert_eq!(app.text, before, "cancel must not change the document");
+        // Cancel added no undo step: the only edit on the stack is the "ab" typing.
+        app.input_char(0x1A);
+        assert_eq!(app.text.len(), 0, "nothing but the original typing was undoable");
+    }
+
+    #[test]
+    fn composition_clamps_caret_and_target() {
+        let mut app = typed("");
+        // Out-of-range caret/target from a misbehaving IME must be clamped, not panic.
+        app.set_composition(&[0x597D, 0x597E], 99, (5, 1));
+        let c = app.composition().unwrap();
+        assert_eq!(c.caret_units, 2, "caret clamps to the composition length");
+        assert!(c.target_start <= c.target_end && c.target_end <= c.text.len(), "target stays in range");
     }
 }
