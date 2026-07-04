@@ -34,6 +34,10 @@ struct WindowState {
     /// motion or edit clears it (SCRIPTORIUM-NATIVE-LAYOUT.md §5). A view quantity (pixels),
     /// so it lives here, not in `app`.
     goal_x: Option<f32>,
+    /// Accumulated wheel delta not yet spent as whole notches. High-resolution wheels and
+    /// trackpads send deltas smaller than `WHEEL_DELTA`; we bank the remainder across messages
+    /// so a slow scroll isn't truncated to nothing (SCRIPTORIUM-NATIVE-LAYOUT.md §6).
+    wheel_accum: i32,
 }
 
 /// One vertical caret step. Up/Down move by a visual line; the Page variants by a viewport
@@ -86,6 +90,7 @@ pub fn run() {
             dpi: 96,
             scroll_y: 0.0,
             goal_x: None,
+            wheel_accum: 0,
         });
         let state_ptr = Box::into_raw(state);
 
@@ -176,6 +181,8 @@ unsafe fn wndproc_impl(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> 
             // An edit is a horizontal move: it ends any vertical run, so the next Up/Down
             // re-seeds the goal column from the caret's new x (§5).
             state.goal_x = None;
+            // Typing at the bottom must keep the caret on screen (scroll-follows-caret, §6).
+            ensure_caret_visible(state);
             // An edit makes the caret solid again so it's visible right after typing.
             state.caret_visible = true;
             InvalidateRect(hwnd, null(), 0);
@@ -192,6 +199,7 @@ unsafe fn wndproc_impl(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> 
             // done once after the match so each arm doesn't have to remember.
             let mut handled = true;
             let mut is_vertical = false;
+            let mut moves_caret = true;
             match vk {
                 VK_LEFT => {
                     let m = if ctrl { Motion::WordLeft } else { Motion::Left };
@@ -221,7 +229,12 @@ unsafe fn wndproc_impl(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> 
                 VK_END => state.app.move_caret(Motion::End, shift),
                 VK_DELETE => state.app.delete_forward(),
                 VK_A if ctrl => state.app.select_all(),
-                VK_C if ctrl => clipboard_set(hwnd, &state.app.copy()),
+                VK_C if ctrl => {
+                    // Copy doesn't move the caret, so it must not yank the view back to it: a
+                    // wheel-scrolled reader can copy without the page jumping (§6).
+                    clipboard_set(hwnd, &state.app.copy());
+                    moves_caret = false;
+                }
                 VK_X if ctrl => {
                     let cut = state.app.cut();
                     clipboard_set(hwnd, &cut);
@@ -240,6 +253,10 @@ unsafe fn wndproc_impl(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> 
                 if !is_vertical {
                     state.goal_x = None;
                 }
+                // Scroll-follows-caret: keep the caret on screen after it moves (§6).
+                if moves_caret {
+                    ensure_caret_visible(state);
+                }
                 state.caret_visible = true;
                 InvalidateRect(hwnd, null(), 0);
                 0
@@ -255,12 +272,24 @@ unsafe fn wndproc_impl(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> 
             }
             0
         }
+        WM_MOUSEWHEEL => {
+            // The wheel moves the view only — the caret keeps its document offset and scrolls
+            // with the content (it may leave the viewport). GET_WHEEL_DELTA_WPARAM is the signed
+            // high word; positive = wheel up = scroll toward the top (§6).
+            let delta = (((wparam >> 16) & 0xffff) as u16 as i16) as i32;
+            wheel_scroll(state, delta);
+            InvalidateRect(hwnd, null(), 0);
+            0
+        }
         WM_SIZE => {
             if let Some(r) = state.renderer.as_mut() {
                 let w = (lparam & 0xffff) as u32;
                 let h = ((lparam >> 16) & 0xffff) as u32;
                 r.resize(w, h);
             }
+            // The viewport (and thus max_scroll) changed: shrinking can push content past the
+            // bottom, growing can leave dead space below the text — re-clamp either way (§6).
+            reclamp_scroll(state);
             0
         }
         WM_DPICHANGED => {
@@ -374,8 +403,88 @@ unsafe fn vertical_motion(state: &mut WindowState, step: VStep, extend: bool) {
         offset = if down { state.app.text.len() } else { 0 };
     }
     state.app.set_caret(offset, extend);
-    // `ensure_caret_visible` (scroll-follows-caret) lands in N3c; until then `scroll_y` stays
-    // 0, so a caret driven below the fold on a tall doc is simply not yet followed.
+    // Scroll-follows-caret runs at the WM_KEYDOWN call site (shared with the horizontal
+    // motions), so vertical motion past the fold pulls the view along too.
+}
+
+// --- scrolling (SCRIPTORIUM-NATIVE-LAYOUT.md §6) ------------------------------
+// The scroll math is pure arithmetic over DIP floats (content height, viewport height, caret
+// extent), split from the view plumbing so it can be oracled without a window. The wrappers
+// below fetch the live geometry from the renderer and apply these.
+
+/// Clamp a scroll offset to `[0, max_scroll]`, where `max_scroll = max(0, content − viewport)`.
+/// When the text fits (`content ≤ viewport`) the only legal offset is 0.
+fn clamp_scroll(scroll_y: f32, content_h: f32, viewport_h: f32) -> f32 {
+    scroll_y.clamp(0.0, (content_h - viewport_h).max(0.0))
+}
+
+/// The minimal scroll offset that reveals the caret's vertical extent `[cy, cy+ch]`, then
+/// clamped. A caret above the viewport pins to the top, below pins to the bottom, and one
+/// already inside leaves the view untouched — so it never scrolls away from a caret that fits.
+fn scroll_to_reveal(scroll_y: f32, cy: f32, ch: f32, content_h: f32, viewport_h: f32) -> f32 {
+    let adjusted = if cy < scroll_y {
+        cy
+    } else if cy + ch > scroll_y + viewport_h {
+        cy + ch - viewport_h
+    } else {
+        scroll_y
+    };
+    clamp_scroll(adjusted, content_h, viewport_h)
+}
+
+/// Spend a raw wheel `delta` (signed, in `WHEEL_DELTA` units): bank the sub-notch remainder,
+/// convert whole notches to a DIP step (lines · line_height, or a page for `WHEEL_PAGESCROLL`),
+/// and move + clamp `scroll_y`. Positive delta scrolls toward the top. No-op without a renderer.
+unsafe fn wheel_scroll(state: &mut WindowState, delta: i32) {
+    let r = match state.renderer.as_mut() {
+        Some(r) => r,
+        None => return,
+    };
+    state.wheel_accum += delta;
+    let notches = state.wheel_accum / WHEEL_DELTA; // toward zero; sub-notch remainder banked
+    state.wheel_accum -= notches * WHEEL_DELTA;
+    if notches == 0 {
+        return; // a sub-notch nudge: banked, nothing to spend yet
+    }
+    // Lines-per-notch is a user setting; the sentinel WHEEL_PAGESCROLL means "a screen a time".
+    let mut lines: u32 = 3;
+    SystemParametersInfoW(SPI_GETWHEELSCROLLLINES, 0, &mut lines as *mut u32 as *mut c_void, 0);
+    let gen = state.app.content_gen();
+    let viewport = r.viewport_height();
+    let step = if lines == WHEEL_PAGESCROLL {
+        viewport
+    } else {
+        lines as f32 * r.line_height(&state.app.text, gen)
+    };
+    let content = r.content_height(&state.app.text, gen);
+    state.scroll_y = clamp_scroll(state.scroll_y - notches as f32 * step, content, viewport);
+}
+
+/// Scroll-follows-caret: after a caret-moving op, scroll the minimum needed to keep the caret
+/// on screen (§6). No-op until the renderer + a resolvable caret geometry exist.
+unsafe fn ensure_caret_visible(state: &mut WindowState) {
+    let r = match state.renderer.as_mut() {
+        Some(r) => r,
+        None => return,
+    };
+    let gen = state.app.content_gen();
+    if let Some((_, cy, ch)) = r.caret_xywh(&state.app.text, gen, state.app.caret) {
+        let viewport = r.viewport_height();
+        let content = r.content_height(&state.app.text, gen);
+        state.scroll_y = scroll_to_reveal(state.scroll_y, cy, ch, content, viewport);
+    }
+}
+
+/// Re-clamp `scroll_y` to the current geometry (after a resize changes viewport / extent).
+unsafe fn reclamp_scroll(state: &mut WindowState) {
+    let r = match state.renderer.as_mut() {
+        Some(r) => r,
+        None => return,
+    };
+    let gen = state.app.content_gen();
+    let viewport = r.viewport_height();
+    let content = r.content_height(&state.app.text, gen);
+    state.scroll_y = clamp_scroll(state.scroll_y, content, viewport);
 }
 
 /// Put `units` on the system clipboard as CF_UNICODETEXT (nul-terminated). Best-effort:
@@ -438,6 +547,49 @@ unsafe fn clipboard_get(hwnd: HWND) -> Option<Vec<u16>> {
     out
 }
 
+// --- scroll-math oracles (SCRIPTORIUM-NATIVE-LAYOUT.md §7) --------------------
+// Pure arithmetic — no DWrite or window needed — so the clamp invariants and the
+// scroll-follows-caret contract (minimal, edge-pinning, idempotent) are pinned deterministically.
+#[cfg(test)]
+mod scroll_tests {
+    use super::{clamp_scroll, scroll_to_reveal};
+
+    #[test]
+    fn scroll_clamps_to_range() {
+        // In-range stays; over/under clamp to [0, max_scroll] where max_scroll = content−viewport.
+        assert_eq!(clamp_scroll(50.0, 1000.0, 400.0), 50.0);
+        assert_eq!(clamp_scroll(-10.0, 1000.0, 400.0), 0.0);
+        assert_eq!(clamp_scroll(9999.0, 1000.0, 400.0), 600.0);
+        // Content fits in the viewport ⇒ max_scroll 0 ⇒ only 0 is legal.
+        assert_eq!(clamp_scroll(50.0, 300.0, 400.0), 0.0);
+    }
+
+    #[test]
+    fn reveal_pins_caret_to_the_nearer_edge() {
+        let (content, vp) = (2000.0, 400.0);
+        // Caret above the view pins it to the viewport top; below pins to the bottom
+        // (scroll = cy+ch−viewport); already inside leaves the view untouched.
+        assert_eq!(scroll_to_reveal(500.0, 480.0, 20.0, content, vp), 480.0);
+        assert_eq!(scroll_to_reveal(0.0, 700.0, 20.0, content, vp), 320.0);
+        assert_eq!(scroll_to_reveal(100.0, 200.0, 20.0, content, vp), 100.0);
+    }
+
+    #[test]
+    fn reveal_is_idempotent_and_keeps_the_caret_visible() {
+        let (content, vp, ch) = (2000.0, 400.0, 20.0);
+        for &(s, cy) in &[(0.0f32, 700.0f32), (500.0, 480.0), (100.0, 200.0), (1500.0, 50.0)] {
+            let once = scroll_to_reveal(s, cy, ch, content, vp);
+            let twice = scroll_to_reveal(once, cy, ch, content, vp);
+            assert_eq!(once, twice, "reveal must be idempotent (running it twice is a no-op)");
+            // A caret that fits in a viewport must actually be inside it afterwards.
+            assert!(
+                cy >= once - 0.01 && cy + ch <= once + vp + 0.01,
+                "caret must be visible after reveal: cy={cy} scroll={once}"
+            );
+        }
+    }
+}
+
 // --- windowed lifecycle smoke test (feature = "smoke") -----------------------
 // The breadth check the unit oracles can't give: a *real* window, driven through
 // its own WndProc with synthetic input, painted, and torn down — proving the whole
@@ -480,6 +632,7 @@ mod smoke_tests {
                 dpi: 96,
                 scroll_y: 0.0,
                 goal_x: None,
+                wheel_accum: 0,
             });
             let state_ptr = Box::into_raw(state);
 
@@ -514,6 +667,10 @@ mod smoke_tests {
             // these clamp rather than move). Exercises the N3b path end-to-end; must not panic.
             SendMessageW(hwnd, WM_KEYDOWN, VK_DOWN as usize, 0);
             SendMessageW(hwnd, WM_KEYDOWN, VK_UP as usize, 0);
+            // A wheel notch (delta in the high word) runs `wheel_scroll` on the live renderer:
+            // SystemParametersInfoW + content_height/line_height on real DWrite. Short text
+            // fits, so max_scroll is 0 and it clamps to 0 — the path runs, must not panic.
+            SendMessageW(hwnd, WM_MOUSEWHEEL, (WHEEL_DELTA as usize) << 16, 0);
 
             // Exercise resize (incl. the 0x0 minimize guard) and a caret-blink tick.
             SendMessageW(hwnd, WM_SIZE, 0, (600isize << 16) | 800);

@@ -50,9 +50,18 @@ pub const WM_PAINT: u32 = 0x000F;
 pub const WM_KEYDOWN: u32 = 0x0100;
 pub const WM_CHAR: u32 = 0x0102;
 pub const WM_TIMER: u32 = 0x0113;
+pub const WM_VSCROLL: u32 = 0x0115;
+pub const WM_MOUSEWHEEL: u32 = 0x020A;
 pub const WM_NCCREATE: u32 = 0x0081;
 pub const WM_NCDESTROY: u32 = 0x0082;
 pub const WM_DPICHANGED: u32 = 0x02E0;
+
+// Mouse wheel: a notch is WHEEL_DELTA; high-res wheels/trackpads send sub-notch deltas that we
+// accumulate. Lines-per-notch comes from SPI_GETWHEELSCROLLLINES (the special value
+// WHEEL_PAGESCROLL means "a screen at a time"). SCROLLINFO/WM_VSCROLL drive the real scrollbar.
+pub const WHEEL_DELTA: i32 = 120;
+pub const SPI_GETWHEELSCROLLLINES: u32 = 0x0068;
+pub const WHEEL_PAGESCROLL: u32 = 0xFFFF_FFFF;
 
 // Virtual-key codes (delivered by WM_KEYDOWN). N2 handles horizontal + word + line edges,
 // plus Delete and the Ctrl shortcuts; N3b adds the vertical family (Up/Down/PageUp/PageDown),
@@ -638,6 +647,8 @@ extern "system" {
     pub fn KillTimer(hwnd: HWND, id: usize) -> BOOL;
     pub fn GetDpiForWindow(hwnd: HWND) -> u32;
     pub fn SetProcessDpiAwarenessContext(ctx: DPI_AWARENESS_CONTEXT) -> BOOL;
+    // Wheel tuning: reads the user's lines-per-notch into a UINT via pvParam.
+    pub fn SystemParametersInfoW(action: u32, ui_param: u32, pv_param: *mut c_void, win_ini: u32) -> BOOL;
     pub fn SetWindowPos(
         hwnd: HWND,
         insert_after: HWND,
