@@ -15,6 +15,7 @@ use core::ptr::{null, null_mut};
 use sys::*;
 
 use crate::app::{App, Motion};
+use crate::grapheme;
 use crate::render::Renderer;
 
 /// Per-window state, owned by the window via GWLP_USERDATA.
@@ -38,6 +39,36 @@ struct WindowState {
     /// trackpads send deltas smaller than `WHEEL_DELTA`; we bank the remainder across messages
     /// so a slow scroll isn't truncated to nothing (SCRIPTORIUM-NATIVE-LAYOUT.md §6).
     wheel_accum: i32,
+    /// A left-button drag is in progress (capture held, selection tracking the pointer).
+    selecting: bool,
+    /// The drag-autoscroll timer is running (pointer held past a viewport edge).
+    autoscrolling: bool,
+    /// Rolling click count (1 = single, 2 = double/word, 3 = triple/line), advanced when a
+    /// press falls within `GetDoubleClickTime` and the `SM_C?DOUBLECLK` box of the last (§4).
+    click_count: u32,
+    /// `GetMessageTime` of the last button-down, and its physical-pixel position — the
+    /// reference the next press is measured against for the click-count classification.
+    last_click_ms: i32,
+    last_click_x: i32,
+    last_click_y: i32,
+    /// The most recent pointer position (physical px), kept so autoscroll ticks can re-hit-test
+    /// at the held pointer even while it isn't moving.
+    last_mouse_x: i32,
+    last_mouse_y: i32,
+    /// The granularity a drag extends by — set by the initiating click (single → char,
+    /// double → word, triple → line) so dragging grows the selection in whole units (§4).
+    drag_mode: DragMode,
+    /// The anchored range fixed for the duration of the drag: the initial caret for a single
+    /// click, or the whole word/line for a double/triple. Drag extension pivots around it.
+    sel_origin: (usize, usize),
+}
+
+/// The unit a drag extends the selection by, fixed by the click that began it (§4).
+#[derive(Clone, Copy, PartialEq)]
+enum DragMode {
+    Char,
+    Word,
+    Line,
 }
 
 /// One vertical caret step. Up/Down move by a visual line; the Page variants by a viewport
@@ -52,6 +83,11 @@ enum VStep {
 
 const CARET_TIMER_ID: usize = 1;
 const CARET_BLINK_MS: u32 = 530;
+/// Second timer: while a drag holds past a viewport edge, this ticks to roll the view (and
+/// re-extend the selection) toward the pointer. One line per tick at ~25 Hz — a steady,
+/// tunable crawl (SCRIPTORIUM-NATIVE-LAYOUT.md §4).
+const AUTOSCROLL_TIMER_ID: usize = 2;
+const AUTOSCROLL_MS: u32 = 40;
 
 /// Open the editor window and pump messages until it closes.
 pub fn run() {
@@ -91,6 +127,16 @@ pub fn run() {
             scroll_y: 0.0,
             goal_x: None,
             wheel_accum: 0,
+            selecting: false,
+            autoscrolling: false,
+            click_count: 0,
+            last_click_ms: 0,
+            last_click_x: 0,
+            last_click_y: 0,
+            last_mouse_x: 0,
+            last_mouse_y: 0,
+            drag_mode: DragMode::Char,
+            sel_origin: (0, 0),
         });
         let state_ptr = Box::into_raw(state);
 
@@ -269,6 +315,8 @@ unsafe fn wndproc_impl(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> 
             if wparam == CARET_TIMER_ID {
                 state.caret_visible = !state.caret_visible;
                 InvalidateRect(hwnd, null(), 0);
+            } else if wparam == AUTOSCROLL_TIMER_ID {
+                autoscroll_tick(state, hwnd);
             }
             0
         }
@@ -287,6 +335,28 @@ unsafe fn wndproc_impl(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> 
             let code = (wparam & 0xffff) as u32;
             vscroll(state, hwnd, code);
             InvalidateRect(hwnd, null(), 0);
+            0
+        }
+        WM_LBUTTONDOWN => {
+            mouse_down(state, hwnd, get_x_lparam(lparam), get_y_lparam(lparam), key_down(VK_SHIFT));
+            0
+        }
+        WM_MOUSEMOVE => {
+            // Only while we own the drag and the button is still down (the wParam flag guards
+            // against a stray move after a lost/synthetic release).
+            if state.selecting && (wparam & MK_LBUTTON) != 0 {
+                mouse_drag(state, hwnd, get_x_lparam(lparam), get_y_lparam(lparam));
+            }
+            0
+        }
+        WM_LBUTTONUP => {
+            mouse_up(state, hwnd);
+            0
+        }
+        WM_CAPTURECHANGED => {
+            // Capture yanked away (another window, Alt+Tab, a menu): end the drag cleanly so we
+            // don't keep extending a selection we can no longer see the pointer for.
+            end_drag(state, hwnd);
             0
         }
         WM_SIZE => {
@@ -556,6 +626,216 @@ unsafe fn update_scrollbar(hwnd: HWND, state: &mut WindowState) {
     SetScrollInfo(hwnd, SB_VERT, &si, 1);
 }
 
+/// Move + clamp `scroll_y` by `dy` DIPs (autoscroll steps; positive scrolls down). No-op
+/// without a renderer.
+unsafe fn scroll_by(state: &mut WindowState, dy: f32) {
+    let r = match state.renderer.as_mut() {
+        Some(r) => r,
+        None => return,
+    };
+    let gen = state.app.content_gen();
+    let viewport = r.viewport_height();
+    let content = r.content_height(&state.app.text, gen);
+    state.scroll_y = clamp_scroll(state.scroll_y + dy, content, viewport);
+}
+
+// --- mouse: click-to-place, drag-select, double/triple, autoscroll (§4) -------
+
+/// The low / high signed 16-bit halves of an lParam — a mouse point's client-pixel x / y.
+fn get_x_lparam(lp: LPARAM) -> i32 {
+    (lp & 0xffff) as u16 as i16 as i32
+}
+fn get_y_lparam(lp: LPARAM) -> i32 {
+    ((lp >> 16) & 0xffff) as u16 as i16 as i32
+}
+
+/// The half-open `[start, end)` of the line containing `offset`, newline excluded — the Home/End
+/// span a triple-click selects.
+fn line_bounds(text: &[u16], offset: usize) -> (usize, usize) {
+    let len = text.len();
+    let o = offset.min(len);
+    let mut s = o;
+    while s > 0 && text[s - 1] != 0x000A {
+        s -= 1;
+    }
+    let mut e = o;
+    while e < len && text[e] != 0x000A {
+        e += 1;
+    }
+    (s, e)
+}
+
+/// Given the drag granularity, the fixed origin range, and the offset now under the pointer,
+/// return the `(anchor, caret)` the selection should take. Char drags pivot on the origin
+/// caret; Word/Line drags grow in whole units, flipping the anchor to the origin's far edge
+/// when the pointer crosses to the other side (§4). Pure — oracle-tested without a window.
+fn extend_selection(mode: DragMode, origin: (usize, usize), offset: usize, text: &[u16]) -> (usize, usize) {
+    let (lo, hi) = origin;
+    match mode {
+        DragMode::Char => (lo, offset),
+        DragMode::Word => {
+            if offset > hi {
+                (lo, grapheme::word_at(text, offset).1)
+            } else if offset < lo {
+                (hi, grapheme::word_at(text, offset).0)
+            } else {
+                (lo, hi)
+            }
+        }
+        DragMode::Line => {
+            if offset > hi {
+                (lo, line_bounds(text, offset).1)
+            } else if offset < lo {
+                (hi, line_bounds(text, offset).0)
+            } else {
+                (lo, hi)
+            }
+        }
+    }
+}
+
+/// Resolve a client-pixel point to a caret offset via the geometry service (unclamped: an
+/// initial click is inside the window, and a click below the last line should land at the
+/// nearest cluster, which DWrite already gives us). None without a renderer.
+unsafe fn hit_offset(state: &mut WindowState, px: i32, py: i32) -> Option<usize> {
+    let r = state.renderer.as_mut()?;
+    let gen = state.app.content_gen();
+    Some(r.hit_test_point(&state.app.text, gen, px, py, state.scroll_y))
+}
+
+/// Left button pressed: classify the click count, place/extend/word/line-select accordingly,
+/// and begin a captured drag (§4).
+unsafe fn mouse_down(state: &mut WindowState, hwnd: HWND, px: i32, py: i32, shift: bool) {
+    let offset = match hit_offset(state, px, py) {
+        Some(o) => o,
+        None => return,
+    };
+    // A press close in time AND space to the previous advances the count (1→2→3→1); otherwise
+    // it restarts at a single click. SM_C?DOUBLECLK is the full box, so the tolerance is half.
+    let now = GetMessageTime();
+    let within_time = now.wrapping_sub(state.last_click_ms) as u32 <= GetDoubleClickTime();
+    let within_box = (px - state.last_click_x).abs() <= GetSystemMetrics(SM_CXDOUBLECLK) / 2
+        && (py - state.last_click_y).abs() <= GetSystemMetrics(SM_CYDOUBLECLK) / 2;
+    state.click_count = if within_time && within_box { state.click_count % 3 + 1 } else { 1 };
+    state.last_click_ms = now;
+    state.last_click_x = px;
+    state.last_click_y = py;
+    state.last_mouse_x = px;
+    state.last_mouse_y = py;
+    // A click is a horizontal placement: it ends any vertical goal-column run (§5).
+    state.goal_x = None;
+
+    if shift {
+        // Shift-click extends the existing selection to the click (character granularity).
+        state.app.set_caret(offset, true);
+        state.drag_mode = DragMode::Char;
+        state.sel_origin = (state.app.anchor, state.app.anchor);
+    } else {
+        match state.click_count {
+            2 => {
+                let (s, e) = grapheme::word_at(&state.app.text, offset);
+                state.app.set_selection(s, e);
+                state.drag_mode = DragMode::Word;
+                state.sel_origin = (s, e);
+            }
+            3 => {
+                let (s, e) = line_bounds(&state.app.text, offset);
+                state.app.set_selection(s, e);
+                state.drag_mode = DragMode::Line;
+                state.sel_origin = (s, e);
+            }
+            _ => {
+                state.app.set_caret(offset, false);
+                state.drag_mode = DragMode::Char;
+                state.sel_origin = (offset, offset);
+            }
+        }
+    }
+
+    SetCapture(hwnd); // track the drag even when the pointer leaves the window
+    state.selecting = true;
+    state.caret_visible = true;
+    // Clicking visible text shouldn't jolt the view, so no ensure_caret_visible on the click.
+    InvalidateRect(hwnd, null(), 0);
+}
+
+/// Pointer moved during a captured drag: re-hit-test (clamped to the visible band) and extend
+/// the selection by the drag's granularity, arming/disarming autoscroll at the edges (§4).
+unsafe fn mouse_drag(state: &mut WindowState, hwnd: HWND, px: i32, py: i32) {
+    state.last_mouse_x = px;
+    state.last_mouse_y = py;
+    drag_extend(state);
+
+    let edge = match state.renderer.as_ref() {
+        Some(r) => r.edge_of_py(py, state.scroll_y),
+        None => 0,
+    };
+    if edge != 0 && !state.autoscrolling {
+        SetTimer(hwnd, AUTOSCROLL_TIMER_ID, AUTOSCROLL_MS, null_mut());
+        state.autoscrolling = true;
+    } else if edge == 0 && state.autoscrolling {
+        KillTimer(hwnd, AUTOSCROLL_TIMER_ID);
+        state.autoscrolling = false;
+    }
+    InvalidateRect(hwnd, null(), 0);
+}
+
+/// Re-hit-test the held pointer (clamped to the visible band) and set the selection to the
+/// granularity-extended range. Shared by drag moves and autoscroll ticks.
+unsafe fn drag_extend(state: &mut WindowState) {
+    let offset = match state.renderer.as_mut() {
+        Some(r) => r.hit_test_point_clamped(
+            &state.app.text,
+            state.app.content_gen(),
+            state.last_mouse_x,
+            state.last_mouse_y,
+            state.scroll_y,
+        ),
+        None => return,
+    };
+    let (anchor, caret) = extend_selection(state.drag_mode, state.sel_origin, offset, &state.app.text);
+    state.app.set_selection(anchor, caret);
+}
+
+/// Autoscroll tick: while the drag holds past a viewport edge, roll the view one line toward the
+/// pointer and re-extend the selection to the new visible edge (§4).
+unsafe fn autoscroll_tick(state: &mut WindowState, hwnd: HWND) {
+    if !state.selecting {
+        return;
+    }
+    let (dir, line) = match state.renderer.as_mut() {
+        Some(r) => (
+            r.edge_of_py(state.last_mouse_y, state.scroll_y),
+            r.line_height(&state.app.text, state.app.content_gen()),
+        ),
+        None => return,
+    };
+    if dir == 0 {
+        return; // pointer wandered back inside between ticks; the next move will disarm us
+    }
+    scroll_by(state, dir as f32 * line);
+    drag_extend(state);
+    InvalidateRect(hwnd, null(), 0);
+}
+
+/// Left button released: drop capture (which also fires WM_CAPTURECHANGED) and end the drag.
+unsafe fn mouse_up(state: &mut WindowState, hwnd: HWND) {
+    if state.selecting {
+        ReleaseCapture();
+    }
+    end_drag(state, hwnd);
+}
+
+/// End a drag from any cause (button up or capture stolen): stop tracking and stop autoscroll.
+/// Idempotent — safe to run twice (release then the WM_CAPTURECHANGED it triggers).
+unsafe fn end_drag(state: &mut WindowState, hwnd: HWND) {
+    state.selecting = false;
+    if state.autoscrolling {
+        KillTimer(hwnd, AUTOSCROLL_TIMER_ID);
+        state.autoscrolling = false;
+    }
+}
+
 /// Put `units` on the system clipboard as CF_UNICODETEXT (nul-terminated). Best-effort:
 /// on any failure we just close the clipboard and move on — clipboard ops never panic.
 unsafe fn clipboard_set(hwnd: HWND, units: &[u16]) {
@@ -659,6 +939,54 @@ mod scroll_tests {
     }
 }
 
+// --- mouse-selection oracles (SCRIPTORIUM-NATIVE-LAYOUT.md §7) ----------------
+// The geometry-free half of the mouse: line/word span math and the drag-granularity state
+// machine, pinned without DWrite (the pixel↔offset half is the render.rs round-trip oracle).
+#[cfg(test)]
+mod mouse_tests {
+    use super::{extend_selection, line_bounds, DragMode};
+
+    fn u(s: &str) -> Vec<u16> {
+        s.encode_utf16().collect()
+    }
+
+    #[test]
+    fn line_bounds_excludes_newlines() {
+        let t = u("ab\ncde\nf");
+        assert_eq!(line_bounds(&t, 4), (3, 6)); // inside the middle line "cde"
+        assert_eq!(line_bounds(&t, 3), (3, 6)); // at its start
+        assert_eq!(line_bounds(&t, 6), (3, 6)); // at its end (before the \n)
+        assert_eq!(line_bounds(&t, 0), (0, 2)); // first line "ab"
+        assert_eq!(line_bounds(&t, 8), (7, 8)); // last line "f"
+    }
+
+    #[test]
+    fn char_drag_pivots_on_the_origin() {
+        let t = u("hello world");
+        assert_eq!(extend_selection(DragMode::Char, (5, 5), 9, &t), (5, 9));
+        assert_eq!(extend_selection(DragMode::Char, (5, 5), 2, &t), (5, 2));
+    }
+
+    #[test]
+    fn word_drag_snaps_to_whole_words() {
+        let t = u("the quick brown fox");
+        let origin = (4, 9); // "quick"
+        // Drag right into "brown" grows to brown's end; inside the origin word is unchanged;
+        // drag left into "the" flips the anchor to the origin's far edge and snaps to word start.
+        assert_eq!(extend_selection(DragMode::Word, origin, 12, &t), (4, 15));
+        assert_eq!(extend_selection(DragMode::Word, origin, 6, &t), (4, 9));
+        assert_eq!(extend_selection(DragMode::Word, origin, 1, &t), (9, 0));
+    }
+
+    #[test]
+    fn line_drag_snaps_to_whole_lines() {
+        let t = u("aaa\nbbb\nccc");
+        let origin = (4, 7); // "bbb"
+        assert_eq!(extend_selection(DragMode::Line, origin, 9, &t), (4, 11));
+        assert_eq!(extend_selection(DragMode::Line, origin, 1, &t), (7, 0));
+    }
+}
+
 // --- windowed lifecycle smoke test (feature = "smoke") -----------------------
 // The breadth check the unit oracles can't give: a *real* window, driven through
 // its own WndProc with synthetic input, painted, and torn down — proving the whole
@@ -702,6 +1030,16 @@ mod smoke_tests {
                 scroll_y: 0.0,
                 goal_x: None,
                 wheel_accum: 0,
+                selecting: false,
+                autoscrolling: false,
+                click_count: 0,
+                last_click_ms: 0,
+                last_click_x: 0,
+                last_click_y: 0,
+                last_mouse_x: 0,
+                last_mouse_y: 0,
+                drag_mode: DragMode::Char,
+                sel_origin: (0, 0),
             });
             let state_ptr = Box::into_raw(state);
 
@@ -745,6 +1083,13 @@ mod smoke_tests {
             // WM_PAINT below. Exercises the new Set/GetScrollInfo FFI on a real WS_VSCROLL bar.
             SendMessageW(hwnd, WM_VSCROLL, SB_LINEDOWN as usize, 0);
             SendMessageW(hwnd, WM_VSCROLL, SB_THUMBTRACK as usize, 0);
+            // Mouse: press, drag, release — SetCapture, hit_test_point + hit_test_point_clamped,
+            // set_caret/set_selection, ReleaseCapture, all through the real WndProc on real
+            // DWrite. y stays inside the viewport so no autoscroll timer arms.
+            let lp = |x: isize, y: isize| ((y << 16) | (x & 0xffff)) as LPARAM;
+            SendMessageW(hwnd, WM_LBUTTONDOWN, 0, lp(30, 18));
+            SendMessageW(hwnd, WM_MOUSEMOVE, MK_LBUTTON, lp(10, 18));
+            SendMessageW(hwnd, WM_LBUTTONUP, 0, lp(10, 18));
 
             // Exercise resize (incl. the 0x0 minimize guard) and a caret-blink tick.
             SendMessageW(hwnd, WM_SIZE, 0, (600isize << 16) | 800);

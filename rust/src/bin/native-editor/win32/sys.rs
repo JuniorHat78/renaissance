@@ -53,9 +53,19 @@ pub const WM_CHAR: u32 = 0x0102;
 pub const WM_TIMER: u32 = 0x0113;
 pub const WM_VSCROLL: u32 = 0x0115;
 pub const WM_MOUSEWHEEL: u32 = 0x020A;
+pub const WM_MOUSEMOVE: u32 = 0x0200;
+pub const WM_LBUTTONDOWN: u32 = 0x0201;
+pub const WM_LBUTTONUP: u32 = 0x0202;
+pub const WM_CAPTURECHANGED: u32 = 0x0215;
 pub const WM_NCCREATE: u32 = 0x0081;
 pub const WM_NCDESTROY: u32 = 0x0082;
 pub const WM_DPICHANGED: u32 = 0x02E0;
+
+// Mouse: MK_LBUTTON marks a drag in WM_MOUSEMOVE's wParam; SM_C?DOUBLECLK is the click-count
+// hit-box (we track click count ourselves — the class has no CS_DBLCLKS — to also catch triple).
+pub const MK_LBUTTON: usize = 0x0001;
+pub const SM_CXDOUBLECLK: i32 = 36;
+pub const SM_CYDOUBLECLK: i32 = 37;
 
 // Mouse wheel: a notch is WHEEL_DELTA; high-res wheels/trackpads send sub-notch deltas that we
 // accumulate. Lines-per-notch comes from SPI_GETWHEELSCROLLLINES (the special value
@@ -693,6 +703,13 @@ extern "system" {
     pub fn SendMessageW(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT;
     pub fn DestroyWindow(hwnd: HWND) -> BOOL;
     pub fn GetKeyState(vk: i32) -> i16;
+    // Mouse capture + click-count inputs: a drag tracks past the window edge via SetCapture;
+    // GetMessageTime + GetDoubleClickTime + GetSystemMetrics classify single/double/triple.
+    pub fn SetCapture(hwnd: HWND) -> HWND;
+    pub fn ReleaseCapture() -> BOOL;
+    pub fn GetMessageTime() -> i32;
+    pub fn GetDoubleClickTime() -> u32;
+    pub fn GetSystemMetrics(index: i32) -> i32;
     // Clipboard (the system clipboard is a user32 resource).
     pub fn OpenClipboard(hwnd: HWND) -> BOOL;
     pub fn CloseClipboard() -> BOOL;

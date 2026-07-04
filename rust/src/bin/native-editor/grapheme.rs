@@ -169,6 +169,33 @@ pub fn prev_word(text: &[u16], i: usize) -> usize {
     idx
 }
 
+/// The half-open range `[start, end)` of the word-class run under `offset` — the unit a
+/// double-click selects. Unlike `[prev_word..next_word]` (which, like Ctrl+Arrow motion,
+/// swallows the trailing whitespace), this takes only the run *containing* the point, which is
+/// the double-click convention. It reuses the same class split, so keyboard and mouse still
+/// agree on what a "word" is. At a Word/non-Word boundary it prefers the touching Word run
+/// (double-clicking just past a word still selects the word); on a punctuation or space run it
+/// selects that run; at end-of-text it takes the run to the left.
+pub fn word_at(text: &[u16], offset: usize) -> (usize, usize) {
+    let len = text.len();
+    if len == 0 {
+        return (0, 0);
+    }
+    let p = offset.min(len);
+    let right = (p < len).then(|| classify(scalar_at(text, p).0));
+    let left = (p > 0).then(|| classify(scalar_at(text, prev_scalar_start(text, p)).0));
+    // Prefer a Word run touching the caret; otherwise take the run at the caret (or, at the
+    // end of the text, the run just before it).
+    let class = if right == Some(WordClass::Word) || left == Some(WordClass::Word) {
+        WordClass::Word
+    } else {
+        right.or(left).unwrap_or(WordClass::Space)
+    };
+    let start = rskip_class(text, p, class);
+    let end = skip_class(text, p, class);
+    (start, end)
+}
+
 fn skip_class(text: &[u16], mut idx: usize, class: WordClass) -> usize {
     let len = text.len();
     while idx < len {
@@ -292,5 +319,21 @@ mod tests {
         assert_eq!(next_word(&t, 4), 11); // skip two spaces to "fox"
         assert_eq!(prev_word(&t, 14), 11); // back to start of "fox"
         assert_eq!(prev_word(&t, 11), 4); // back to start of "quick"
+    }
+
+    #[test]
+    fn word_at_selects_the_run_under_the_point() {
+        let t = u("the quick  fox!!");
+        // Inside "quick" (any interior offset) selects exactly "quick" — no trailing space,
+        // unlike prev_word..next_word which would reach the start of "fox".
+        assert_eq!(word_at(&t, 5), (4, 9));
+        assert_eq!(word_at(&t, 4), (4, 9)); // at the word's leading edge
+        assert_eq!(word_at(&t, 9), (4, 9)); // at the trailing edge → prefers the Word to the left
+        // Inside the double space selects just the space run.
+        assert_eq!(word_at(&t, 10), (9, 11));
+        // On the punctuation run "!!" selects the punctuation.
+        assert_eq!(word_at(&t, 15), (14, 16));
+        // End of text takes the run to the left (the "!!").
+        assert_eq!(word_at(&t, 16), (14, 16));
     }
 }

@@ -349,6 +349,40 @@ impl Renderer {
         self.hit_test_content(text, gen, cx, cy)
     }
 
+    /// Like `hit_test_point`, but clamps the point to the currently *visible* content band
+    /// first, so a drag past the top/bottom edge selects to the visible edge while autoscroll
+    /// advances the view (SCRIPTORIUM-NATIVE-LAYOUT.md §4). `scroll_y` is the current view offset.
+    pub fn hit_test_point_clamped(
+        &mut self,
+        text: &[u16],
+        gen: u64,
+        px: i32,
+        py: i32,
+        scroll_y: f32,
+    ) -> usize {
+        let scale = 96.0 / self.dpi as f32;
+        let cx = px as f32 * scale - PAD_DIP;
+        let cy = py as f32 * scale - PAD_DIP + scroll_y;
+        // Keep the y inside [scroll_y, scroll_y + viewport): the hit lands on the last visible
+        // line, and the caller's autoscroll brings more into view for the next tick.
+        let cy = cy.clamp(scroll_y, (scroll_y + self.viewport_height() - 1.0).max(scroll_y));
+        self.hit_test_content(text, gen, cx, cy)
+    }
+
+    /// Where a physical-pixel `py` falls relative to the visible text band: `-1` above the top,
+    /// `+1` below the bottom, `0` inside. Drives drag-autoscroll direction (§4).
+    pub fn edge_of_py(&self, py: i32, scroll_y: f32) -> i32 {
+        let scale = 96.0 / self.dpi as f32;
+        let cy = py as f32 * scale - PAD_DIP + scroll_y;
+        if cy < scroll_y {
+            -1
+        } else if cy > scroll_y + self.viewport_height() {
+            1
+        } else {
+            0
+        }
+    }
+
     /// Map a **content-space** point (DIPs, pre-scroll) to a UTF-16 caret offset. Used both
     /// by `hit_test_point` and directly by Up/Down (which already work in content space).
     pub fn hit_test_content(&mut self, text: &[u16], gen: u64, cx: f32, cy: f32) -> usize {
