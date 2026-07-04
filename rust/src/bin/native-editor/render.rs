@@ -73,6 +73,11 @@ pub struct Renderer {
     cached_layout: Option<ComPtr<IDWriteTextLayout>>,
     cached_gen: u64,
     cached_width: f32,
+    // Composition signature the cached layout was built with (0 = no composition). Part of the
+    // cache key so the provisional inline composition (N2b) rebuilds the layout while composing
+    // and — crucially — falls back to the committed layout the instant composition ends, even
+    // though `content_gen` never changed while composing (the rope was untouched).
+    cached_comp_sig: u64,
     // Held only to keep our factory ref alive for the Renderer's lifetime (RAII); the
     // render target keeps its own ref, so we never read this after construction.
     // Kept alive for the Renderer's lifetime AND read on device-loss recovery: the
@@ -139,6 +144,7 @@ impl Renderer {
                 cached_layout: None,
                 cached_gen: 0,
                 cached_width: -1.0, // sentinel: forces the first ensure_layout to build
+                cached_comp_sig: 0,
                 d2d_factory,
                 dwrite_factory,
                 hwnd,
@@ -202,24 +208,39 @@ impl Renderer {
             let dip_h = px_h as f32 * scale;
             let text_w = (dip_w - PAD_DIP * 2.0).max(0.0);
 
-            // The retained main-text layout (also the geometry authority for input). The
-            // text origin scrolls: x = PAD, y = PAD − scroll_y.
-            let layout = self.ensure_layout(&app.text, app.content_gen(), text_w);
+            // The display layout (also the geometry authority for input). While composing, the
+            // provisional string is spliced over the selection so it wraps inline with its line
+            // (SCRIPTORIUM-NATIVE-IME.md §5); otherwise this is the retained committed layout.
+            // The text origin scrolls: x = PAD, y = PAD − scroll_y.
             let oy = PAD_DIP - scroll_y;
+            let (lo, hi) = app.selection();
+            let display; // the spliced units, materialized only while composing
+            let (layout, display_caret, comp_span, display_len) = match app.composition() {
+                Some(c) => {
+                    display = splice(&app.text, lo, hi, &c.text);
+                    let sig = comp_sig(&c.text, c.caret_units, lo);
+                    let l = self.ensure_layout(&display, app.content_gen(), sig, text_w);
+                    let base = lo;
+                    (l, base + c.caret_units.min(c.text.len()), Some((base, c.text.len(), c.target_start, c.target_end)), display.len())
+                }
+                None => (self.ensure_layout(&app.text, app.content_gen(), 0, text_w), app.caret, None, app.text.len()),
+            };
             if !layout.is_null() {
-                // Selection highlight sits behind the glyphs.
-                if app.has_selection() {
-                    let (s, e) = app.selection();
-                    fill_selection_range(
-                        rt,
-                        v,
-                        layout,
-                        self.sel_brush.as_raw() as *mut c_void,
-                        PAD_DIP,
-                        oy,
-                        s as u32,
-                        (e - s) as u32,
-                    );
+                let sel = self.sel_brush.as_raw() as *mut c_void;
+                match comp_span {
+                    // Not composing: the normal selection highlight sits behind the glyphs.
+                    None => {
+                        if app.has_selection() {
+                            fill_selection_range(rt, v, layout, sel, PAD_DIP, oy, lo as u32, (hi - lo) as u32);
+                        }
+                    }
+                    // Composing: no selection highlight (the composition replaces it); instead
+                    // emphasize the target clause the candidate list is acting on (§5).
+                    Some((base, _len, ts, te)) => {
+                        if te > ts {
+                            fill_selection_range(rt, v, layout, sel, PAD_DIP, oy, (base + ts) as u32, (te - ts) as u32);
+                        }
+                    }
                 }
                 (v.draw_text_layout)(
                     rt,
@@ -228,8 +249,21 @@ impl Renderer {
                     self.text_brush.as_raw() as *mut c_void,
                     0,
                 );
+                // Underline the whole composition — the universal "this is provisional" affordance.
+                if let Some((base, len, _, _)) = comp_span {
+                    underline_range(
+                        rt,
+                        v,
+                        layout,
+                        self.caret_brush.as_raw() as *mut c_void,
+                        PAD_DIP,
+                        oy,
+                        base as u32,
+                        len as u32,
+                    );
+                }
                 if caret_visible {
-                    if let Some((cx, cy, ch)) = caret_geometry(layout, app.caret, app.text.len()) {
+                    if let Some((cx, cy, ch)) = caret_geometry(layout, display_caret, display_len) {
                         let rect = D2D1_RECT_F {
                             left: PAD_DIP + cx,
                             top: oy + cy,
@@ -300,12 +334,23 @@ impl Renderer {
     // about geometry. The layout coords are content-space (origin at the top of the text,
     // before scroll); callers apply the scroll/padding transform (§3).
 
-    /// The cached main-text layout for `(gen, width)`, rebuilt only on key drift. The single
-    /// place text is (re)shaped. Returns null only if we have no layout at all and the build
-    /// failed (a transient build failure keeps the prior, stale-but-valid layout).
-    unsafe fn ensure_layout(&mut self, text: &[u16], gen: u64, width: f32) -> *mut IDWriteTextLayout {
+    /// The cached display layout for `(gen, comp_sig, width)`, rebuilt only on key drift. The
+    /// single place text is (re)shaped. `text` is the *display* string — the committed text, or
+    /// (while composing) the committed text with the provisional composition spliced in;
+    /// `comp_sig` is 0 when not composing and a content signature of the composition otherwise
+    /// (so it rebuilds each keystroke and reverts to the committed layout on end). Returns null
+    /// only if we have no layout at all and the build failed (a transient failure keeps the
+    /// prior, stale-but-valid layout).
+    unsafe fn ensure_layout(
+        &mut self,
+        text: &[u16],
+        gen: u64,
+        comp_sig: u64,
+        width: f32,
+    ) -> *mut IDWriteTextLayout {
         let stale = self.cached_layout.is_none()
             || self.cached_gen != gen
+            || self.cached_comp_sig != comp_sig
             || (self.cached_width - width).abs() > 0.5;
         if stale {
             let raw = self.make_layout(text, self.text_format.as_raw(), width, LAYOUT_MAX_HEIGHT);
@@ -313,6 +358,7 @@ impl Renderer {
                 // Assigning drops the previous ComPtr → releases the old layout.
                 self.cached_layout = Some(ComPtr::from_raw(raw));
                 self.cached_gen = gen;
+                self.cached_comp_sig = comp_sig;
                 self.cached_width = width;
             }
         }
@@ -387,7 +433,7 @@ impl Renderer {
     /// by `hit_test_point` and directly by Up/Down (which already work in content space).
     pub fn hit_test_content(&mut self, text: &[u16], gen: u64, cx: f32, cy: f32) -> usize {
         unsafe {
-            let layout = self.ensure_layout(text, gen, self.layout_width());
+            let layout = self.ensure_layout(text, gen, 0, self.layout_width());
             if layout.is_null() {
                 return 0;
             }
@@ -413,7 +459,7 @@ impl Renderer {
     /// Caret geometry (x, top, height) in **content space** for a UTF-16 offset, or None.
     pub fn caret_xywh(&mut self, text: &[u16], gen: u64, offset: usize) -> Option<(f32, f32, f32)> {
         unsafe {
-            let layout = self.ensure_layout(text, gen, self.layout_width());
+            let layout = self.ensure_layout(text, gen, 0, self.layout_width());
             if layout.is_null() {
                 return None;
             }
@@ -421,18 +467,31 @@ impl Renderer {
         }
     }
 
-    /// The caret's on-screen position for `offset` in **client pixels** — the point the IME
-    /// candidate window pins to (SCRIPTORIUM-NATIVE-IME.md §6). Content→viewport (`+PAD`,
-    /// `−scroll_y`) then DIP→px; returns the caret's *bottom*-left so the candidate list sits
-    /// just below the caret. None if the geometry is unavailable.
-    pub fn caret_client_px(
-        &mut self,
-        text: &[u16],
-        gen: u64,
-        offset: usize,
-        scroll_y: f32,
-    ) -> Option<(i32, i32)> {
-        let (cx, cy, ch) = self.caret_xywh(text, gen, offset)?;
+    /// The **display** caret geometry (x, top, height) in content space — composition-aware: the
+    /// caret *within* the provisional string while composing (resolved on the spliced layout),
+    /// else the committed caret. The one place the on-screen caret is resolved for the candidate
+    /// window and scroll-follows, so both track the composition caret (SCRIPTORIUM-NATIVE-IME.md §5).
+    pub fn display_caret_xywh(&mut self, app: &App) -> Option<(f32, f32, f32)> {
+        match app.composition() {
+            None => self.caret_xywh(&app.text, app.content_gen(), app.caret),
+            Some(c) => unsafe {
+                let (lo, hi) = app.selection();
+                let display = splice(&app.text, lo, hi, &c.text);
+                let sig = comp_sig(&c.text, c.caret_units, lo);
+                let layout = self.ensure_layout(&display, app.content_gen(), sig, self.layout_width());
+                if layout.is_null() {
+                    return None;
+                }
+                caret_geometry(layout, lo + c.caret_units.min(c.text.len()), display.len())
+            },
+        }
+    }
+
+    /// The display caret in **client pixels** — the point the IME candidate window pins to
+    /// (§6). Content→viewport (`+PAD`, `−scroll_y`) then DIP→px; the caret's *bottom*-left so
+    /// the candidate list sits just below the caret. None if the geometry is unavailable.
+    pub fn display_caret_client_px(&mut self, app: &App, scroll_y: f32) -> Option<(i32, i32)> {
+        let (cx, cy, ch) = self.display_caret_xywh(app)?;
         let scale = self.dpi as f32 / 96.0;
         let vx = (PAD_DIP + cx) * scale;
         let vy = (PAD_DIP + cy - scroll_y + ch) * scale;
@@ -442,7 +501,7 @@ impl Renderer {
     /// The total laid-out text height in DIPs (the scroll extent), via `GetMetrics`.
     pub fn content_height(&mut self, text: &[u16], gen: u64) -> f32 {
         unsafe {
-            let layout = self.ensure_layout(text, gen, self.layout_width());
+            let layout = self.ensure_layout(text, gen, 0, self.layout_width());
             if layout.is_null() {
                 return 0.0;
             }
@@ -586,19 +645,15 @@ unsafe fn caret_geometry(
     Some((x, m.top, height))
 }
 
-/// Fill the highlight rectangles for the text range `[start, start+length)` of `layout`,
-/// offset by (`origin_x`, `origin_y`) into the render target. DirectWrite returns one
-/// metric per on-screen run (a wrapped/bidi selection is several boxes); we start with a
-/// stack buffer and grow once if the range spans more runs than it holds.
-unsafe fn fill_selection_range(
-    rt: *mut ID2D1HwndRenderTarget,
-    v: &ID2D1HwndRenderTargetVtbl,
+/// Call `f` for each on-screen run rectangle of the text range `[start, start+length)`.
+/// DirectWrite returns one metric per run (a wrapped/bidi range is several boxes); we start
+/// with a stack buffer and grow once if the range spans more runs than it holds. The single
+/// `HitTestTextRange` choke point shared by selection fill and composition underline.
+unsafe fn each_range_metric(
     layout: *mut IDWriteTextLayout,
-    brush: *mut c_void,
-    origin_x: f32,
-    origin_y: f32,
     start: u32,
     length: u32,
+    mut f: impl FnMut(&DWRITE_HIT_TEST_METRICS),
 ) {
     let lv = &*(*layout).vtbl;
     let mut metrics: [DWRITE_HIT_TEST_METRICS; 32] = zeroed();
@@ -615,7 +670,7 @@ unsafe fn fill_selection_range(
     );
     if hr >= 0 {
         for m in &metrics[..actual as usize] {
-            fill_metric(rt, v, brush, origin_x, origin_y, m);
+            f(m);
         }
         return;
     }
@@ -629,28 +684,83 @@ unsafe fn fill_selection_range(
             (lv.hit_test_text_range)(layout, start, length, 0.0, 0.0, buf.as_mut_ptr(), cap, &mut got);
         if hr2 >= 0 {
             for m in &buf[..got as usize] {
-                fill_metric(rt, v, brush, origin_x, origin_y, m);
+                f(m);
             }
         }
     }
 }
 
-/// Fill one selection-run rectangle (a hit-test metric) with `brush`.
-unsafe fn fill_metric(
+/// Fill the highlight rectangles for the range `[start, start+length)` of `layout`, offset by
+/// (`origin_x`, `origin_y`) — the selection highlight, and the composition target-clause emphasis.
+unsafe fn fill_selection_range(
     rt: *mut ID2D1HwndRenderTarget,
     v: &ID2D1HwndRenderTargetVtbl,
+    layout: *mut IDWriteTextLayout,
     brush: *mut c_void,
     origin_x: f32,
     origin_y: f32,
-    m: &DWRITE_HIT_TEST_METRICS,
+    start: u32,
+    length: u32,
 ) {
-    let rect = D2D1_RECT_F {
-        left: origin_x + m.left,
-        top: origin_y + m.top,
-        right: origin_x + m.left + m.width,
-        bottom: origin_y + m.top + m.height,
-    };
-    (v.fill_rectangle)(rt, &rect, brush);
+    each_range_metric(layout, start, length, |m| {
+        let rect = D2D1_RECT_F {
+            left: origin_x + m.left,
+            top: origin_y + m.top,
+            right: origin_x + m.left + m.width,
+            bottom: origin_y + m.top + m.height,
+        };
+        (v.fill_rectangle)(rt, &rect, brush);
+    });
+}
+
+/// The composition-underline thickness (a thin strip at each run's baseline-ish bottom).
+const COMP_UNDERLINE_DIP: f32 = 1.5;
+
+/// Underline the range `[start, start+length)` — a thin strip at the bottom of each run — the
+/// "this text is provisional" affordance for an in-progress IME composition (§5).
+unsafe fn underline_range(
+    rt: *mut ID2D1HwndRenderTarget,
+    v: &ID2D1HwndRenderTargetVtbl,
+    layout: *mut IDWriteTextLayout,
+    brush: *mut c_void,
+    origin_x: f32,
+    origin_y: f32,
+    start: u32,
+    length: u32,
+) {
+    each_range_metric(layout, start, length, |m| {
+        let rect = D2D1_RECT_F {
+            left: origin_x + m.left,
+            top: origin_y + m.top + m.height - COMP_UNDERLINE_DIP,
+            right: origin_x + m.left + m.width,
+            bottom: origin_y + m.top + m.height,
+        };
+        (v.fill_rectangle)(rt, &rect, brush);
+    });
+}
+
+/// The display string while composing: the committed `text` with the provisional composition
+/// `comp` spliced in place of the selection `[lo, hi)` (SCRIPTORIUM-NATIVE-IME.md §5).
+fn splice(text: &[u16], lo: usize, hi: usize, comp: &[u16]) -> Vec<u16> {
+    let mut v = Vec::with_capacity(text.len().saturating_sub(hi - lo) + comp.len());
+    v.extend_from_slice(&text[..lo]);
+    v.extend_from_slice(comp);
+    v.extend_from_slice(&text[hi..]);
+    v
+}
+
+/// A non-zero content signature of the composition state, part of the layout cache key so the
+/// spliced layout rebuilds on each keystroke and can never collide with the "no composition"
+/// key (0). FNV-1a over the units + caret + anchor; `| 1` guarantees non-zero.
+fn comp_sig(comp: &[u16], caret_units: usize, lo: usize) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for &u in comp {
+        h = (h ^ u as u64).wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    for x in [caret_units as u64, lo as u64] {
+        h = (h ^ x).wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    h | 1
 }
 
 /// A nul-terminated UTF-16 string for the wide Win32/DWrite APIs.
@@ -836,6 +946,29 @@ mod tests {
 
             com_release(layout as *mut c_void);
         }
+    }
+
+    /// The composition display splice (SCRIPTORIUM-NATIVE-IME.md §5): the provisional string
+    /// replaces the selection (or inserts at the caret). Pure, no DWrite.
+    #[test]
+    fn splice_places_composition_over_the_selection() {
+        let text: Vec<u16> = "abcXYdef".encode_utf16().collect();
+        let comp: Vec<u16> = "**".encode_utf16().collect();
+        // Replace the selection [3,5) ("XY").
+        assert_eq!(String::from_utf16(&splice(&text, 3, 5, &comp)).unwrap(), "abc**def");
+        // No selection (lo == hi): insert at the caret.
+        assert_eq!(String::from_utf16(&splice(&text, 3, 3, &comp)).unwrap(), "abc**XYdef");
+    }
+
+    /// The composition cache signature is non-zero (0 is reserved for "not composing") and
+    /// changes with the composition content + caret, so the spliced layout rebuilds per keystroke.
+    #[test]
+    fn comp_sig_is_nonzero_and_content_sensitive() {
+        let a: Vec<u16> = "ni".encode_utf16().collect();
+        let b: Vec<u16> = "nih".encode_utf16().collect();
+        assert_ne!(comp_sig(&a, 2, 0), 0, "0 is reserved for the no-composition key");
+        assert_ne!(comp_sig(&a, 2, 0), comp_sig(&b, 3, 0), "sig tracks the growing string");
+        assert_ne!(comp_sig(&a, 1, 0), comp_sig(&a, 2, 0), "sig tracks the caret");
     }
 
     /// Exercise the newly-typed GetMetrics slot (60) on real DirectWrite: a single

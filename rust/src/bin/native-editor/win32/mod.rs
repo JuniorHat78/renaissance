@@ -591,7 +591,9 @@ unsafe fn ensure_caret_visible(state: &mut WindowState) {
         None => return,
     };
     let gen = state.app.content_gen();
-    if let Some((_, cy, ch)) = r.caret_xywh(&state.app.text, gen, state.app.caret) {
+    // The DISPLAY caret (composition-aware): while composing, follow the caret inside the
+    // provisional string, so typing a long composition past the fold pulls the view along.
+    if let Some((_, cy, ch)) = r.display_caret_xywh(&state.app) {
         let viewport = r.viewport_height();
         let content = r.content_height(&state.app.text, gen);
         state.scroll_y = scroll_to_reveal(state.scroll_y, cy, ch, content, viewport);
@@ -967,7 +969,7 @@ fn target_clause(attrs: &[u8]) -> (usize, usize) {
 /// so the candidate list appears under the caret rather than the window origin (§6).
 unsafe fn set_ime_candidate_pos(state: &mut WindowState, hwnd: HWND, himc: HIMC) {
     let pt = match state.renderer.as_mut() {
-        Some(r) => r.caret_client_px(&state.app.text, state.app.content_gen(), state.app.caret, state.scroll_y),
+        Some(r) => r.display_caret_client_px(&state.app, state.scroll_y),
         None => None,
     };
     if let Some((x, y)) = pt {
@@ -1245,6 +1247,21 @@ mod smoke_tests {
             SendMessageW(hwnd, WM_IME_COMPOSITION, 0, GCS_COMPSTR as isize);
             SendMessageW(hwnd, WM_IME_COMPOSITION, 0, GCS_RESULTSTR as isize);
             SendMessageW(hwnd, WM_IME_ENDCOMPOSITION, 0, 0);
+            // Exercise the inline-composition RENDER path on real DirectWrite: set a provisional
+            // composition directly (a synthetic message can't populate the IMC, but the render is
+            // ours — §8), paint (building the spliced layout, drawing the composition underline via
+            // HitTestTextRange, and the caret inside the spliced layout), then clear.
+            {
+                let cs = &mut *(GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut WindowState);
+                cs.app.set_composition(&['x' as u16, 'y' as u16], 2, (0, 2));
+                assert!(cs.app.composition().is_some(), "composition should be active for the render");
+            }
+            InvalidateRect(hwnd, null(), 0);
+            SendMessageW(hwnd, WM_PAINT, 0, 0);
+            {
+                let cs = &mut *(GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut WindowState);
+                cs.app.clear_composition();
+            }
 
             // Exercise resize (incl. the 0x0 minimize guard) and a caret-blink tick.
             SendMessageW(hwnd, WM_SIZE, 0, (600isize << 16) | 800);
