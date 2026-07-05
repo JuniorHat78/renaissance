@@ -11,8 +11,10 @@
 //! the font-metric estimate and the DWrite measurement are the renderer's to supply (N5b); this
 //! module owns only the prefix-sum algebra.
 //!
-//! N5a lands this structure + its model-based oracle alone; the geometry service consumes it in N5b,
-//! which removes the module-level `dead_code` allow below. Until then it is deliberately unwired.
+//! N5a lands this structure + its model-based oracle alone; N5b wires `reset_estimated`/`measure`/
+//! `total`/`para_top`/`locate` into the geometry service, and N5c consumes the remainder
+//! (`invalidate`/`insert`/`remove`/`estimate`/`is_measured` for edit-locality + estimate correction)
+//! and removes this module-level allow. Until then the not-yet-wired methods are deliberately unused.
 #![allow(dead_code)]
 
 /// A mutable prefix-sum over paragraph heights. Queries (`total`/`para_top`/`locate`) take `&mut

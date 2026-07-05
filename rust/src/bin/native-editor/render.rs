@@ -15,6 +15,7 @@ use core::mem::zeroed;
 use core::ptr::{null, null_mut};
 
 use crate::app::App;
+use crate::heights::HeightIndex;
 use crate::win32::sys::*;
 
 /// RAII wrapper: owns one ref on a COM interface pointer; releases on drop.
@@ -65,19 +66,27 @@ pub struct Renderer {
     bg_brush: ComPtr<ID2D1SolidColorBrush>,
     text_format: ComPtr<IDWriteTextFormat>,
     status_format: ComPtr<IDWriteTextFormat>,
-    // The retained main-text layout: the geometry authority shared by the paint path and
-    // the input path (SCRIPTORIUM-NATIVE-LAYOUT.md §2.1). Rebuilt only when its key —
-    // (content_gen, wrap width) — drifts, so caret motion / scroll / selection never
-    // re-shape text. A DWrite layout is device-independent, so it survives device loss
-    // (unlike the target + brushes). `None` until the first `ensure_layout`.
-    cached_layout: Option<ComPtr<IDWriteTextLayout>>,
-    cached_gen: u64,
-    cached_width: f32,
-    // Composition signature the cached layout was built with (0 = no composition). Part of the
-    // cache key so the provisional inline composition (N2b) rebuilds the layout while composing
-    // and — crucially — falls back to the committed layout the instant composition ends, even
-    // though `content_gen` never changed while composing (the rope was untouched).
-    cached_comp_sig: u64,
+    // --- virtualized layout (N5, SCRIPTORIUM-NATIVE-VIRTUAL-LAYOUT.md) --------
+    // The geometry authority is no longer one whole-document `IDWriteTextLayout` (that rebuild was
+    // the UI-thread cliff — 15–34× parse, superlinear). Instead the document's content-space y is
+    // synthesized from a per-paragraph height index, and only the paragraph a query/paint touches
+    // is laid out (paragraphs are newline-isolated, so a standalone paragraph's geometry is
+    // identical to its geometry in a whole-doc layout — the property the equivalence oracle pins).
+    //
+    // The height index: `para_top(i)` and `content_height` as prefix sums over per-paragraph
+    // heights (measured on layout, estimated otherwise). `para_starts[i]` is paragraph i's start
+    // offset (a paragraph = text between hard newlines = a rope line). Both are rebuilt from the
+    // text when `(content_gen, wrap width)` drifts (`heights_gen`/`heights_width`); a measured
+    // height is folded in whenever a paragraph is laid out, so the total converges to the truth.
+    heights: HeightIndex,
+    para_starts: Vec<usize>,
+    heights_gen: u64,
+    heights_width: f32,
+    // Font metrics for the estimate of a not-yet-laid-out paragraph (`ceil(chars / (width /
+    // avg_char_width)) × line_height`), probed once at construction (a single DWrite call, not
+    // per-edit).
+    avg_char_width: f32,
+    line_height_dip: f32,
     // Held only to keep our factory ref alive for the Renderer's lifetime (RAII); the
     // render target keeps its own ref, so we never read this after construction.
     // Kept alive for the Renderer's lifetime AND read on device-loss recovery: the
@@ -133,6 +142,11 @@ impl Renderer {
             let status_format =
                 ComPtr::from_raw(make_text_format(dwrite_factory.as_raw(), STATUS_SIZE_DIP)?);
 
+            // Probe the font's average advance width + line height once, for paragraph-height
+            // estimates (N5). A one-time DWrite layout of a sample line — not a per-edit cost.
+            let (avg_char_width, line_height_dip) =
+                probe_font_metrics(dwrite_factory.as_raw(), text_format.as_raw());
+
             Ok(Renderer {
                 target,
                 text_brush,
@@ -141,10 +155,12 @@ impl Renderer {
                 bg_brush,
                 text_format,
                 status_format,
-                cached_layout: None,
-                cached_gen: 0,
-                cached_width: -1.0, // sentinel: forces the first ensure_layout to build
-                cached_comp_sig: 0,
+                heights: HeightIndex::new(),
+                para_starts: Vec::new(),
+                heights_gen: u64::MAX, // sentinel: forces the first rebuild_heights
+                heights_width: -1.0,
+                avg_char_width,
+                line_height_dip,
                 d2d_factory,
                 dwrite_factory,
                 hwnd,
@@ -207,70 +223,83 @@ impl Renderer {
             let dip_w = px_w as f32 * scale;
             let dip_h = px_h as f32 * scale;
             let text_w = (dip_w - PAD_DIP * 2.0).max(0.0);
+            let viewport = (dip_h - PAD_DIP - STATUS_STRIP_DIP).max(0.0);
 
-            // The display layout (also the geometry authority for input). While composing, the
-            // provisional string is spliced over the selection so it wraps inline with its line
-            // (SCRIPTORIUM-NATIVE-IME.md §5); otherwise this is the retained committed layout.
-            // The text origin scrolls: x = PAD, y = PAD − scroll_y.
-            let oy = PAD_DIP - scroll_y;
-            let (lo, hi) = app.selection();
-            let display; // the spliced units, materialized only while composing
-            let (layout, display_caret, comp_span, display_len) = match app.composition() {
-                Some(c) => {
-                    display = splice(&app.text, lo, hi, &c.text);
-                    let sig = comp_sig(&c.text, c.caret_units, lo);
-                    let l = self.ensure_layout(&display, app.content_gen(), sig, text_w);
-                    let base = lo;
-                    (l, base + c.caret_units.min(c.text.len()), Some((base, c.text.len(), c.target_start, c.target_end)), display.len())
-                }
-                None => (self.ensure_layout(&app.text, app.content_gen(), 0, text_w), app.caret, None, app.text.len()),
-            };
-            if !layout.is_null() {
+            // Virtualized paint (N5): lay out and draw only the paragraphs that intersect the
+            // viewport band (± a small margin), each at its content-space top `para_top(i)`
+            // (translated by `−scroll_y`). Paragraph layouts are transient; folding each one's
+            // measured height in keeps `para_top` converging so the block is internally exact.
+            self.rebuild_heights(&app.text, app.content_gen(), text_w);
+            if !self.para_starts.is_empty() {
+                let n = self.para_starts.len();
+                let margin = self.line_height_dip * 2.0;
+                let p0 = self.heights.locate((scroll_y - margin).max(0.0)).0;
+                let p1 = self.heights.locate(scroll_y + viewport + margin).0.min(n - 1);
+
+                let comp = app.composition();
+                let (lo, hi) = app.selection();
+                let comp_para = comp.map(|_| self.para_of_offset(lo));
+                // The one paragraph that paints the caret: the composition's while composing, else
+                // the caret's — so exactly one paragraph draws it (and none if blinked off).
+                let caret_owner = if !caret_visible {
+                    None
+                } else if comp.is_some() {
+                    comp_para
+                } else {
+                    Some(self.para_of_offset(app.caret))
+                };
+
+                let text_brush = self.text_brush.as_raw() as *mut c_void;
                 let sel = self.sel_brush.as_raw() as *mut c_void;
-                match comp_span {
-                    // Not composing: the normal selection highlight sits behind the glyphs.
-                    None => {
-                        if app.has_selection() {
-                            fill_selection_range(rt, v, layout, sel, PAD_DIP, oy, lo as u32, (hi - lo) as u32);
+                let caret_b = self.caret_brush.as_raw() as *mut c_void;
+
+                for i in p0..=p1 {
+                    let oy = PAD_DIP - scroll_y + self.heights.para_top(i);
+                    let ps = self.para_starts[i];
+                    let pe = self.para_content_end(i, app.text.len());
+
+                    if comp.is_some() && comp_para == Some(i) {
+                        // The composition paragraph: draw the spliced provisional string (no normal
+                        // selection highlight — the composition replaces it), the target-clause
+                        // emphasis, the underline, and the caret within the composition (§8.7).
+                        let c = comp.unwrap();
+                        let units = self.spliced_paragraph(&app.text, i, lo, hi, &c.text);
+                        let raw = self.make_layout(&units, self.text_format.as_raw(), text_w, LAYOUT_MAX_HEIGHT);
+                        if raw.is_null() {
+                            continue;
                         }
-                    }
-                    // Composing: no selection highlight (the composition replaces it); instead
-                    // emphasize the target clause the candidate list is acting on (§5).
-                    Some((base, _len, ts, te)) => {
-                        if te > ts {
-                            fill_selection_range(rt, v, layout, sel, PAD_DIP, oy, (base + ts) as u32, (te - ts) as u32);
+                        let layout = ComPtr::from_raw(raw);
+                        let lptr = layout.as_raw();
+                        let base = lo.clamp(ps, pe) - ps; // local start of the composition
+                        if c.target_end > c.target_start {
+                            fill_selection_range(rt, v, lptr, sel, PAD_DIP, oy, (base + c.target_start) as u32, (c.target_end - c.target_start) as u32);
                         }
-                    }
-                }
-                (v.draw_text_layout)(
-                    rt,
-                    D2D_POINT_2F { x: PAD_DIP, y: oy },
-                    layout,
-                    self.text_brush.as_raw() as *mut c_void,
-                    0,
-                );
-                // Underline the whole composition — the universal "this is provisional" affordance.
-                if let Some((base, len, _, _)) = comp_span {
-                    underline_range(
-                        rt,
-                        v,
-                        layout,
-                        self.caret_brush.as_raw() as *mut c_void,
-                        PAD_DIP,
-                        oy,
-                        base as u32,
-                        len as u32,
-                    );
-                }
-                if caret_visible {
-                    if let Some((cx, cy, ch)) = caret_geometry(layout, display_caret, display_len) {
-                        let rect = D2D1_RECT_F {
-                            left: PAD_DIP + cx,
-                            top: oy + cy,
-                            right: PAD_DIP + cx + CARET_WIDTH_DIP,
-                            bottom: oy + cy + ch,
+                        (v.draw_text_layout)(rt, D2D_POINT_2F { x: PAD_DIP, y: oy }, lptr, text_brush, 0);
+                        underline_range(rt, v, lptr, caret_b, PAD_DIP, oy, base as u32, c.text.len() as u32);
+                        if caret_owner == Some(i) {
+                            let local_caret = base + c.caret_units.min(c.text.len());
+                            draw_caret(rt, v, lptr, local_caret, units.len(), PAD_DIP, oy, caret_b);
+                        }
+                    } else {
+                        // A committed paragraph: lay it out (folding its measured height), draw the
+                        // selection portion that falls in it, the text, and the caret if it lives here.
+                        let (layout, clen) = match self.lay_out_paragraph(&app.text, i, text_w) {
+                            Some(l) => l,
+                            None => continue,
                         };
-                        (v.fill_rectangle)(rt, &rect, self.caret_brush.as_raw() as *mut c_void);
+                        let lptr = layout.as_raw();
+                        if app.has_selection() {
+                            let s = lo.max(ps);
+                            let e = hi.min(pe);
+                            if e > s {
+                                fill_selection_range(rt, v, lptr, sel, PAD_DIP, oy, (s - ps) as u32, (e - s) as u32);
+                            }
+                        }
+                        (v.draw_text_layout)(rt, D2D_POINT_2F { x: PAD_DIP, y: oy }, lptr, text_brush, 0);
+                        if caret_owner == Some(i) {
+                            let local = (app.caret - ps).min(clen);
+                            draw_caret(rt, v, lptr, local, clen, PAD_DIP, oy, caret_b);
+                        }
                     }
                 }
             }
@@ -334,35 +363,86 @@ impl Renderer {
     // about geometry. The layout coords are content-space (origin at the top of the text,
     // before scroll); callers apply the scroll/padding transform (§3).
 
-    /// The cached display layout for `(gen, comp_sig, width)`, rebuilt only on key drift. The
-    /// single place text is (re)shaped. `text` is the *display* string — the committed text, or
-    /// (while composing) the committed text with the provisional composition spliced in;
-    /// `comp_sig` is 0 when not composing and a content signature of the composition otherwise
-    /// (so it rebuilds each keystroke and reverts to the committed layout on end). Returns null
-    /// only if we have no layout at all and the build failed (a transient failure keeps the
-    /// prior, stale-but-valid layout).
-    unsafe fn ensure_layout(
-        &mut self,
-        text: &[u16],
-        gen: u64,
-        comp_sig: u64,
-        width: f32,
-    ) -> *mut IDWriteTextLayout {
-        let stale = self.cached_layout.is_none()
-            || self.cached_gen != gen
-            || self.cached_comp_sig != comp_sig
-            || (self.cached_width - width).abs() > 0.5;
-        if stale {
-            let raw = self.make_layout(text, self.text_format.as_raw(), width, LAYOUT_MAX_HEIGHT);
-            if !raw.is_null() {
-                // Assigning drops the previous ComPtr → releases the old layout.
-                self.cached_layout = Some(ComPtr::from_raw(raw));
-                self.cached_gen = gen;
-                self.cached_comp_sig = comp_sig;
-                self.cached_width = width;
+    // --- the height model (SCRIPTORIUM-NATIVE-VIRTUAL-LAYOUT.md §4/§6) --------
+
+    /// Rebuild the paragraph structure + all-estimated height index when the content or wrap width
+    /// changed (`(gen, width)` drift). A paragraph is text between hard newlines (a rope line);
+    /// `para_starts[i]` is its start offset, its content excludes the trailing `\n`. Estimates come
+    /// from the paragraph's char count + the probed font metrics; measured heights are folded in
+    /// later as paragraphs are laid out (so the total converges to the truth). O(n) in the text — a
+    /// cheap byte scan, ~1000× under the whole-doc DWrite shape it replaces; preserving measured
+    /// heights across edits (the rope-driven paragraph diff, §6) is the measure-gated refinement.
+    fn rebuild_heights(&mut self, text: &[u16], gen: u64, width: f32) {
+        if self.heights_gen == gen && (self.heights_width - width).abs() <= 0.5 {
+            return;
+        }
+        self.para_starts.clear();
+        self.para_starts.push(0);
+        let mut char_lens: Vec<usize> = Vec::new();
+        let mut last = 0usize;
+        for (i, &u) in text.iter().enumerate() {
+            if u == 0x000A {
+                char_lens.push(i - last); // paragraph content, excluding this '\n'
+                self.para_starts.push(i + 1);
+                last = i + 1;
             }
         }
-        self.cached_layout.as_ref().map(|c| c.as_raw()).unwrap_or(null_mut())
+        char_lens.push(text.len() - last); // the final paragraph (no trailing '\n')
+        let cpl = (width / self.avg_char_width).max(1.0);
+        self.heights.reset_estimated(&char_lens, cpl, self.line_height_dip);
+        self.heights_gen = gen;
+        self.heights_width = width;
+    }
+
+    /// The end offset of paragraph `i`'s content (the `\n` before the next paragraph is excluded;
+    /// the last paragraph runs to the text end).
+    fn para_content_end(&self, i: usize, text_len: usize) -> usize {
+        if i + 1 < self.para_starts.len() {
+            self.para_starts[i + 1] - 1
+        } else {
+            text_len
+        }
+    }
+
+    /// The paragraph containing offset `off` — the largest `i` with `para_starts[i] <= off`. An
+    /// offset at a paragraph's start belongs to that paragraph (the `\n` before it ends the prior).
+    fn para_of_offset(&self, off: usize) -> usize {
+        let n = self.para_starts.len();
+        if n == 0 {
+            return 0;
+        }
+        self.para_starts.partition_point(|&s| s <= off).saturating_sub(1).min(n - 1)
+    }
+
+    /// Lay out paragraph `i`'s content (transient — the caller owns and drops it) and fold its
+    /// measured height into the index so `para_top`/`content_height` converge to the truth. No
+    /// persistent cache yet: a paragraph is small (a viewport's worth is sub-millisecond to shape),
+    /// and build-per-query keeps the coordinate model bug-free; a bounded cache is the measure-gated
+    /// refinement (§3). Returns the layout + its content length, or `None` on failure.
+    unsafe fn lay_out_paragraph(
+        &mut self,
+        text: &[u16],
+        i: usize,
+        width: f32,
+    ) -> Option<(ComPtr<IDWriteTextLayout>, usize)> {
+        let start = self.para_starts[i];
+        let end = self.para_content_end(i, text.len());
+        let raw = self.make_layout(&text[start..end], self.text_format.as_raw(), width, LAYOUT_MAX_HEIGHT);
+        if raw.is_null() {
+            return None;
+        }
+        let layout = ComPtr::from_raw(raw);
+        self.fold_paragraph_height(i, layout.as_raw());
+        Some((layout, end - start))
+    }
+
+    /// Read a laid-out paragraph's real height (`GetMetrics`) and fold it into the index (measured
+    /// truth replacing the estimate, §5).
+    unsafe fn fold_paragraph_height(&mut self, i: usize, layout: *mut IDWriteTextLayout) {
+        let mut tm: DWRITE_TEXT_METRICS = zeroed();
+        if ((*(*layout).vtbl).get_metrics)(layout, &mut tm) >= 0 && tm.height > 0.0 {
+            self.heights.measure(i, tm.height);
+        }
     }
 
     /// The wrap width in DIPs for the current client rect (client width − 2·padding).
@@ -431,39 +511,62 @@ impl Renderer {
 
     /// Map a **content-space** point (DIPs, pre-scroll) to a UTF-16 caret offset. Used both
     /// by `hit_test_point` and directly by Up/Down (which already work in content space).
+    /// Virtualized (N5): locate the paragraph whose vertical span holds `cy`, lay out just that
+    /// paragraph, hit-test locally (`cy − para_top`), and add the paragraph's start offset.
     pub fn hit_test_content(&mut self, text: &[u16], gen: u64, cx: f32, cy: f32) -> usize {
         unsafe {
-            let layout = self.ensure_layout(text, gen, 0, self.layout_width());
-            if layout.is_null() {
+            let width = self.layout_width();
+            self.rebuild_heights(text, gen, width);
+            if self.para_starts.is_empty() {
                 return 0;
             }
+            let (i, top) = self.heights.locate(cy);
+            let (layout, clen) = match self.lay_out_paragraph(text, i, width) {
+                Some(l) => l,
+                None => return 0,
+            };
             let mut trailing: BOOL = 0;
             let mut inside: BOOL = 0;
             let mut m: DWRITE_HIT_TEST_METRICS = zeroed();
-            let hr = ((*(*layout).vtbl).hit_test_point)(layout, cx, cy, &mut trailing, &mut inside, &mut m);
+            let hr = ((*(*layout.as_raw()).vtbl).hit_test_point)(
+                layout.as_raw(),
+                cx,
+                (cy - top).max(0.0), // local y within the paragraph
+                &mut trailing,
+                &mut inside,
+                &mut m,
+            );
             if hr < 0 {
-                return 0;
+                return self.para_starts[i];
             }
-            // offset = textPosition + (isTrailingHit ? cluster length : 0): clicking the
-            // right half of a glyph lands the caret after the whole cluster. `isInside` is
-            // ignored on purpose — honoring `trailing` regardless is what makes clicks past
-            // EOL / below the last line / in the margin all land where a user expects (§4).
-            let mut off = m.text_position as usize;
+            // offset = textPosition + (isTrailingHit ? cluster length : 0): clicking the right half
+            // of a glyph lands the caret after the whole cluster. `isInside` is ignored on purpose —
+            // honoring `trailing` regardless lands past-EOL / margin clicks where a user expects (§4).
+            let mut local = m.text_position as usize;
             if trailing != 0 {
-                off += m.length as usize;
+                local += m.length as usize;
             }
-            off.min(text.len())
+            // Clamp within the paragraph's content and lift to a document offset.
+            self.para_starts[i] + local.min(clen)
         }
     }
 
     /// Caret geometry (x, top, height) in **content space** for a UTF-16 offset, or None.
+    /// Virtualized (N5): lay out just the paragraph containing `offset`, resolve the caret locally,
+    /// and lift the y by `para_top(paragraph)`.
     pub fn caret_xywh(&mut self, text: &[u16], gen: u64, offset: usize) -> Option<(f32, f32, f32)> {
         unsafe {
-            let layout = self.ensure_layout(text, gen, 0, self.layout_width());
-            if layout.is_null() {
+            let width = self.layout_width();
+            self.rebuild_heights(text, gen, width);
+            if self.para_starts.is_empty() {
                 return None;
             }
-            caret_geometry(layout, offset, text.len())
+            let i = self.para_of_offset(offset);
+            let (layout, clen) = self.lay_out_paragraph(text, i, width)?;
+            let local = offset - self.para_starts[i];
+            let (x, ly, h) = caret_geometry(layout.as_raw(), local.min(clen), clen)?;
+            let top = self.heights.para_top(i);
+            Some((x, top + ly, h))
         }
     }
 
@@ -475,16 +578,42 @@ impl Renderer {
         match app.composition() {
             None => self.caret_xywh(&app.text, app.content_gen(), app.caret),
             Some(c) => unsafe {
-                let (lo, hi) = app.selection();
-                let display = splice(&app.text, lo, hi, &c.text);
-                let sig = comp_sig(&c.text, c.caret_units, lo);
-                let layout = self.ensure_layout(&display, app.content_gen(), sig, self.layout_width());
-                if layout.is_null() {
+                let width = self.layout_width();
+                self.rebuild_heights(&app.text, app.content_gen(), width);
+                if self.para_starts.is_empty() {
                     return None;
                 }
-                caret_geometry(layout, lo + c.caret_units.min(c.text.len()), display.len())
+                // The composition replaces the selection, which lives in one paragraph — splice it
+                // into that paragraph's content and resolve the caret locally (N5 §8.7).
+                let (lo, hi) = app.selection();
+                let i = self.para_of_offset(lo);
+                let units = self.spliced_paragraph(&app.text, i, lo, hi, &c.text);
+                let raw = self.make_layout(&units, self.text_format.as_raw(), width, LAYOUT_MAX_HEIGHT);
+                if raw.is_null() {
+                    return None;
+                }
+                let layout = ComPtr::from_raw(raw);
+                let local_caret = (lo - self.para_starts[i]) + c.caret_units.min(c.text.len());
+                let (x, ly, h) = caret_geometry(layout.as_raw(), local_caret, units.len())?;
+                let top = self.heights.para_top(i);
+                Some((x, top + ly, h))
             },
         }
+    }
+
+    /// Paragraph `i`'s content with the provisional composition `comp` spliced in place of the
+    /// selection `[lo, hi)` (both clamped into the paragraph). The display units for the one
+    /// paragraph an IME composition touches (N5 §8.7) — the buffer is never mutated.
+    fn spliced_paragraph(&self, text: &[u16], i: usize, lo: usize, hi: usize, comp: &[u16]) -> Vec<u16> {
+        let ps = self.para_starts[i];
+        let pe = self.para_content_end(i, text.len());
+        let lo = lo.clamp(ps, pe);
+        let hi = hi.clamp(lo, pe);
+        let mut units = Vec::with_capacity((pe - ps) + comp.len());
+        units.extend_from_slice(&text[ps..lo]);
+        units.extend_from_slice(comp);
+        units.extend_from_slice(&text[hi..pe]);
+        units
     }
 
     /// The display caret in **client pixels** — the point the IME candidate window pins to
@@ -498,27 +627,19 @@ impl Renderer {
         Some((vx as i32, vy as i32))
     }
 
-    /// The total laid-out text height in DIPs (the scroll extent), via `GetMetrics`.
+    /// The scroll extent in DIPs — the height index total (measured paragraphs + estimates for the
+    /// rest, N5 §4), not a whole-doc `GetMetrics`. Converges to the true height as the reader
+    /// scrolls and more paragraphs are measured.
     pub fn content_height(&mut self, text: &[u16], gen: u64) -> f32 {
-        unsafe {
-            let layout = self.ensure_layout(text, gen, 0, self.layout_width());
-            if layout.is_null() {
-                return 0.0;
-            }
-            let mut tm: DWRITE_TEXT_METRICS = zeroed();
-            let hr = ((*(*layout).vtbl).get_metrics)(layout, &mut tm);
-            if hr < 0 {
-                0.0
-            } else {
-                tm.height
-            }
-        }
+        let width = unsafe { self.layout_width() };
+        self.rebuild_heights(text, gen, width);
+        self.heights.total()
     }
 
-    /// The line height in DIPs (the caret height at the document start), for wheel + Up/Down
-    /// stepping. Falls back to a font-derived estimate if the layout/hit-test is unavailable.
-    pub fn line_height(&mut self, text: &[u16], gen: u64) -> f32 {
-        self.caret_xywh(text, gen, 0).map(|(_, _, h)| h).unwrap_or(FONT_SIZE_DIP * 1.3)
+    /// The line height in DIPs, for wheel + Up/Down stepping. Font-derived (probed once at
+    /// construction) — constant for the single-format editor, so no layout is needed.
+    pub fn line_height(&mut self, _text: &[u16], _gen: u64) -> f32 {
+        self.line_height_dip
     }
 }
 
@@ -645,6 +766,60 @@ unsafe fn caret_geometry(
     Some((x, m.top, height))
 }
 
+/// Draw the caret bar for local `offset` within `layout` (content length `len`), at paragraph
+/// origin (`ox`, `oy`). Shared by the committed and composition paint paths (N5).
+unsafe fn draw_caret(
+    rt: *mut ID2D1HwndRenderTarget,
+    v: &ID2D1HwndRenderTargetVtbl,
+    layout: *mut IDWriteTextLayout,
+    offset: usize,
+    len: usize,
+    ox: f32,
+    oy: f32,
+    brush: *mut c_void,
+) {
+    if let Some((cx, cy, ch)) = caret_geometry(layout, offset, len) {
+        let rect = D2D1_RECT_F {
+            left: ox + cx,
+            top: oy + cy,
+            right: ox + cx + CARET_WIDTH_DIP,
+            bottom: oy + cy + ch,
+        };
+        (v.fill_rectangle)(rt, &rect, brush);
+    }
+}
+
+/// Probe the font's average advance width + line height once, for paragraph-height estimates (N5
+/// §4). Lay out a non-wrapping sample line: `avg_char_width = width / chars`, `line_height =
+/// metrics.height / line_count`. Falls back to font-size-derived constants if the probe fails.
+unsafe fn probe_font_metrics(factory: *mut IDWriteFactory, format: *mut IDWriteTextFormat) -> (f32, f32) {
+    let fallback = (FONT_SIZE_DIP * 0.55, FONT_SIZE_DIP * 1.3);
+    let sample: Vec<u16> = "MMMMMMMMMMMMMMMMMMMM".encode_utf16().collect(); // 20 glyphs, no wrap
+    let mut layout: *mut IDWriteTextLayout = null_mut();
+    let hr = ((*(*factory).vtbl).create_text_layout)(
+        factory,
+        sample.as_ptr(),
+        sample.len() as u32,
+        format,
+        LAYOUT_MAX_HEIGHT,
+        LAYOUT_MAX_HEIGHT,
+        &mut layout,
+    );
+    if hr < 0 || layout.is_null() {
+        return fallback;
+    }
+    let mut tm: DWRITE_TEXT_METRICS = zeroed();
+    let ok = ((*(*layout).vtbl).get_metrics)(layout, &mut tm) >= 0 && tm.line_count >= 1;
+    let result = if ok {
+        let avg = if tm.width > 0.0 { tm.width / sample.len() as f32 } else { fallback.0 };
+        (avg, tm.height / tm.line_count as f32)
+    } else {
+        fallback
+    };
+    com_release(layout as *mut c_void);
+    result
+}
+
 /// Call `f` for each on-screen run rectangle of the text range `[start, start+length)`.
 /// DirectWrite returns one metric per run (a wrapped/bidi range is several boxes); we start
 /// with a stack buffer and grow once if the range spans more runs than it holds. The single
@@ -737,30 +912,6 @@ unsafe fn underline_range(
         };
         (v.fill_rectangle)(rt, &rect, brush);
     });
-}
-
-/// The display string while composing: the committed `text` with the provisional composition
-/// `comp` spliced in place of the selection `[lo, hi)` (SCRIPTORIUM-NATIVE-IME.md §5).
-fn splice(text: &[u16], lo: usize, hi: usize, comp: &[u16]) -> Vec<u16> {
-    let mut v = Vec::with_capacity(text.len().saturating_sub(hi - lo) + comp.len());
-    v.extend_from_slice(&text[..lo]);
-    v.extend_from_slice(comp);
-    v.extend_from_slice(&text[hi..]);
-    v
-}
-
-/// A non-zero content signature of the composition state, part of the layout cache key so the
-/// spliced layout rebuilds on each keystroke and can never collide with the "no composition"
-/// key (0). FNV-1a over the units + caret + anchor; `| 1` guarantees non-zero.
-fn comp_sig(comp: &[u16], caret_units: usize, lo: usize) -> u64 {
-    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-    for &u in comp {
-        h = (h ^ u as u64).wrapping_mul(0x0000_0100_0000_01b3);
-    }
-    for x in [caret_units as u64, lo as u64] {
-        h = (h ^ x).wrapping_mul(0x0000_0100_0000_01b3);
-    }
-    h | 1
 }
 
 /// A nul-terminated UTF-16 string for the wide Win32/DWrite APIs.
@@ -948,29 +1099,6 @@ mod tests {
         }
     }
 
-    /// The composition display splice (SCRIPTORIUM-NATIVE-IME.md §5): the provisional string
-    /// replaces the selection (or inserts at the caret). Pure, no DWrite.
-    #[test]
-    fn splice_places_composition_over_the_selection() {
-        let text: Vec<u16> = "abcXYdef".encode_utf16().collect();
-        let comp: Vec<u16> = "**".encode_utf16().collect();
-        // Replace the selection [3,5) ("XY").
-        assert_eq!(String::from_utf16(&splice(&text, 3, 5, &comp)).unwrap(), "abc**def");
-        // No selection (lo == hi): insert at the caret.
-        assert_eq!(String::from_utf16(&splice(&text, 3, 3, &comp)).unwrap(), "abc**XYdef");
-    }
-
-    /// The composition cache signature is non-zero (0 is reserved for "not composing") and
-    /// changes with the composition content + caret, so the spliced layout rebuilds per keystroke.
-    #[test]
-    fn comp_sig_is_nonzero_and_content_sensitive() {
-        let a: Vec<u16> = "ni".encode_utf16().collect();
-        let b: Vec<u16> = "nih".encode_utf16().collect();
-        assert_ne!(comp_sig(&a, 2, 0), 0, "0 is reserved for the no-composition key");
-        assert_ne!(comp_sig(&a, 2, 0), comp_sig(&b, 3, 0), "sig tracks the growing string");
-        assert_ne!(comp_sig(&a, 1, 0), comp_sig(&a, 2, 0), "sig tracks the caret");
-    }
-
     /// Exercise the newly-typed GetMetrics slot (60) on real DirectWrite: a single
     /// non-wrapping ASCII line reports one line and a positive content height (the scroll
     /// extent source).
@@ -984,6 +1112,98 @@ mod tests {
             assert_eq!(tm.line_count, 1, "single line expected");
             assert!(tm.height > 0.0, "content height should be positive");
             com_release(layout as *mut c_void);
+        }
+    }
+
+    /// THE headline N5 oracle (SCRIPTORIUM-NATIVE-VIRTUAL-LAYOUT.md §9): **virtualized geometry ≡
+    /// whole-doc geometry** for a document that fits. Laying the whole document out as one layout
+    /// (the old authority) and synthesizing geometry from per-paragraph layouts + `para_top` (the
+    /// new authority) must agree — proving virtualization changed *cost*, not *geometry*, exactly
+    /// as N4's snapshot/parse equivalence proved async changed timing, not result. Uses a **narrow**
+    /// width so paragraphs wrap across several lines (the real test of the coordinate synthesis),
+    /// and an empty paragraph (the degenerate line). All layouts come from one factory+format so
+    /// their metrics are identical.
+    #[test]
+    fn virtualized_geometry_matches_whole_doc() {
+        unsafe {
+            let mut dw: *mut c_void = null_mut();
+            let hr = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, &IID_IDWRITE_FACTORY, &mut dw);
+            assert!(hr >= 0, "DWriteCreateFactory failed: 0x{hr:08x}");
+            let factory = ComPtr::from_raw(dw as *mut IDWriteFactory);
+            let format =
+                ComPtr::from_raw(make_text_format(factory.as_raw(), FONT_SIZE_DIP).expect("format"));
+            let f = factory.as_raw();
+            let width = 220.0; // narrow: paragraphs wrap across lines
+
+            let make = |units: &[u16]| -> *mut IDWriteTextLayout {
+                let dummy = [0u16; 1];
+                let ptr = if units.is_empty() { dummy.as_ptr() } else { units.as_ptr() };
+                let mut out: *mut IDWriteTextLayout = null_mut();
+                let hr = ((*(*f).vtbl).create_text_layout)(
+                    f, ptr, units.len() as u32, format.as_raw(), width, LAYOUT_MAX_HEIGHT, &mut out,
+                );
+                assert!(hr >= 0 && !out.is_null(), "CreateTextLayout failed");
+                out
+            };
+            let height_of = |l: *mut IDWriteTextLayout| -> f32 {
+                let mut tm: DWRITE_TEXT_METRICS = zeroed();
+                assert!(((*(*l).vtbl).get_metrics)(l, &mut tm) >= 0);
+                tm.height
+            };
+
+            let text = "The quick brown fox jumps over the lazy dog again and again\n\
+                        a second paragraph long enough to wrap a couple of times as well\n\
+                        \n\
+                        last";
+            let units: Vec<u16> = text.encode_utf16().collect();
+            let whole = make(&units);
+
+            // Paragraph starts (line starts) + content ends (excluding the '\n').
+            let mut starts = vec![0usize];
+            for (i, &u) in units.iter().enumerate() {
+                if u == 0x000A {
+                    starts.push(i + 1);
+                }
+            }
+            let para_end = |i: usize| -> usize {
+                if i + 1 < starts.len() { starts[i + 1] - 1 } else { units.len() }
+            };
+
+            // Per-paragraph layouts + heights, and the prefix-sum para_top.
+            let mut layouts = Vec::new();
+            let mut heights = Vec::new();
+            for i in 0..starts.len() {
+                let l = make(&units[starts[i]..para_end(i)]);
+                heights.push(height_of(l));
+                layouts.push(l);
+            }
+            let para_top = |i: usize| -> f32 { heights[..i].iter().sum::<f32>() };
+
+            // (1) content height: Σ per-paragraph heights ≈ the whole-doc height.
+            let sum: f32 = heights.iter().sum();
+            let whole_h = height_of(whole);
+            assert!(
+                (sum - whole_h).abs() <= 1.0,
+                "content height diverged: virtualized {sum} vs whole-doc {whole_h}"
+            );
+
+            // (2) caret geometry across every offset: virtualized (para_top + local) ≈ whole-doc.
+            for off in 0..=units.len() {
+                let (wx, wy, wh) = caret_geometry(whole, off, units.len()).expect("whole caret");
+                let p = starts.partition_point(|&s| s <= off).saturating_sub(1).min(starts.len() - 1);
+                let clen = para_end(p) - starts[p];
+                let local = (off - starts[p]).min(clen);
+                let (vx, vyl, vh) = caret_geometry(layouts[p], local, clen).expect("para caret");
+                let vy = para_top(p) + vyl;
+                assert!((wx - vx).abs() <= 1.0, "caret x @ {off}: whole {wx} vs virt {vx}");
+                assert!((wy - vy).abs() <= 1.0, "caret y @ {off}: whole {wy} vs virt {vy}");
+                assert!((wh - vh).abs() <= 1.0, "caret height @ {off}: whole {wh} vs virt {vh}");
+            }
+
+            for l in layouts {
+                com_release(l as *mut c_void);
+            }
+            com_release(whole as *mut c_void);
         }
     }
 }
