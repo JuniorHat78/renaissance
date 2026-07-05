@@ -12,6 +12,7 @@ use core::ffi::c_void;
 use core::mem::{size_of, zeroed};
 use core::ptr::{null, null_mut};
 use std::sync::Arc;
+use std::time::Instant;
 
 use sys::*;
 
@@ -31,6 +32,9 @@ struct WindowState {
     /// The last generation handed to the parser, so `reparse_if_dirty` submits at most once per
     /// edit and a no-op key never resubmits (the coalescing is on the worker; this is the guard).
     last_submitted_gen: u64,
+    /// When the most recent edit was submitted — the start of the end-to-end async round-trip
+    /// timer (N4b). Taken when the settling result lands, to measure submit→landed felt latency.
+    edit_at: Option<Instant>,
     caret_visible: bool,
     dpi: u32,
     /// View-space scroll offset (content-space DIPs of the viewport top). Wheel + scrollbar
@@ -133,6 +137,7 @@ pub fn run() {
             renderer: None,
             parse: None,
             last_submitted_gen: 0,
+            edit_at: None,
             caret_visible: true,
             dpi: 96,
             scroll_y: 0.0,
@@ -261,7 +266,16 @@ unsafe fn wndproc_impl(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> 
             // and fold it in under the monotonic gate; repaint the status line only if it applied.
             let res = state.parse.as_ref().and_then(|p| p.drain_latest());
             if let Some(r) = res {
-                if state.app.apply_parse(r.gen, r.signal) {
+                let gen = r.gen;
+                if state.app.apply_parse(gen, r.signal) {
+                    // If this result brought the display level with the live content (no newer edit
+                    // is pending), the async round-trip for the settled edit is complete — record
+                    // the submit→landed latency (N4b). A newer edit in flight defers the measure.
+                    if gen == state.app.content_gen() {
+                        if let Some(t) = state.edit_at.take() {
+                            state.app.set_roundtrip(t.elapsed().as_micros());
+                        }
+                    }
                     InvalidateRect(hwnd, null(), 0);
                 }
             }
@@ -514,6 +528,9 @@ fn reparse_if_dirty(state: &mut WindowState) {
         if let Some(p) = state.parse.as_ref() {
             p.submit(gen, state.app.snapshot());
             state.last_submitted_gen = gen;
+            // Start the end-to-end round-trip timer for this edit (N4b). Overwriting on each edit
+            // means it tracks the *latest* edit — the one whose settling is the felt latency.
+            state.edit_at = Some(Instant::now());
         }
     }
 }
@@ -1228,6 +1245,7 @@ mod smoke_tests {
                 renderer: None,
                 parse: None,
                 last_submitted_gen: 0,
+                edit_at: None,
                 caret_visible: true,
                 dpi: 96,
                 scroll_y: 0.0,

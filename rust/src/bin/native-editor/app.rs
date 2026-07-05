@@ -77,6 +77,12 @@ pub struct App {
     /// SCRIPTORIUM-NATIVE-CONCURRENCY.md §5), so an out-of-order or late parse can never regress
     /// the displayed stats. `content_gen - signal_gen` is how many edits the parse is behind.
     signal_gen: u64,
+    /// The last measured end-to-end async round-trip in microseconds — from an edit's submit to
+    /// its parse landing back and settling the display (thread scheduling + parse + post-back).
+    /// Measured by `win32` (the timing is a platform concern) and stored here only to show in the
+    /// status line (N4b instrumentation). This — not `parse_micros`, the worker's CPU cost alone —
+    /// is the *felt* latency, and the figure that reveals the frame-budget cliff on large content.
+    roundtrip_micros: u128,
     /// The provisional IME composition, if a session is active (SCRIPTORIUM-NATIVE-IME.md §2).
     /// `Some` only between `WM_IME_STARTCOMPOSITION` and its end; the rope stays untouched
     /// while it lives. The renderer reads it to splice the inline preview.
@@ -96,6 +102,7 @@ impl App {
             signal: ParseSignal { blocks: 0, words: 0, parse_micros: 0 },
             content_gen: 0,
             signal_gen: 0,
+            roundtrip_micros: 0,
             comp: None,
         };
         app.refresh();
@@ -400,6 +407,12 @@ impl App {
         }
     }
 
+    /// Record the last measured end-to-end async round-trip (µs), for the status line (N4b). The
+    /// measurement (an `Instant` spanning submit→settle) is `win32`'s — this only stores the number.
+    pub fn set_roundtrip(&mut self, micros: u128) {
+        self.roundtrip_micros = micros;
+    }
+
     /// The status line: caret Ln/Col (from the rope's line summary) + selection size when
     /// active + the AST signal.
     pub fn status_text(&self) -> String {
@@ -412,12 +425,19 @@ impl App {
             String::new()
         };
         // The parse runs off-thread (N4), so the AST signal can lag the live text by the edits
-        // whose parse hasn't landed yet. Surface that honestly: at rest the signal is caught up and
-        // nothing shows; mid-flight a "· parsing…" marker makes the async visible (and is how you
-        // watch N4 working). `content_gen - signal_gen` is the number of edits still in flight.
-        let lag = if self.signal_gen < self.content_gen { " \u{00B7} parsing\u{2026}" } else { "" };
+        // whose parse hasn't landed yet. Surface the async state honestly (N4b): mid-flight a
+        // "parsing…" marker makes it visible; once settled, the end-to-end round-trip (submit→
+        // landed — the *felt* latency, not just the worker's CPU `parse_micros`) is what reveals
+        // the frame-budget cliff as content grows. `content_gen - signal_gen` = edits in flight.
+        let tail = if self.signal_gen < self.content_gen {
+            " \u{00B7} parsing\u{2026}".to_string()
+        } else if self.roundtrip_micros > 0 {
+            format!(" \u{00B7} async {} \u{00B5}s", self.roundtrip_micros)
+        } else {
+            String::new()
+        };
         format!(
-            "Ln {}, Col {}{}  \u{00B7}  {} blocks \u{00B7} {} words \u{00B7} parsed in {} \u{00B5}s \u{00B7} {} units{}",
+            "Ln {}, Col {}{}  \u{00B7}  {} blocks \u{00B7} {} words \u{00B7} parse {} \u{00B5}s \u{00B7} {} units{}",
             line + 1,
             col + 1,
             sel,
@@ -425,7 +445,7 @@ impl App {
             self.signal.words,
             self.signal.parse_micros,
             self.text.len(),
-            lag,
+            tail,
         )
     }
 }
@@ -535,5 +555,21 @@ mod parse_apply_tests {
         // The same generation is also a no-op (idempotent — no duplicate apply).
         assert!(!app.apply_parse(5, ParseSignal { blocks: 0, words: 0, parse_micros: 1 }));
         assert_eq!(app.signal.words, 9);
+    }
+
+    #[test]
+    fn status_line_shows_parsing_in_flight_then_the_async_roundtrip() {
+        // A fresh App has content_gen 1 but no parse folded in yet (signal_gen 0) — in flight (N4b).
+        let mut app = App::new();
+        assert!(app.status_text().contains("parsing"), "in flight before the first parse lands");
+        // The parse for gen 1 lands: caught up, so the "parsing…" marker clears. No round-trip
+        // measured yet (that's win32's to record), so no async figure either.
+        app.apply_parse(1, ParseSignal { blocks: 0, words: 0, parse_micros: 5 });
+        assert!(!app.status_text().contains("parsing"), "not in flight once caught up");
+        assert!(!app.status_text().contains("async"), "no round-trip shown until one is measured");
+        // Once win32 records the settle latency, the status surfaces the felt end-to-end figure.
+        app.set_roundtrip(1234);
+        let s = app.status_text();
+        assert!(s.contains("async 1234"), "settled round-trip is shown: {s}");
     }
 }
