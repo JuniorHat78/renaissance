@@ -1,11 +1,16 @@
 # Scriptorium Native Editor — File I/O (open / save / dirty-state)
 
-**Status: spec — build queued (checkpoints IO-a → IO-b).** The first node outside the
-named N-roadmap: not a rendering or input-mechanics landmark but the plumbing that turns
-the editor from a scratchpad into something you can *keep work in*. It is also the
-enabling move for the author's feel-loop — **you cannot judge N2b IME / N3 scroll-caret /
-N4 latency / N5 scrolling on a real manuscript until you can load one.** So it lands
-before N5.
+**Status: BUILT + locally validated (2026-07-05).** The first node outside the named
+N-roadmap: not a rendering or input-mechanics landmark but the plumbing that turns the
+editor from a scratchpad into something you can *keep work in*. It is also the enabling
+move for the author's feel-loop — **you cannot judge N2b IME / N3 scroll-caret / N4 latency
+/ N5 scrolling on a real manuscript until you can load one.** So it lands before N5. Built
+to this spec; the modal Open/Save dialogs are the author's manual pass (no automatable feel
+surface), everything else is oracle- and smoke-covered. **The two checkpoints IO-a (codec +
+document model) and IO-b (win32 wiring) landed as one commit** (`d83b340`): the document
+model is dead code in a bin crate until the platform layer calls it — `pub` is not
+reachability in a binary — so a warning-free tree per commit outweighed the intermediate
+split. The codec's byte round-trip is still oracled on every platform, as designed.
 
 Built against the umbrella (`SCRIPTORIUM-NATIVE-EDITOR.md`) — same dependency line (the OS
 API, no crate), same seam (`app` platform-free, only `win32`/`render` touch the OS), same
@@ -268,17 +273,22 @@ stays ASan-clean (the temp files are cleaned up).
 
 ---
 
-## 10. Checkpoints
+## 10. Checkpoints (both landed in one commit — see Status)
 
 - **IO-a — the codec + the document model (platform-free core).** `codec.rs` (Encoding/Newline,
   decode/encode, all round-trip oracles) + `app.rs` identity block, `is_dirty`, `load_document`/
-  `new_document`/`mark_saved`/`bytes_to_save` + dirty-state oracles. **No FFI, no `win32`.** Lands
-  green on all three platforms. This is the correctness heart.
+  `new_document`/`mark_saved`/`bytes_to_save`/`path` + dirty-state oracles. **No FFI, no `win32`.**
+  The codec's byte round-trip lands green on all three platforms. This is the correctness heart.
 - **IO-b — the win32 wiring.** comdlg32 + `MessageBoxW` + `SetWindowTextW` FFI (ABI-asserted),
-  the Ctrl+O/S/Shift+S/N handlers, the `confirm_discard` guard + `WM_CLOSE`, `load_path`/
-  `save_path`/`save_as` (dialog + `std::fs` + error boxes), the title bar, and the smoke
-  extension. Validate locally: oracles debug+release, smoke green, **ASan-clean** across the new
-  FFI, warning-free — before the push.
+  the Ctrl+O/S/Shift+S/N handlers, the `confirm_discard` guard + `WM_CLOSE`, `load_from`/
+  `save_to` (the dialog-free cores) behind `do_open`/`do_save`/`do_new` (dialog + `std::fs` +
+  error boxes), the title bar, and the smoke extension (the live-window load→edit→save→byte
+  round-trip, dialogs excepted).
+
+**Landed together** (`d83b340`): IO-a's document model is unreachable — hence dead-code-warned in
+a bin crate — until IO-b's platform layer calls it, and a warning-free tree per commit is the
+governing rule. Validated locally before the push: 56 oracles debug+release, windowed smoke green,
+**ASan-clean** across the new FFI + teardown, clippy adds zero new findings, warning-free release.
 
 ---
 

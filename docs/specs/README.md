@@ -71,9 +71,9 @@ roadmap, but they are not the roadmap itself. For overall orientation read
   heights) with scroll-anchoring, all **behind the unchanged N3 geometry-service seam**. Edit cost drops
   from O(document) to O(viewport + log n). Equivalence oracle (virtualized ≡ whole-doc for small docs) +
   height-index/locality/anchor oracles + a large-doc flat-per-edit-time guard. Checkpoints N5a→N5b→N5c.
-- `SCRIPTORIUM-NATIVE-IO.md`: **file I/O (spec — build queued)** — the first node outside the named
-  N-roadmap and the enabler for the author's feel-loop (you can't judge feel on a real manuscript
-  until you can load one, so it lands **before N5**). Open / Save / Save As / New with a real
+- `SCRIPTORIUM-NATIVE-IO.md`: **file I/O (built + locally validated)** — the first node outside the
+  named N-roadmap and the enabler for the author's feel-loop (you can't judge feel on a real manuscript
+  until you can load one, so it landed **before N5**). Open / Save / Save As / New with a real
   dirty-state machine (`content_gen != saved_gen`) and a three-way **discard-unsaved-changes guard**
   (Yes/No/Cancel — a failed or cancelled save never drops the buffer). A platform-free **codec**
   (`Encoding{Utf8,Utf8Bom,Utf16Le,Utf16Be}` × `Newline{Lf,Crlf,Cr}`, BOM detection, lossy, LF-internal
