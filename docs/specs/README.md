@@ -61,7 +61,16 @@ roadmap, but they are not the roadmap itself. For overall orientation read
   `App`, the worker only reads an immutable snapshot ("never paint a half-updated model"). 43
   oracles + real-worker smoke, ASan-clean. **Honest scope:** no latency win at section scale — N4 is
   the *architecture* (pre-paid by N1's rope; the siren substrate) and its feel on book-scale content
-  is **queued for the author**. With N4 the named roadmap (N0–N4) is complete; the `siren` tier is next.
+  is **queued for the author**. With N4 the named roadmap (N0–N4) is complete.
+- `SCRIPTORIUM-NATIVE-VIRTUAL-LAYOUT.md`: **N5 (spec — build queued)** — virtualized layout, the first
+  `siren` **promoted to `need-now` by a measurement**. The N4 latency dig found the whole-document
+  `IDWriteTextLayout` rebuild (not parse) is the UI-thread cliff: **15–34× the parse cost, superlinear,
+  crossing 60 fps at ~8K words** (1M units = 851 ms/keystroke). Fix: lay out only the viewport-snapped
+  paragraph span (grain = the rope's newline paragraphs — synchronous, O(log n), no coupling to the
+  async parse), synthesize document geometry from a **paragraph height index** (measured + estimated
+  heights) with scroll-anchoring, all **behind the unchanged N3 geometry-service seam**. Edit cost drops
+  from O(document) to O(viewport + log n). Equivalence oracle (virtualized ≡ whole-doc for small docs) +
+  height-index/locality/anchor oracles + a large-doc flat-per-edit-time guard. Checkpoints N5a→N5b→N5c.
 
 **Search, recovery, UX:**
 - `ORACLE-SEARCH-SPEC.md`: target AST-native search/index/ranking system for

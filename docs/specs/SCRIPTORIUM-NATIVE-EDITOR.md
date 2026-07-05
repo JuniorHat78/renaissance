@@ -31,8 +31,11 @@
 > built to **spec-correct** with pure state-machine/splice oracles + a crash/leak smoke guard — but
 > its *feel* is un-oracle-able by the implementer and **queued for the author** to judge on a real
 > IME (§8, `SCRIPTORIUM-NATIVE-IME.md`). N4's latency *feel* on book-scale content is likewise
-> queued (§8, `SCRIPTORIUM-NATIVE-CONCURRENCY.md`). The roadmap's named nodes are **all built**;
-> next is the measure-gated `siren` tier (N5+) and the author's feel-loop. Last refreshed: 2026-07-05.
+> queued (§8, `SCRIPTORIUM-NATIVE-CONCURRENCY.md`). The roadmap's named nodes N0–N4 are **all built**;
+> the N4 latency dig then measured that the **whole-doc DirectWrite relayout — not parse — is the real
+> UI-thread cliff** (15–34× parse, superlinear, crosses 60 fps at ~8K words), which **promoted
+> virtualized layout from `siren` to `need-now` as N5** (spec written, build queued —
+> `SCRIPTORIUM-NATIVE-VIRTUAL-LAYOUT.md`). Last refreshed: 2026-07-05.
 
 ---
 
@@ -177,8 +180,8 @@ when we go deep on it. Status tags keep §2.5 honest:
 | **Layout oracle** | Golden-geometry tests (caret positions, wrap points, hit-tests) | `need-now` | Extends the parser's fearless-refactor rigor to the renderer. Geometry is deterministic; feel is not (§6). Almost nobody does this — it's a signature discipline. |
 | **Undo/redo** | Edit history (stack · tree · persistent structure) | `need-now`* | *Minimal first; the *elegant* version (free undo from a piece-table's immutable original) couples to the buffer choice. |
 | **Durability / IO** | Atomic save (temp+rename), encoding detection, file watch, maybe mmap/WAL | `siren` | Crash-safety as systems work. A journal so an edit is never lost — gorgeous, but gate on need. |
-| **Virtualized layout** | Lay out only the viewport; estimate + correct scroll geometry | `siren` | Needed the moment docs get long (100k lines). Online height-estimation problem. |
-| **Incremental parse** | Reuse unchanged subtrees; reparse only the dirty span (tree-sitter-shaped) | `siren` | The prettiest one — and unnecessary now (580µs/section is imperceptible). Reach for it only if a "section" becomes a novel. |
+| **Virtualized layout** | Lay out only the viewport; estimate + correct scroll geometry | **`need-now` (N5)** | **Promoted from `siren` by measurement (§8, 2026-07-05):** the whole-doc `IDWriteTextLayout` rebuild is the real UI-thread cliff — 15–34× parse, superlinear, crosses 60 fps at ~8K words (~10× sooner than the old "100k lines" estimate). The online height-estimation + scroll-anchoring problem. **Spec: `SCRIPTORIUM-NATIVE-VIRTUAL-LAYOUT.md`.** |
+| **Incremental parse** | Reuse unchanged subtrees; reparse only the dirty span (tree-sitter-shaped) | `siren` | Still parked. Parse is off-thread (N4) and linear — 25 ms at 200K words on the worker, invisible. Reach for subtree-reuse only when a measurement shows the *worker* falling behind the typist. (Layout, not parse, was the cliff — §8.) |
 | **Arena allocation** | Bump allocator reset per parse; reuse the input scratch (`utf16le_units` copy) | `siren` | The concrete cash-out of the perf note in `SCRIPTORIUM-WASM-MARSHALLING.md` §5. Invisible until a doc is huge, then decisive. |
 | **Search** | In-document find; full-text (hand-rolled, no `regex` crate) | `siren` | The site already has a search-index discipline to borrow from. |
 
@@ -275,10 +278,21 @@ skeleton, not speculation. Each phase below spawns its own JIT component spec.
   win (non-negotiable #5) — N4 is *architecture* (pre-paid by N1's rope, the siren substrate, the
   fix already-there before the book-scale cliff), and its latency *feel* is queued for the author
   like N2b's IME feel.
-- **N5+ — measure-gated sirens.** Virtualized layout, incremental parse, arenas,
-  durability/WAL, search — each only when a number demands it. **This is now the frontier:** every
-  named roadmap node (N0–N4) is built; the `siren` tier stays parked behind measurements, and the
-  author's feel-loop (N2b IME, N3 scroll/caret, N4 latency on large docs) is the live thread.
+- **N5 — Virtualized layout.** `[SPEC → SCRIPTORIUM-NATIVE-VIRTUAL-LAYOUT.md]` The first `siren`
+  **promoted to `need-now` by a measurement** (§8, 2026-07-05): the N4 latency dig found the
+  whole-document `IDWriteTextLayout` rebuild — not parse — is the UI-thread cliff (15–34× parse,
+  superlinear, crosses 60 fps at ~8K words). Fix: lay out only the viewport-snapped paragraph span
+  (grain = the rope's newline paragraphs, synchronous and O(log n) — zero coupling to the async
+  parse), synthesize document geometry from a **paragraph height index** (measured + estimated),
+  and correct estimates with scroll-anchoring as the reader explores. The geometry-service seam
+  (N3 §2) is **unchanged** — a re-implementation behind `ensure_layout`, not a rewrite — so `app`
+  and `win32` don't move. Edit cost drops from O(document) to O(viewport + log n): the
+  851 ms-per-keystroke at 1M units becomes sub-frame. Checkpoints N5a (height index) → N5b (windowed
+  layout + equivalence oracle) → N5c (estimate correction, anchoring, flat-cost guard). Spec written;
+  build queued.
+- **N6+ — measure-gated sirens.** Incremental parse, arenas, durability/WAL, search — each only when
+  a number demands it. The `siren` tier stays parked behind measurements; the author's feel-loop
+  (N2b IME, N3 scroll/caret, N4 latency + N5 large-doc scrolling) is the live thread alongside N5.
 
 The layout-oracle discipline (§5) is woven in from N0 onward, not a phase.
 
@@ -313,6 +327,7 @@ sequencing lives in this section because it is coupled to the architecture.)
 | 2026-07-05 | **N4 confronts the measure-gate before building — N4 is *architecture*, not a section-scale speedup** | Non-negotiable #5 (measure before optimizing) + the record (parse ~580µs, imperceptible; marshalling specced-then-refuted) mean async parse buys **no felt latency at section scale** — a reparse already fits in one frame. N4 was built anyway, on honest grounds (`SCRIPTORIUM-NATIVE-CONCURRENCY.md` §1): (1) it is **pre-paid** — N1 chose the persistent rope *specifically* for O(1) snapshots = "the N4 snappiness foundation"; (2) the **frame budget is a cliff** — a section that becomes a novel crosses 16ms on a full reparse and an inline parse would then drop frames *mid-keystroke*, so build the seam *before* the cliff, not under duress; (3) it is the **load-bearing wall for the sirens** (incremental parse, virtualized layout both assume an off-thread snapshot consumer). The latency *win* itself stays **measure-gated** (N4b instruments submit→settled round-trip so the cliff is measurable, not asserted) — the claim "async cut latency" is only made when a number shows a reparse crossing a frame. |
 | 2026-07-05 | **N4 threading model — one worker + a single-slot coalescing mailbox + a contentless `WM_APP` post-back** | Chosen shape (`SCRIPTORIUM-NATIVE-CONCURRENCY.md` §4): a **single long-lived worker** fed a `Mutex<Option<Job>> + Condvar` **one-slot mailbox** (a submit overwrites the slot, dropping the superseded `Arc` snapshot O(1)) — so N keystrokes collapse to one parse, bounded to one pending job, never a backlog; the worker releases the lock *before* parsing (a submit during a parse never blocks the UI). Deliberately **not** the classic `Box::into_raw`-through-`lParam` post-back: the result rides an `mpsc` channel and the `PostMessage` nudge is **contentless**, so a message still in the queue at teardown carries no owned resource → **leak-free by construction** (the property the ASan gate needs, incl. the in-process smoke create/destroy). The UI wakeup is the *only* Win32 touch and is **injected as a closure**, so the mailbox/coalescing/service is platform-free and oracle-tested on every CI platform. The invariant "never paint a half-updated model" is structural: the UI thread is the sole owner/mutator of `App`; the worker only reads an immutable `Snapshot`. |
 | 2026-07-05 | **VERDICT — the concurrency mechanism is oracle-certified; the latency feel is queued (all roadmap nodes now built)** | N4's two checkpoints landed 43 oracles (coalescing, `take`-on-shutdown, snapshot/parse equivalence, a bounded real-worker round-trip, supersede, monotonic apply, the status in-flight→settled transition) + the windowed smoke driving the **real worker + `PostMessageW` + `WM_APP_PARSE_DONE` drain** and asserting the async loop closes, ASan-clean across the worker teardown/join. `content_gen` (the N3a layout-cache key) served as the staleness token exactly as forward-predicted at N3 — no throwaway. Like N2b, the split is honest: the **mechanism** is deterministic and certified, but the **latency *feel*** — whether off-thread parse *matters* — only appears on book-scale content where a reparse crosses the frame budget, so it is **queued for the author** (there is nothing to feel at section scale). With N4 done, **every named roadmap node (N0–N4) is built**; the frontier is now the measure-gated `siren` tier (N5+, §5) and the author's feel-loop. |
+| 2026-07-05 | **MEASUREMENT — DWrite full-doc relayout is the real scaling cliff (15–34× parse, superlinear); virtualized layout PROMOTED `siren`→`need-now`** | The N4 latency dig measured what actually crosses the frame budget on the UI thread. Per-edit **DWrite relayout** (`CreateTextLayout` + `GetMetrics`, forced full-doc shape, real Renderer, release): 25K units (a section) **13.3 ms** vs parse 0.57 ms (23×); 55K **34 ms** (26×); 500K (a novel) **314 ms** (25×); 1M **851 ms** (34×); 2M **3,566 ms** (76×). Three findings: (1) **layout dominates the UI thread by ~15–34×** — N4 correctly moved parse off-thread but parse was never the bottleneck; (2) the 60 fps cliff is at **~40K units ≈ 8K words** (a long blog post), ~17× sooner than the parse cliff (~140K words) — the umbrella's "100k lines" gate for virtualized layout was ~10× too conservative; (3) layout is **superlinear** (per-unit cost doubles 500K→2M: 0.63→1.78 µs/unit) — a single `IDWriteTextLayout` was never meant to hold a megabyte. The fix is NOT off-thread layout (it is the *synchronous* input geometry authority) but **virtualization** — lay out only the viewport, estimate the rest. This satisfies non-negotiable #5's gate with a number: **virtualized layout becomes the measure-justified next node, N5** (`SCRIPTORIUM-NATIVE-VIRTUAL-LAYOUT.md`). |
 
 ## 9. Open forks (deliberately unresolved)
 
