@@ -51,8 +51,17 @@ roadmap, but they are not the roadmap itself. For overall orientation read
   paints (geometry authority, cache-keyed on `(content_gen, width)`): sticky-goal-column
   Up/Down/PageUp/Down, wheel + `WS_VSCROLL` scrolling with scroll-follows-caret, and mouse
   click-to-place / drag-select / double-word / triple-line / drag-past-edge autoscroll. 28
-  geometry oracles + windowed smoke on real DirectWrite, ASan-clean. N4 (concurrency/latency)
-  is next after N2b.
+  geometry oracles + windowed smoke on real DirectWrite, ASan-clean.
+- `SCRIPTORIUM-NATIVE-CONCURRENCY.md`: **N4 (built + CI-validated)** — concurrency / latency:
+  `parse_document` lifted off the UI thread onto a single long-lived worker fed an O(1), immutable
+  rope `Snapshot`, with a **single-slot coalescing mailbox** (N keystrokes → 1 parse), a
+  `content_gen` monotonic staleness gate, a **contentless `WM_APP` post-back** (leak-free teardown —
+  no boxed pointer through `lParam`), and latency instrumentation (the submit→settled async
+  round-trip in the status line). The invariant holds: the UI thread is the sole owner/mutator of
+  `App`, the worker only reads an immutable snapshot ("never paint a half-updated model"). 43
+  oracles + real-worker smoke, ASan-clean. **Honest scope:** no latency win at section scale — N4 is
+  the *architecture* (pre-paid by N1's rope; the siren substrate) and its feel on book-scale content
+  is **queued for the author**. With N4 the named roadmap (N0–N4) is complete; the `siren` tier is next.
 
 **Search, recovery, UX:**
 - `ORACLE-SEARCH-SPEC.md`: target AST-native search/index/ranking system for

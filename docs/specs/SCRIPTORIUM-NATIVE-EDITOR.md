@@ -19,16 +19,20 @@
 > Builds on the shipped `rust/` core (parser cutover complete; `SCRIPTORIUM-RUST-PARSER.md`
 > §14). The JS⇄wasm boundary is measured and closed (`SCRIPTORIUM-WASM-MARSHALLING.md`).
 >
-> Status: **building — N0, N1, N2a, N3 shipped; N2b built spec-correct (feel unvalidated).**
+> Status: **building — N0, N1, N2a, N3, N4 shipped; N2b built spec-correct (feel unvalidated).**
 > The platform/render walking skeleton (N0), the persistent-rope text buffer (N1), input
-> correctness N2a (selection + grapheme/word motion + clipboard), and N3 (layout maturity:
+> correctness N2a (selection + grapheme/word motion + clipboard), N3 (layout maturity:
 > retained-layout geometry service, vertical motion, scrolling, mouse click/drag/double/triple
-> + autoscroll) are built and CI-validated (COM-from-raw-Rust, the crate-free rope, and the
-> geometry oracle all proven — §8). **N2b** (IME composition: `WM_IME_*` + imm32, provisional-
-> not-in-rope, inline rendering, candidate window) is built to **spec-correct** with pure
-> state-machine/splice oracles + a crash/leak smoke guard — but its *feel* is un-oracle-able by
-> the implementer and **queued for the author** to judge on a real IME (§8, `SCRIPTORIUM-NATIVE-IME.md`).
-> Named next: **N4** (concurrency / latency). Last refreshed: 2026-07-05.
+> + autoscroll), and **N4** (concurrency: off-thread parse on an O(1) rope snapshot, a single-slot
+> coalescing mailbox, a `content_gen` staleness gate, a contentless `WM_APP` post-back, leak-free
+> teardown, latency instrumentation) are built and CI-validated (COM-from-raw-Rust, the crate-free
+> rope, the geometry oracle, and now the concurrency mechanism all proven — §8). **N2b** (IME
+> composition: `WM_IME_*` + imm32, provisional-not-in-rope, inline rendering, candidate window) is
+> built to **spec-correct** with pure state-machine/splice oracles + a crash/leak smoke guard — but
+> its *feel* is un-oracle-able by the implementer and **queued for the author** to judge on a real
+> IME (§8, `SCRIPTORIUM-NATIVE-IME.md`). N4's latency *feel* on book-scale content is likewise
+> queued (§8, `SCRIPTORIUM-NATIVE-CONCURRENCY.md`). The roadmap's named nodes are **all built**;
+> next is the measure-gated `siren` tier (N5+) and the author's feel-loop. Last refreshed: 2026-07-05.
 
 ---
 
@@ -250,11 +254,31 @@ skeleton, not speculation. Each phase below spawns its own JIT component spec.
   extended throughout (point↔position round-trip, goal-column stickiness, scroll invariants,
   drag granularity) + the smoke test drives synthetic click/vertical/wheel/scrollbar through
   the real WndProc on real DirectWrite. Next: N2b, then N4.
-- **N4 — Concurrency / latency.** Off-thread IO/heavy work, input coalescing, the
-  latency tuning where snappiness is born. (`content_gen`, introduced in N3a as the layout
-  cache key, is the forward-aligned primitive N4 uses to discard a stale off-thread parse.)
+- **N4 — Concurrency / latency.** `[BUILT + CI-validated → SCRIPTORIUM-NATIVE-CONCURRENCY.md]`
+  `parse_document` lifted off the UI thread onto a single long-lived worker fed an O(1), immutable
+  rope `Snapshot`, so a keystroke never waits on the parser. **Done (2026-07-05)**, in two
+  checkpoints: **N4a** — the spine: a `parse` module (platform-free; the one OS touch, the UI
+  wakeup, is an injected closure) with a **single-slot coalescing mailbox** (N keystrokes → 1
+  parse, bounded to one pending job), a worker that parses with the lock released, and a
+  `ParseService` whose `Drop` joins the worker; `refresh()` stopped parsing and gained
+  `snapshot()` / `apply_parse` gated monotonically on `signal_gen` (a late/out-of-order parse can't
+  regress the display); the post-back is a **contentless `WM_APP_PARSE_DONE`** + an `mpsc` channel,
+  so teardown is **leak-free by construction** (no boxed pointer through `lParam`); **N4b** —
+  latency instrumentation: `win32` times the submit→settled async round-trip and the status line
+  shows it (`· async N µs`, distinct from the worker's `parse N µs`) plus a live `parsing…` marker,
+  so the frame-budget cliff is *observable* on real content. The invariant held: the UI thread
+  stays the sole owner/mutator of `App`; the worker only reads an immutable `Snapshot` (§2 "never
+  paint a half-updated model"). `content_gen` (the N3a layout-cache key) served exactly as the
+  forward-aligned staleness token, as predicted. 43 oracles (coalescing, snapshot/parse
+  equivalence, monotonic apply, a real-worker round-trip, the status transition) + the smoke test
+  driving the real post-back, ASan-clean. **Honest scope:** at section scale there is no latency
+  win (non-negotiable #5) — N4 is *architecture* (pre-paid by N1's rope, the siren substrate, the
+  fix already-there before the book-scale cliff), and its latency *feel* is queued for the author
+  like N2b's IME feel.
 - **N5+ — measure-gated sirens.** Virtualized layout, incremental parse, arenas,
-  durability/WAL, search — each only when a number demands it.
+  durability/WAL, search — each only when a number demands it. **This is now the frontier:** every
+  named roadmap node (N0–N4) is built; the `siren` tier stays parked behind measurements, and the
+  author's feel-loop (N2b IME, N3 scroll/caret, N4 latency on large docs) is the live thread.
 
 The layout-oracle discipline (§5) is woven in from N0 onward, not a phase.
 
@@ -286,6 +310,9 @@ sequencing lives in this section because it is coupled to the architecture.)
 | 2026-07-05 | **N2b seam — the IME composition is provisional and lives OUTSIDE the rope until commit** | Half-composed text must never reach the document/parser/undo. Decision (`SCRIPTORIUM-NATIVE-IME.md` §2): `App` holds `comp: Option<Composition>`; the renderer splices it into the *display* layout only (`text[..lo] ++ comp ++ text[hi..]`), the buffer stays untouched until `commit_composition` (`GCS_RESULTSTR`) folds it in as one `replace_selection` undo step. This makes the two headline edges *free*: **cancel = zero document change** (nothing was written, so nothing to undo) and **commit = one undo step** (delete+insert already grouped). The OS's IMM subsystem owns the composition *logic* (candidate lists, conversion); we own the *semantics* (where provisional text lives, how it renders, when it becomes an edit) — the same delegation line as glyph rasterization. The layout cache key gains a `comp_sig` so the spliced layout rebuilds per keystroke and reverts to the committed layout the instant composition ends (`content_gen` is unchanged while composing). |
 | 2026-07-05 | **N2b result double-insert prevention; UAX #14 line breaking resolved as a deferral** | The classic IME bug: `DefWindowProc(WM_IME_COMPOSITION)` with `GCS_RESULTSTR` synthesizes a `WM_IME_CHAR`/`WM_CHAR`, so handling the result *and* forwarding inserts it twice. Rule (§4): when we handle `GCS_RESULTSTR` we do **not** forward the message, and we swallow `WM_IME_CHAR`; focus loss finalizes via `ImmNotifyIME(CPS_COMPLETE)`. Separately, N2a named "our-own UAX #14 line breaking" for N2b — **now resolved as a named `siren` deferral (§7):** we do NOT own wrapping, DirectWrite does and does UAX #14 correctly (same delegation as glyph rasterization); a custom wrapper is only needed for a no-wrap/h-scroll mode, virtualized layout, or a felt breaking bug — none present. So N2b is, in practice, the IME node. |
 | 2026-07-05 | **VERDICT — IME correctness is oracle-able but its *feel* is not; N2b is spec-correct, NOT feel-validated** | N2b splits cleanly (§8): the composition **state machine** (commit/cancel/replace + undo grouping) and the **display splice** are deterministic and pinned by pure oracles (no IMM/DWrite); the smoke test drives the `WM_IME_*` handlers + composition render on real DirectWrite as a crash/leak guard, ASan-clean. But whether a real Microsoft Pinyin/Japanese/Korean IME drives our handlers as expected — and whether composing *feels* right — cannot be synthesized (a synthetic message doesn't populate the IMC) and is the **author's to judge on a real IME**. Per the autonomous mandate, N2b ships built-to-spec and is **explicitly not marked feel-validated by the implementer** — that verdict is queued for the author's return. This is the first node whose correctness the implementer cannot fully close alone. |
+| 2026-07-05 | **N4 confronts the measure-gate before building — N4 is *architecture*, not a section-scale speedup** | Non-negotiable #5 (measure before optimizing) + the record (parse ~580µs, imperceptible; marshalling specced-then-refuted) mean async parse buys **no felt latency at section scale** — a reparse already fits in one frame. N4 was built anyway, on honest grounds (`SCRIPTORIUM-NATIVE-CONCURRENCY.md` §1): (1) it is **pre-paid** — N1 chose the persistent rope *specifically* for O(1) snapshots = "the N4 snappiness foundation"; (2) the **frame budget is a cliff** — a section that becomes a novel crosses 16ms on a full reparse and an inline parse would then drop frames *mid-keystroke*, so build the seam *before* the cliff, not under duress; (3) it is the **load-bearing wall for the sirens** (incremental parse, virtualized layout both assume an off-thread snapshot consumer). The latency *win* itself stays **measure-gated** (N4b instruments submit→settled round-trip so the cliff is measurable, not asserted) — the claim "async cut latency" is only made when a number shows a reparse crossing a frame. |
+| 2026-07-05 | **N4 threading model — one worker + a single-slot coalescing mailbox + a contentless `WM_APP` post-back** | Chosen shape (`SCRIPTORIUM-NATIVE-CONCURRENCY.md` §4): a **single long-lived worker** fed a `Mutex<Option<Job>> + Condvar` **one-slot mailbox** (a submit overwrites the slot, dropping the superseded `Arc` snapshot O(1)) — so N keystrokes collapse to one parse, bounded to one pending job, never a backlog; the worker releases the lock *before* parsing (a submit during a parse never blocks the UI). Deliberately **not** the classic `Box::into_raw`-through-`lParam` post-back: the result rides an `mpsc` channel and the `PostMessage` nudge is **contentless**, so a message still in the queue at teardown carries no owned resource → **leak-free by construction** (the property the ASan gate needs, incl. the in-process smoke create/destroy). The UI wakeup is the *only* Win32 touch and is **injected as a closure**, so the mailbox/coalescing/service is platform-free and oracle-tested on every CI platform. The invariant "never paint a half-updated model" is structural: the UI thread is the sole owner/mutator of `App`; the worker only reads an immutable `Snapshot`. |
+| 2026-07-05 | **VERDICT — the concurrency mechanism is oracle-certified; the latency feel is queued (all roadmap nodes now built)** | N4's two checkpoints landed 43 oracles (coalescing, `take`-on-shutdown, snapshot/parse equivalence, a bounded real-worker round-trip, supersede, monotonic apply, the status in-flight→settled transition) + the windowed smoke driving the **real worker + `PostMessageW` + `WM_APP_PARSE_DONE` drain** and asserting the async loop closes, ASan-clean across the worker teardown/join. `content_gen` (the N3a layout-cache key) served as the staleness token exactly as forward-predicted at N3 — no throwaway. Like N2b, the split is honest: the **mechanism** is deterministic and certified, but the **latency *feel*** — whether off-thread parse *matters* — only appears on book-scale content where a reparse crosses the frame budget, so it is **queued for the author** (there is nothing to feel at section scale). With N4 done, **every named roadmap node (N0–N4) is built**; the frontier is now the measure-gated `siren` tier (N5+, §5) and the author's feel-loop. |
 
 ## 9. Open forks (deliberately unresolved)
 

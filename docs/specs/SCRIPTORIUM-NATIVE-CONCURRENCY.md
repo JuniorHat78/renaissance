@@ -1,6 +1,11 @@
 # SCRIPTORIUM-NATIVE-CONCURRENCY — N4: off-thread parse & latency
 
-**Status:** spec (2026-07-05). Part of the native-editor umbrella
+**Status:** **built + CI-validated (2026-07-05)** — N4a (off-thread parse spine) + N4b (latency
+instrumentation) landed, 43 oracles debug + release, clippy-clean, windowed smoke driving a real
+worker + `PostMessageW` post-back, ASan-clean across the worker teardown/join. The concurrency
+*mechanism* is certified; the latency *win* stays measure-gated (there is none at section scale —
+§1) and its *feel* on book-scale content is queued for the author, like N2b's IME feel (§8). Part
+of the native-editor umbrella
 (`SCRIPTORIUM-NATIVE-EDITOR.md` §5 "Concurrency / latency" — tagged `need-now`; §7 roadmap N4).
 N0–N3 built a single-threaded editor: every keystroke runs materialize → **parse** → layout →
 paint inline on the UI thread. N4 lifts the one unbounded step — `parse_document` — off that
@@ -241,14 +246,16 @@ queued.
 
 ## 11. Checkpoints
 
-- **N4a — the off-thread parse spine.** The `parse` module (single-slot coalescing mailbox, the
+Both **built + CI-validated (2026-07-05)**.
+
+- **N4a — the off-thread parse spine.** `[BUILT]` The `parse` module (single-slot coalescing mailbox, the
   worker loop, `ParseService::{new, submit, drop/join}`, `ParseResult`); `app.refresh()` stops
   parsing and gains `snapshot()` / `apply_parse` / `signal_gen`; `win32` creates the service,
   `reparse_if_dirty` on edits, and handles `WM_APP_PARSE_DONE` (drain → monotonic apply →
   invalidate); `PostMessageW` + `WM_APP_PARSE_DONE` added to `sys`. Oracles: coalescing,
   monotonic apply, snapshot/parse equivalence. Smoke extended with a service + one post-back
   round-trip. Debug + release + smoke + ASan.
-- **N4b — latency instrumentation & the feel surface.** Measure keystroke→parse-applied latency and
+- **N4b — latency instrumentation & the feel surface.** `[BUILT]` Measure keystroke→parse-applied latency and
   a "parse in flight" state; surface both in the status line so the frame-budget threshold is
   observable on real content; expose whatever tuning the author will want to react to. Verdict, in
   the N2b mould: mechanism oracle-certified, **feel not implementer-validated** — the latency
