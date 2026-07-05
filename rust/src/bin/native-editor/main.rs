@@ -19,6 +19,7 @@
 // by `win32`, so the mailbox/coalescing/service logic itself is platform-free) all compile and
 // run everywhere (no Win32/DWrite), so they are NOT gated to Windows.
 mod buffer;
+mod codec;
 mod grapheme;
 mod parse;
 

@@ -9,7 +9,10 @@
 //! to the reparse). N2 adds a selection (`anchor`/`caret`), grapheme-cluster + word motion
 //! (SCRIPTORIUM-NATIVE-INPUT.md), and selection-aware edits; IME is N2b.
 
+use std::path::{Path, PathBuf};
+
 use crate::buffer::{Snapshot, TextBuffer};
+use crate::codec::{encode, Decoded, Encoding, Newline};
 use crate::grapheme;
 use crate::parse::ParseSignal;
 
@@ -87,6 +90,21 @@ pub struct App {
     /// `Some` only between `WM_IME_STARTCOMPOSITION` and its end; the rope stays untouched
     /// while it lives. The renderer reads it to splice the inline preview.
     comp: Option<Composition>,
+    /// The document's file path, or `None` for an untitled buffer (SCRIPTORIUM-NATIVE-IO.md §4).
+    /// Set by a load or a Save As; drives the title bar and whether Save can write without a dialog.
+    path: Option<PathBuf>,
+    /// The file's encoding, remembered from the load so a save round-trips it byte-faithfully
+    /// (§3). New documents default to BOM-less UTF-8.
+    encoding: Encoding,
+    /// The file's newline convention, remembered from the load so an opened CRLF file stays CRLF
+    /// on save (§3). New documents default to LF (coherent with the LF-internal buffer).
+    newline: Newline,
+    /// The `content_gen` at the last successful load/save — "the generation that's on disk"
+    /// (§4). `is_dirty()` is `content_gen != saved_gen`: a generation compare, not a flag, so it
+    /// rides the counter the renderer + parser already maintain. Over-reports across undo-to-saved
+    /// (undo bumps the generation) but never under-reports — it can prompt to save byte-identical
+    /// content, it can never drop unsaved work.
+    saved_gen: u64,
 }
 
 impl App {
@@ -104,8 +122,15 @@ impl App {
             signal_gen: 0,
             roundtrip_micros: 0,
             comp: None,
+            path: None,
+            encoding: Encoding::Utf8,
+            newline: Newline::Lf,
+            saved_gen: 0,
         };
         app.refresh();
+        // The empty untitled document is clean: closing it prompts for nothing (§4). `refresh`
+        // just bumped `content_gen`, so pin `saved_gen` to it — nothing to save yet.
+        app.saved_gen = app.content_gen;
         app
     }
 
@@ -413,6 +438,81 @@ impl App {
         self.roundtrip_micros = micros;
     }
 
+    // --- file document model (SCRIPTORIUM-NATIVE-IO.md §4) --------------------
+    // Identity + the dirty-state machine. Platform-free: a `PathBuf` is std, the dialogs (win32)
+    // fill it, and the bytes flow through the pure `codec`. The buffer stays LF-internal; encoding
+    // + newline are remembered only to round-trip the file on save.
+
+    /// Has the buffer diverged from what's on disk? A generation compare (§4) — `content_gen`
+    /// already bumps on every edit, so this needs no separate bookkeeping.
+    pub fn is_dirty(&self) -> bool {
+        self.content_gen != self.saved_gen
+    }
+
+    /// Does the document have a file path yet (vs. untitled)? Save writes directly when it does;
+    /// otherwise it must escalate to Save As for a path.
+    pub fn has_path(&self) -> bool {
+        self.path.is_some()
+    }
+
+    /// The document's file path, if any — so `win32` can write a plain Save without a dialog.
+    pub fn path(&self) -> Option<&Path> {
+        self.path.as_deref()
+    }
+
+    /// The document's display name — the file's base name, or `Untitled` for an unsaved buffer.
+    /// The title bar shows this (plus a dirty marker); the `Scriptorium —` branding is win32's.
+    pub fn document_name(&self) -> String {
+        match self.path.as_deref().and_then(Path::file_name) {
+            Some(name) => name.to_string_lossy().into_owned(),
+            None => "Untitled".to_string(),
+        }
+    }
+
+    /// Replace the whole document with a freshly decoded file (SCRIPTORIUM-NATIVE-IO.md §4): rebuild
+    /// the rope from the units, **clear undo/redo** (a loaded file is a new history, not an undoable
+    /// edit of the prior one), reset the caret/selection/composition to the top, adopt the file's
+    /// identity, and mark it clean. `refresh()` bumps `content_gen` so the renderer relayouts and
+    /// `win32` resubmits the parse (N4). Used for Open; `new_document` reuses it with empty content.
+    pub fn load_document(&mut self, decoded: Decoded, path: Option<PathBuf>) {
+        self.buffer = TextBuffer::from_units(&decoded.units);
+        self.undo.clear();
+        self.redo.clear();
+        self.group = None;
+        self.caret = 0;
+        self.anchor = 0;
+        self.comp = None;
+        self.path = path;
+        self.encoding = decoded.encoding;
+        self.newline = decoded.newline;
+        self.refresh();
+        self.saved_gen = self.content_gen;
+    }
+
+    /// Reset to a clean, empty, untitled document with the default encoding/newline (§4). The
+    /// caller runs the discard guard first if the current document is dirty.
+    pub fn new_document(&mut self) {
+        let empty = Decoded { units: Vec::new(), encoding: Encoding::Utf8, newline: Newline::Lf };
+        self.load_document(empty, None);
+    }
+
+    /// Record a Save As target: the new path (encoding/newline are unchanged — Save As is "same
+    /// document, new location", not an encoding conversion). The write + `mark_saved` follow.
+    pub fn set_save_target(&mut self, path: PathBuf) {
+        self.path = Some(path);
+    }
+
+    /// Mark the current generation as the one on disk — called after a successful write (§4).
+    pub fn mark_saved(&mut self) {
+        self.saved_gen = self.content_gen;
+    }
+
+    /// The bytes to write for a save: the buffer re-encoded in the document's encoding + newline
+    /// (§3). Pure — `win32` performs the actual `std::fs::write`.
+    pub fn bytes_to_save(&self) -> Vec<u8> {
+        encode(&self.text, self.encoding, self.newline)
+    }
+
     /// The status line: caret Ln/Col (from the rope's line summary) + selection size when
     /// active + the AST signal.
     pub fn status_text(&self) -> String {
@@ -571,5 +671,82 @@ mod parse_apply_tests {
         app.set_roundtrip(1234);
         let s = app.status_text();
         assert!(s.contains("async 1234"), "settled round-trip is shown: {s}");
+    }
+}
+
+// --- the file document model + dirty-state machine (SCRIPTORIUM-NATIVE-IO.md §4) --
+// The generation-based dirty gate, load/new/save transitions, and the codec hand-off — pinned
+// without any dialog or filesystem (those are win32's; the byte round-trip is codec's oracle).
+#[cfg(test)]
+mod document_tests {
+    use super::*;
+    use crate::codec::decode;
+
+    #[test]
+    fn a_fresh_document_is_clean_and_untitled() {
+        let app = App::new();
+        assert!(!app.is_dirty(), "an empty new buffer has nothing to save");
+        assert!(!app.has_path());
+        assert_eq!(app.document_name(), "Untitled");
+    }
+
+    #[test]
+    fn editing_marks_dirty_and_saving_marks_clean() {
+        let mut app = App::new();
+        app.input_char('x' as u16);
+        assert!(app.is_dirty(), "a typed edit diverges from disk");
+        app.mark_saved();
+        assert!(!app.is_dirty(), "a save reconciles the generation");
+        app.input_char('y' as u16);
+        assert!(app.is_dirty(), "the next edit is dirty again");
+    }
+
+    #[test]
+    fn load_document_is_clean_resets_the_caret_and_clears_undo() {
+        let mut app = App::new();
+        app.input_char('a' as u16); // give it undoable history + a moved caret
+        app.input_char('b' as u16);
+        let path = PathBuf::from("C:/notes/manuscript.md");
+        app.load_document(decode(b"loaded body\r\ntext"), Some(path));
+
+        assert!(!app.is_dirty(), "a freshly loaded file is clean");
+        assert_eq!(app.caret, 0, "the caret homes to the top of the loaded doc");
+        assert_eq!(app.anchor, 0);
+        assert_eq!(app.document_name(), "manuscript.md");
+        assert!(app.has_path());
+        // The loaded content replaced the buffer, LF-normalized.
+        assert_eq!(String::from_utf16(&app.text).unwrap(), "loaded body\ntext");
+        // Undo history was cleared: Ctrl+Z can't reach back into the previous document.
+        app.input_char(0x1A);
+        assert_eq!(
+            String::from_utf16(&app.text).unwrap(),
+            "loaded body\ntext",
+            "undo must not cross a load boundary"
+        );
+    }
+
+    #[test]
+    fn new_document_resets_to_a_clean_untitled_buffer() {
+        let mut app = App::new();
+        app.load_document(decode(b"something"), Some(PathBuf::from("x.txt")));
+        app.new_document();
+        assert!(!app.is_dirty());
+        assert!(!app.has_path());
+        assert_eq!(app.document_name(), "Untitled");
+        assert!(app.text.is_empty());
+    }
+
+    #[test]
+    fn bytes_to_save_reencodes_in_the_files_convention() {
+        let mut app = App::new();
+        // Load a CRLF UTF-8-BOM file; the buffer is LF-internal but the identity is remembered.
+        let original = crate::codec::encode(
+            &"line one\nline two".encode_utf16().collect::<Vec<_>>(),
+            Encoding::Utf8Bom,
+            Newline::Crlf,
+        );
+        app.load_document(decode(&original), Some(PathBuf::from("doc.txt")));
+        // Saving with no further edits reproduces the original bytes (preserve-on-save, §3).
+        assert_eq!(app.bytes_to_save(), original, "save round-trips the file's encoding + newline");
     }
 }

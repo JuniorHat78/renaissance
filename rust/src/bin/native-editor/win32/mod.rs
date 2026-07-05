@@ -11,6 +11,7 @@ pub mod sys;
 use core::ffi::c_void;
 use core::mem::{size_of, zeroed};
 use core::ptr::{null, null_mut};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -74,6 +75,10 @@ struct WindowState {
     /// The anchored range fixed for the duration of the drag: the initial caret for a single
     /// click, or the whole word/line for a double/triple. Drag extension pivots around it.
     sel_origin: (usize, usize),
+    /// The window title last handed to `SetWindowTextW` (SCRIPTORIUM-NATIVE-IO.md §6). Kept so
+    /// `update_title` only calls the OS when the displayed string actually changes — the dirty
+    /// marker rides the paint path, and we don't want to retitle on every keystroke.
+    title: String,
 }
 
 /// The unit a drag extends the selection by, fixed by the click that began it (§4).
@@ -153,6 +158,7 @@ pub fn run() {
             last_mouse_y: 0,
             drag_mode: DragMode::Char,
             sel_origin: (0, 0),
+            title: String::new(),
         });
         let state_ptr = Box::into_raw(state);
 
@@ -337,6 +343,25 @@ unsafe fn wndproc_impl(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> 
                         state.app.paste(&units);
                     }
                 }
+                // File I/O (SCRIPTORIUM-NATIVE-IO.md §5). These aren't caret motions (a load homes
+                // the caret + view itself), so `moves_caret = false` keeps the shared tail from
+                // yanking the view; the tail's `reparse_if_dirty` still submits a load's new content.
+                VK_O if ctrl => {
+                    do_open(state, hwnd);
+                    moves_caret = false;
+                }
+                VK_N if ctrl => {
+                    do_new(state, hwnd);
+                    moves_caret = false;
+                }
+                VK_S if ctrl && shift => {
+                    do_save(state, hwnd, true);
+                    moves_caret = false;
+                }
+                VK_S if ctrl => {
+                    do_save(state, hwnd, false);
+                    moves_caret = false;
+                }
                 _ => handled = false,
             }
 
@@ -500,7 +525,18 @@ unsafe fn wndproc_impl(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> 
             // invalidate after every state change, so paint is the one place guaranteed to see
             // the latest extent (an edit changed content_height, a wheel changed scroll_y).
             update_scrollbar(hwnd, state);
+            // The title (document name + dirty marker) also rides the paint path — cheap because
+            // `update_title` only calls SetWindowTextW when the string actually changed (§6).
+            update_title(state, hwnd);
             EndPaint(hwnd, &ps);
+            0
+        }
+        WM_CLOSE => {
+            // The ✕ / Alt+F4: guard unsaved work before we tear the window down (§5). The guard
+            // returns whether to proceed — Cancel (or a failed save) aborts the close entirely.
+            if confirm_discard(state, hwnd) {
+                DestroyWindow(hwnd);
+            }
             0
         }
         WM_DESTROY => {
@@ -1114,6 +1150,183 @@ unsafe fn clipboard_get(hwnd: HWND) -> Option<Vec<u16>> {
     out
 }
 
+// --- file I/O: open / save / discard guard (SCRIPTORIUM-NATIVE-IO.md §5) ------
+// The dialogs + message boxes + the byte read/write. The pure codec (bytes<->buffer) and the
+// dirty-state machine live in `codec`/`app`; this is the OS-facing shell. `load_from`/`save_to`
+// are the dialog-free cores (used by the handlers below AND driven directly by the smoke test,
+// since a modal dialog can't run unattended).
+
+/// Read a file, decode it, and load it into the document — the dialog-free core of Open. Homes the
+/// view to the top (a freshly opened doc shows its start, not a stale scroll). Returns the read
+/// error so the caller can surface it (the buffer is left untouched on failure).
+fn load_from(state: &mut WindowState, path: &Path) -> std::io::Result<()> {
+    let bytes = std::fs::read(path)?;
+    let decoded = crate::codec::decode(&bytes);
+    state.app.load_document(decoded, Some(path.to_path_buf()));
+    state.scroll_y = 0.0;
+    state.goal_x = None;
+    Ok(())
+}
+
+/// Encode the buffer and write it — the dialog-free core of Save. Records the path (so an untitled
+/// buffer that was just Saved-As now has one) and marks the document clean on success; a write
+/// failure leaves it dirty and the error is returned for the caller to surface.
+fn save_to(state: &mut WindowState, path: &Path) -> std::io::Result<()> {
+    std::fs::write(path, state.app.bytes_to_save())?;
+    state.app.set_save_target(path.to_path_buf());
+    state.app.mark_saved();
+    Ok(())
+}
+
+/// Show a `MessageBoxW` and return its result (`IDYES`/`IDNO`/`IDCANCEL`/`IDOK`). A tiny wrapper
+/// that owns the wide-string lifetimes for the duration of the modal call.
+unsafe fn message_box(hwnd: HWND, text: &str, caption: &str, flags: u32) -> i32 {
+    let t = wide(text);
+    let c = wide(caption);
+    MessageBoxW(hwnd, t.as_ptr(), c.as_ptr(), flags)
+}
+
+/// Guard a destructive transition (New / Open / close). Clean ⇒ proceed silently. Dirty ⇒ the
+/// three-way prompt (§5): Yes saves (proceed only if the save *succeeded* — a cancelled Save As or
+/// a write error aborts), No discards, Cancel aborts. Returns whether the caller may proceed.
+unsafe fn confirm_discard(state: &mut WindowState, hwnd: HWND) -> bool {
+    if !state.app.is_dirty() {
+        return true;
+    }
+    let prompt = format!("Save changes to {}?", state.app.document_name());
+    match message_box(hwnd, &prompt, "Scriptorium", MB_YESNOCANCEL | MB_ICONWARNING) {
+        IDYES => do_save(state, hwnd, false),
+        IDNO => true,
+        _ => false, // IDCANCEL, or the box failed to show — the safe answer is "don't discard"
+    }
+}
+
+/// Open: guard unsaved work, pick a file, load it (surfacing a read error). No-op on dialog Cancel.
+unsafe fn do_open(state: &mut WindowState, hwnd: HWND) {
+    if !confirm_discard(state, hwnd) {
+        return;
+    }
+    if let Some(path) = run_open_dialog(hwnd) {
+        if let Err(e) = load_from(state, &path) {
+            message_box(hwnd, &format!("Couldn't open the file:\n{e}"), "Scriptorium", MB_OK | MB_ICONERROR);
+        }
+    }
+}
+
+/// New: guard unsaved work, then reset to a clean untitled buffer.
+unsafe fn do_new(state: &mut WindowState, hwnd: HWND) {
+    if !confirm_discard(state, hwnd) {
+        return;
+    }
+    state.app.new_document();
+    state.scroll_y = 0.0;
+    state.goal_x = None;
+}
+
+/// Save. `force_dialog` (Save As) always prompts for a path; a plain Save writes to the existing
+/// path and only escalates to the dialog when the document is still untitled. Returns whether the
+/// save succeeded (the discard guard needs to know: a cancelled/failed save must not proceed).
+unsafe fn do_save(state: &mut WindowState, hwnd: HWND, force_dialog: bool) -> bool {
+    let path = if force_dialog || !state.app.has_path() {
+        match run_save_dialog(hwnd, &state.app.document_name()) {
+            Some(p) => p,
+            None => return false, // dialog cancelled — nothing written
+        }
+    } else {
+        // has_path() is true here, so this is always Some; clone out before the mutable write.
+        state.app.path().map(Path::to_path_buf).unwrap()
+    };
+    match save_to(state, &path) {
+        Ok(()) => true,
+        Err(e) => {
+            message_box(hwnd, &format!("Couldn't save the file:\n{e}"), "Scriptorium", MB_OK | MB_ICONERROR);
+            false
+        }
+    }
+}
+
+/// The comdlg32 file-type filter, a run of NUL-separated pairs ending in a double NUL:
+/// `Text files\0*.txt;*.md\0All files\0*.*\0\0`.
+fn filter_string() -> Vec<u16> {
+    let mut v: Vec<u16> = "Text files\0*.txt;*.md\0All files\0*.*\0".encode_utf16().collect();
+    v.push(0); // the second NUL that terminates the whole list
+    v
+}
+
+/// The path from an `OPENFILENAMEW`'s `lpstrFile` buffer (NUL-terminated wide), as a `PathBuf`
+/// via the OS-string round-trip (no lossy UTF-8 detour — paths can hold unpaired surrogates).
+fn pathbuf_from_wide(buf: &[u16]) -> PathBuf {
+    use std::os::windows::ffi::OsStringExt;
+    let len = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+    std::ffi::OsString::from_wide(&buf[..len]).into()
+}
+
+/// Run the Open dialog; `Some(path)` on OK, `None` on Cancel. The `lpstrFile` buffer is the
+/// caller-owned scratch comdlg32 writes the chosen path into.
+unsafe fn run_open_dialog(hwnd: HWND) -> Option<PathBuf> {
+    let mut file_buf = vec![0u16; 1024];
+    let filter = filter_string();
+    let title = wide("Open");
+    let defext = wide("txt");
+    let mut ofn: OPENFILENAMEW = zeroed();
+    ofn.lStructSize = size_of::<OPENFILENAMEW>() as u32;
+    ofn.hwndOwner = hwnd;
+    ofn.lpstrFilter = filter.as_ptr();
+    ofn.lpstrFile = file_buf.as_mut_ptr();
+    ofn.nMaxFile = file_buf.len() as u32;
+    ofn.lpstrTitle = title.as_ptr();
+    ofn.lpstrDefExt = defext.as_ptr();
+    ofn.Flags = OFN_EXPLORER | OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST | OFN_HIDEREADONLY | OFN_NOCHANGEDIR;
+    if GetOpenFileNameW(&mut ofn) != 0 {
+        Some(pathbuf_from_wide(&file_buf))
+    } else {
+        None
+    }
+}
+
+/// Run the Save As dialog, pre-seeding the current document name; `Some(path)` on OK (the OS
+/// handles the overwrite prompt), `None` on Cancel.
+unsafe fn run_save_dialog(hwnd: HWND, suggested_name: &str) -> Option<PathBuf> {
+    let mut file_buf = vec![0u16; 1024];
+    // Seed the edit field with the current name (skipping the "Untitled" placeholder).
+    if suggested_name != "Untitled" {
+        for (i, u) in suggested_name.encode_utf16().enumerate() {
+            if i + 1 < file_buf.len() {
+                file_buf[i] = u;
+            }
+        }
+    }
+    let filter = filter_string();
+    let title = wide("Save As");
+    let defext = wide("txt");
+    let mut ofn: OPENFILENAMEW = zeroed();
+    ofn.lStructSize = size_of::<OPENFILENAMEW>() as u32;
+    ofn.hwndOwner = hwnd;
+    ofn.lpstrFilter = filter.as_ptr();
+    ofn.lpstrFile = file_buf.as_mut_ptr();
+    ofn.nMaxFile = file_buf.len() as u32;
+    ofn.lpstrTitle = title.as_ptr();
+    ofn.lpstrDefExt = defext.as_ptr();
+    ofn.Flags = OFN_EXPLORER | OFN_PATHMUSTEXIST | OFN_OVERWRITEPROMPT | OFN_HIDEREADONLY | OFN_NOCHANGEDIR;
+    if GetSaveFileNameW(&mut ofn) != 0 {
+        Some(pathbuf_from_wide(&file_buf))
+    } else {
+        None
+    }
+}
+
+/// Retitle the window `Scriptorium — <name>[*]` (name = file base name or `Untitled`, `*` iff
+/// dirty), but only when the string actually changed — so it rides the paint path for free (§6).
+unsafe fn update_title(state: &mut WindowState, hwnd: HWND) {
+    let dirty = if state.app.is_dirty() { "*" } else { "" };
+    let next = format!("Scriptorium \u{2014} {}{}", state.app.document_name(), dirty);
+    if next != state.title {
+        let wide_title = wide(&next);
+        SetWindowTextW(hwnd, wide_title.as_ptr());
+        state.title = next;
+    }
+}
+
 // --- scroll-math oracles (SCRIPTORIUM-NATIVE-LAYOUT.md §7) --------------------
 // Pure arithmetic — no DWrite or window needed — so the clamp invariants and the
 // scroll-follows-caret contract (minimal, edge-pinning, idempotent) are pinned deterministically.
@@ -1261,6 +1474,7 @@ mod smoke_tests {
                 last_mouse_y: 0,
                 drag_mode: DragMode::Char,
                 sel_origin: (0, 0),
+                title: String::new(),
             });
             let state_ptr = Box::into_raw(state);
 
@@ -1399,6 +1613,54 @@ mod smoke_tests {
             let st = &*(GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut WindowState);
             assert_eq!(st.app.text.len(), 2, "expected two typed units");
             assert_eq!(st.app.selection(), (0, 2), "whole document should be selected");
+
+            // File I/O (SCRIPTORIUM-NATIVE-IO.md §9): drive the dialog-free cores + the byte
+            // round-trip through the live window. The modal GetOpen/SaveFileNameW can't run
+            // unattended (they'd block the test), so we exercise `load_from`/`save_to` directly —
+            // the dialogs themselves are compiled + ABI-asserted and left to the author's manual
+            // pass. Runs LAST (it replaces the document) and ends CLEAN so the DestroyWindow below
+            // — which bypasses WM_CLOSE, so no discard prompt — tears down without a modal.
+            {
+                let dir = std::env::temp_dir();
+                let src = dir.join("scriptorium_smoke_in.txt");
+                let dst = dir.join("scriptorium_smoke_out.txt");
+                // A CRLF, UTF-8-with-BOM file carrying CJK + an emoji (a surrogate pair) — the
+                // interesting encoding/newline corners in one round-trip.
+                let body: Vec<u16> = "first line\nsecond \u{6587}\u{5B57} line\n\u{1F600}".encode_utf16().collect();
+                let original = crate::codec::encode(&body, crate::codec::Encoding::Utf8Bom, crate::codec::Newline::Crlf);
+                std::fs::write(&src, &original).expect("write smoke input");
+
+                let cs = &mut *(GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut WindowState);
+                load_from(cs, &src).expect("load_from reads + decodes the file");
+                assert!(!cs.app.is_dirty(), "a freshly loaded file is clean");
+                assert_eq!(cs.app.document_name(), "scriptorium_smoke_in.txt");
+                assert_eq!(
+                    String::from_utf16(&cs.app.text).unwrap(),
+                    "first line\nsecond \u{6587}\u{5B57} line\n\u{1F600}",
+                    "the CRLF file decoded to the LF-internal buffer"
+                );
+                // The title (name + no dirty marker) updates on the next paint.
+                InvalidateRect(hwnd, null(), 0);
+                SendMessageW(hwnd, WM_PAINT, 0, 0);
+
+                // Edit → dirty; save to a new path → the bytes must reproduce the file's own
+                // encoding + newline faithfully (preserve-on-save, §3), not the LF buffer form.
+                // The caret homed to offset 0 on load, so the typed '!' lands at the FRONT.
+                SendMessageW(hwnd, WM_CHAR, '!' as usize, 0);
+                let cs = &mut *(GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut WindowState);
+                assert!(cs.app.is_dirty(), "typing dirties the loaded document");
+                save_to(cs, &dst).expect("save_to writes the file");
+                assert!(!cs.app.is_dirty(), "a successful save marks the document clean");
+
+                let mut expect_body = vec!['!' as u16];
+                expect_body.extend_from_slice(&body);
+                let expected = crate::codec::encode(&expect_body, crate::codec::Encoding::Utf8Bom, crate::codec::Newline::Crlf);
+                let round = std::fs::read(&dst).expect("read the saved file back");
+                assert_eq!(round, expected, "save re-encodes in the file's own encoding + newline");
+
+                let _ = std::fs::remove_file(&src);
+                let _ = std::fs::remove_file(&dst);
+            }
 
             // Tear down — WM_DESTROY + WM_NCDESTROY run synchronously and drop the box.
             assert!(DestroyWindow(hwnd) != 0, "DestroyWindow failed");

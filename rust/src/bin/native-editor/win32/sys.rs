@@ -47,6 +47,7 @@ pub const GWLP_USERDATA: i32 = -21;
 
 pub const WM_CREATE: u32 = 0x0001;
 pub const WM_DESTROY: u32 = 0x0002;
+pub const WM_CLOSE: u32 = 0x0010;
 pub const WM_SIZE: u32 = 0x0005;
 pub const WM_PAINT: u32 = 0x000F;
 pub const WM_KEYDOWN: u32 = 0x0100;
@@ -132,8 +133,29 @@ pub const VK_DOWN: u32 = 0x28;
 pub const VK_DELETE: u32 = 0x2E;
 pub const VK_A: u32 = 0x41;
 pub const VK_C: u32 = 0x43;
+pub const VK_N: u32 = 0x4E;
+pub const VK_O: u32 = 0x4F;
+pub const VK_S: u32 = 0x53;
 pub const VK_V: u32 = 0x56;
 pub const VK_X: u32 = 0x58;
+
+// File I/O (SCRIPTORIUM-NATIVE-IO.md §7). MessageBoxW drives the discard-unsaved-changes prompt
+// (a three-way Yes/No/Cancel) and the read/write error boxes; the ID* are its return values. The
+// OFN_* flags configure the comdlg32 Open/Save dialogs.
+pub const MB_OK: u32 = 0x0000_0000;
+pub const MB_YESNOCANCEL: u32 = 0x0000_0003;
+pub const MB_ICONERROR: u32 = 0x0000_0010;
+pub const MB_ICONWARNING: u32 = 0x0000_0030;
+pub const IDOK: i32 = 1;
+pub const IDCANCEL: i32 = 2;
+pub const IDYES: i32 = 6;
+pub const IDNO: i32 = 7;
+pub const OFN_HIDEREADONLY: u32 = 0x0000_0004;
+pub const OFN_NOCHANGEDIR: u32 = 0x0000_0008;
+pub const OFN_PATHMUSTEXIST: u32 = 0x0000_0800;
+pub const OFN_FILEMUSTEXIST: u32 = 0x0000_1000;
+pub const OFN_OVERWRITEPROMPT: u32 = 0x0000_0002;
+pub const OFN_EXPLORER: u32 = 0x0008_0000;
 
 pub const SWP_NOZORDER: u32 = 0x0004;
 pub const SWP_NOACTIVATE: u32 = 0x0010;
@@ -237,6 +259,39 @@ pub struct COMPOSITIONFORM {
     pub dwStyle: u32,
     pub ptCurrentPos: POINT,
     pub rcArea: RECT,
+}
+
+/// The comdlg32 Open/Save common-dialog parameter block (`GetOpenFileNameW`/`GetSaveFileNameW`,
+/// SCRIPTORIUM-NATIVE-IO.md §7). x64 layout is the correctness risk (the `WORD` pair at 100/102
+/// then 4 bytes of padding before `lpstrDefExt` @104), so `size_of` (152) + key offsets are
+/// ABI-asserted below alongside the COM vtables. We set `lStructSize`, `hwndOwner`, `lpstrFilter`,
+/// `lpstrFile` (a caller-owned buffer, filled with the chosen path on return), `nMaxFile`,
+/// `lpstrTitle`, `lpstrDefExt`, and `Flags`; the rest stay zeroed.
+#[repr(C)]
+pub struct OPENFILENAMEW {
+    pub lStructSize: u32,
+    pub hwndOwner: HWND,
+    pub hInstance: HINSTANCE,
+    pub lpstrFilter: *const u16,
+    pub lpstrCustomFilter: *mut u16,
+    pub nMaxCustFilter: u32,
+    pub nFilterIndex: u32,
+    pub lpstrFile: *mut u16,
+    pub nMaxFile: u32,
+    pub lpstrFileTitle: *mut u16,
+    pub nMaxFileTitle: u32,
+    pub lpstrInitialDir: *const u16,
+    pub lpstrTitle: *const u16,
+    pub Flags: u32,
+    pub nFileOffset: u16,
+    pub nFileExtension: u16,
+    pub lpstrDefExt: *const u16,
+    pub lCustData: LPARAM,
+    pub lpfnHook: *mut c_void,
+    pub lpTemplateName: *const u16,
+    pub pvReserved: *mut c_void,
+    pub dwReserved: u32,
+    pub FlagsEx: u32,
 }
 
 #[repr(C)]
@@ -740,6 +795,11 @@ extern "system" {
     pub fn PostMessageW(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> BOOL;
     pub fn DestroyWindow(hwnd: HWND) -> BOOL;
     pub fn GetKeyState(vk: i32) -> i16;
+    // File I/O UI (SCRIPTORIUM-NATIVE-IO.md §5/§7): MessageBoxW is the discard-changes prompt and
+    // the read/write error boxes; SetWindowTextW retitles the window with the document name + a
+    // dirty marker.
+    pub fn MessageBoxW(hwnd: HWND, text: *const u16, caption: *const u16, u_type: u32) -> i32;
+    pub fn SetWindowTextW(hwnd: HWND, text: *const u16) -> BOOL;
     // Mouse capture + click-count inputs: a drag tracks past the window edge via SetCapture;
     // GetMessageTime + GetDoubleClickTime + GetSystemMetrics classify single/double/triple.
     pub fn SetCapture(hwnd: HWND) -> HWND;
@@ -765,6 +825,16 @@ extern "system" {
     pub fn GlobalLock(mem: HGLOBAL) -> *mut c_void;
     pub fn GlobalUnlock(mem: HGLOBAL) -> BOOL;
     pub fn GlobalSize(mem: HGLOBAL) -> usize;
+}
+
+#[cfg(windows)]
+#[link(name = "comdlg32")]
+extern "system" {
+    // The Open/Save common dialogs (SCRIPTORIUM-NATIVE-IO.md §7). Each takes a caller-filled
+    // OPENFILENAMEW; returns nonzero and writes the chosen path into `lpstrFile` on OK, zero on
+    // Cancel (or error — CommDlgExtendedError, which we treat as "no file picked").
+    pub fn GetOpenFileNameW(ofn: *mut OPENFILENAMEW) -> BOOL;
+    pub fn GetSaveFileNameW(ofn: *mut OPENFILENAMEW) -> BOOL;
 }
 
 #[cfg(windows)]
@@ -855,5 +925,11 @@ mod layout_tests {
         assert_eq!(size_of::<SCROLLINFO>(), 28);
         // DWORD(4) + POINT(8) + RECT(16), no padding — passed by pointer to ImmSetCompositionWindow.
         assert_eq!(size_of::<COMPOSITIONFORM>(), 28);
+        // OPENFILENAMEW (comdlg32): the x64 risk is the WORD pair (nFileOffset/nFileExtension at
+        // 100/102) then 4 bytes of padding before the next pointer (lpstrDefExt @104). Pin Flags,
+        // lpstrDefExt, and the total size — a miscount would hand comdlg32 a malformed block.
+        assert_eq!(offset_of!(OPENFILENAMEW, Flags), 96);
+        assert_eq!(offset_of!(OPENFILENAMEW, lpstrDefExt), 104);
+        assert_eq!(size_of::<OPENFILENAMEW>(), 152);
     }
 }
