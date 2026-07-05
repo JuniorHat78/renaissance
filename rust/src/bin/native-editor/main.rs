@@ -21,6 +21,7 @@
 mod buffer;
 mod codec;
 mod grapheme;
+mod heights;
 mod parse;
 
 #[cfg(windows)]
