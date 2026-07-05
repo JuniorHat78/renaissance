@@ -14,11 +14,13 @@
 
 #![cfg_attr(not(windows), allow(unused))]
 
-// Platform-independent: the rope buffer + its cross-platform fuzz oracle, and the
-// grapheme/word boundary logic + its oracle, compile and run everywhere (no Win32/DWrite),
-// so they are NOT gated to Windows.
+// Platform-independent: the rope buffer + its cross-platform fuzz oracle, the grapheme/word
+// boundary logic + its oracle, and the off-thread parse service (N4; its OS wakeup is injected
+// by `win32`, so the mailbox/coalescing/service logic itself is platform-free) all compile and
+// run everywhere (no Win32/DWrite), so they are NOT gated to Windows.
 mod buffer;
 mod grapheme;
+mod parse;
 
 #[cfg(windows)]
 mod app;

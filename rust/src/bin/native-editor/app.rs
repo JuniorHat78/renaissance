@@ -11,15 +11,7 @@
 
 use crate::buffer::{Snapshot, TextBuffer};
 use crate::grapheme;
-use scriptorium_parser::parse_document;
-use std::time::Instant;
-
-/// AST-derived signal shown in the status line — proof the parse loop is closed.
-pub struct ParseSignal {
-    pub blocks: usize,
-    pub words: usize,
-    pub parse_micros: u128,
-}
+use crate::parse::ParseSignal;
 
 /// A provisional IME composition (SCRIPTORIUM-NATIVE-IME.md §2): the in-progress string the
 /// user is composing through an Input Method Editor. It is shown inline by the renderer,
@@ -72,11 +64,19 @@ pub struct App {
     redo: Vec<Checkpoint>,
     /// Which kind of edit the current undo group is, if a run is open (for grouping).
     group: Option<EditKind>,
+    /// The last parse result folded in (`apply_parse`) — the AST stats shown in the status line.
+    /// It reflects `signal_gen`, which lags `content_gen` by the ~1ms a parse is in flight (the
+    /// async contract, N4): the status line shows the previous parse until the worker's catches up.
     signal: ParseSignal,
-    /// Monotonic content generation, bumped on every edit (`refresh`). The renderer keys
-    /// its cached `IDWriteTextLayout` on this so it rebuilds only when the text actually
-    /// changed (N3 layout cache), and N4 will use it to discard a stale off-thread parse.
+    /// Monotonic content generation, bumped on every edit (`refresh`). The renderer keys its cached
+    /// `IDWriteTextLayout` on this so it rebuilds only when the text actually changed (N3 layout
+    /// cache); N4 submits it with each snapshot so a stale off-thread parse can be discarded.
     content_gen: u64,
+    /// The generation the current `signal` reflects. `apply_parse` folds a worker result in only
+    /// when its generation is newer than this (the monotonic staleness gate,
+    /// SCRIPTORIUM-NATIVE-CONCURRENCY.md §5), so an out-of-order or late parse can never regress
+    /// the displayed stats. `content_gen - signal_gen` is how many edits the parse is behind.
+    signal_gen: u64,
     /// The provisional IME composition, if a session is active (SCRIPTORIUM-NATIVE-IME.md §2).
     /// `Some` only between `WM_IME_STARTCOMPOSITION` and its end; the rope stays untouched
     /// while it lives. The renderer reads it to splice the inline preview.
@@ -95,6 +95,7 @@ impl App {
             group: None,
             signal: ParseSignal { blocks: 0, words: 0, parse_micros: 0 },
             content_gen: 0,
+            signal_gen: 0,
             comp: None,
         };
         app.refresh();
@@ -365,22 +366,38 @@ impl App {
         }
     }
 
-    /// Re-materialize `text` from the rope and re-drive the parse. Clamps caret + anchor,
-    /// and bumps the content generation so the renderer's layout cache invalidates.
+    /// Re-materialize `text` from the rope, clamp caret + anchor, and bump the content generation
+    /// so the renderer's layout cache invalidates. This is the fast, synchronous, UI-thread half of
+    /// an edit; the **parse no longer runs here** (N4) — `win32` submits `snapshot()` to the
+    /// off-thread worker and folds the result back via `apply_parse`. The previous `signal` stays
+    /// in place until then (the status line lags one parse behind — the async contract).
     fn refresh(&mut self) {
         self.text = self.buffer.to_units();
         self.content_gen = self.content_gen.wrapping_add(1);
         let len = self.text.len();
         self.caret = self.caret.min(len);
         self.anchor = self.anchor.min(len);
-        let start = Instant::now();
-        let doc = parse_document(&self.text);
-        let parse_micros = start.elapsed().as_micros();
-        self.signal = ParseSignal {
-            blocks: doc.stats_blocks,
-            words: doc.stats_words,
-            parse_micros,
-        };
+    }
+
+    /// An O(1), immutable view of the buffer at this generation, to hand the off-thread parser
+    /// (N4). Structural sharing keeps it valid and cheap; the worker reads it without ever touching
+    /// `App` (SCRIPTORIUM-NATIVE-CONCURRENCY.md §2).
+    pub fn snapshot(&self) -> Snapshot {
+        self.buffer.snapshot()
+    }
+
+    /// Fold an off-thread parse result into the status signal — but only if it is **newer** than
+    /// what's displayed (`gen > signal_gen`). The monotonic gate (SCRIPTORIUM-NATIVE-CONCURRENCY.md
+    /// §5) means an out-of-order or late parse is dropped rather than regressing the stats. Returns
+    /// whether it was applied (so the caller knows if a repaint is warranted).
+    pub fn apply_parse(&mut self, gen: u64, signal: ParseSignal) -> bool {
+        if gen > self.signal_gen {
+            self.signal = signal;
+            self.signal_gen = gen;
+            true
+        } else {
+            false
+        }
     }
 
     /// The status line: caret Ln/Col (from the rope's line summary) + selection size when
@@ -394,15 +411,21 @@ impl App {
         } else {
             String::new()
         };
+        // The parse runs off-thread (N4), so the AST signal can lag the live text by the edits
+        // whose parse hasn't landed yet. Surface that honestly: at rest the signal is caught up and
+        // nothing shows; mid-flight a "· parsing…" marker makes the async visible (and is how you
+        // watch N4 working). `content_gen - signal_gen` is the number of edits still in flight.
+        let lag = if self.signal_gen < self.content_gen { " \u{00B7} parsing\u{2026}" } else { "" };
         format!(
-            "Ln {}, Col {}{}  \u{00B7}  {} blocks \u{00B7} {} words \u{00B7} parsed in {} \u{00B5}s \u{00B7} {} units",
+            "Ln {}, Col {}{}  \u{00B7}  {} blocks \u{00B7} {} words \u{00B7} parsed in {} \u{00B5}s \u{00B7} {} units{}",
             line + 1,
             col + 1,
             sel,
             self.signal.blocks,
             self.signal.words,
             self.signal.parse_micros,
-            self.text.len()
+            self.text.len(),
+            lag,
         )
     }
 }
@@ -482,5 +505,35 @@ mod ime_tests {
         let c = app.composition().unwrap();
         assert_eq!(c.caret_units, 2, "caret clamps to the composition length");
         assert!(c.target_start <= c.target_end && c.target_end <= c.text.len(), "target stays in range");
+    }
+}
+
+// --- the monotonic parse-apply gate (SCRIPTORIUM-NATIVE-CONCURRENCY.md §5) -----
+// The UI-side half of the generation gate: a worker result folds in only when it is newer than
+// what's displayed, so a late/out-of-order parse can never regress the shown stats. Pure — no
+// thread, no Win32 (the worker + coalescing are oracle'd in `parse`).
+#[cfg(test)]
+mod parse_apply_tests {
+    use super::*;
+
+    #[test]
+    fn apply_parse_folds_in_a_newer_result() {
+        let mut app = App::new();
+        assert!(app.apply_parse(3, ParseSignal { blocks: 1, words: 5, parse_micros: 10 }));
+        assert_eq!(app.signal.words, 5, "a newer generation updates the signal");
+        assert_eq!(app.signal_gen, 3);
+    }
+
+    #[test]
+    fn apply_parse_refuses_to_regress_on_a_stale_result() {
+        let mut app = App::new();
+        assert!(app.apply_parse(5, ParseSignal { blocks: 2, words: 9, parse_micros: 20 }));
+        // A later-arriving OLDER parse (gen 4 < 5) must be dropped, not overwrite the newer stats.
+        assert!(!app.apply_parse(4, ParseSignal { blocks: 0, words: 0, parse_micros: 1 }));
+        assert_eq!(app.signal.words, 9, "the stale result did not regress the display");
+        assert_eq!(app.signal_gen, 5, "signal_gen never moves backwards");
+        // The same generation is also a no-op (idempotent — no duplicate apply).
+        assert!(!app.apply_parse(5, ParseSignal { blocks: 0, words: 0, parse_micros: 1 }));
+        assert_eq!(app.signal.words, 9);
     }
 }

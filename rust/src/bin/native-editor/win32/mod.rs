@@ -11,17 +11,26 @@ pub mod sys;
 use core::ffi::c_void;
 use core::mem::{size_of, zeroed};
 use core::ptr::{null, null_mut};
+use std::sync::Arc;
 
 use sys::*;
 
 use crate::app::{App, Motion};
 use crate::grapheme;
+use crate::parse::ParseService;
 use crate::render::Renderer;
 
 /// Per-window state, owned by the window via GWLP_USERDATA.
 struct WindowState {
     app: App,
     renderer: Option<Renderer>,
+    /// The off-thread parser (N4; SCRIPTORIUM-NATIVE-CONCURRENCY.md). `Option` because it is
+    /// spawned in `WM_CREATE` — the wake closure needs the `HWND`, which doesn't exist until then.
+    /// Dropping it (on `WM_NCDESTROY`) stops and joins the worker (leak-free teardown, §6).
+    parse: Option<ParseService>,
+    /// The last generation handed to the parser, so `reparse_if_dirty` submits at most once per
+    /// edit and a no-op key never resubmits (the coalescing is on the worker; this is the guard).
+    last_submitted_gen: u64,
     caret_visible: bool,
     dpi: u32,
     /// View-space scroll offset (content-space DIPs of the viewport top). Wheel + scrollbar
@@ -122,6 +131,8 @@ pub fn run() {
         let state = Box::new(WindowState {
             app: App::new(),
             renderer: None,
+            parse: None,
+            last_submitted_gen: 0,
             caret_visible: true,
             dpi: 96,
             scroll_y: 0.0,
@@ -220,6 +231,15 @@ unsafe fn wndproc_impl(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> 
                 Err(hr) => eprintln!("Renderer init failed: 0x{hr:08x}"),
             }
             SetTimer(hwnd, CARET_TIMER_ID, CARET_BLINK_MS, null_mut());
+            // Spawn the off-thread parser now that we have an HWND to post the wake to (N4). The
+            // wake captures the HWND as a `usize` (a raw HWND isn't `Send`) and posts a contentless
+            // WM_APP_PARSE_DONE from the worker thread to nudge this pump. Then seed the first parse.
+            let hwnd_usize = hwnd as usize;
+            let wake: Arc<dyn Fn() + Send + Sync> = Arc::new(move || unsafe {
+                PostMessageW(hwnd_usize as HWND, WM_APP_PARSE_DONE, 0, 0);
+            });
+            state.parse = Some(ParseService::new(wake));
+            reparse_if_dirty(state);
             0
         }
         WM_CHAR => {
@@ -227,11 +247,24 @@ unsafe fn wndproc_impl(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> 
             // An edit is a horizontal move: it ends any vertical run, so the next Up/Down
             // re-seeds the goal column from the caret's new x (§5).
             state.goal_x = None;
+            // Hand the new content to the off-thread parser (N4). No-op if nothing changed.
+            reparse_if_dirty(state);
             // Typing at the bottom must keep the caret on screen (scroll-follows-caret, §6).
             ensure_caret_visible(state);
             // An edit makes the caret solid again so it's visible right after typing.
             state.caret_visible = true;
             InvalidateRect(hwnd, null(), 0);
+            0
+        }
+        WM_APP_PARSE_DONE => {
+            // The off-thread worker finished a parse and nudged us (N4). Drain to the newest result
+            // and fold it in under the monotonic gate; repaint the status line only if it applied.
+            let res = state.parse.as_ref().and_then(|p| p.drain_latest());
+            if let Some(r) = res {
+                if state.app.apply_parse(r.gen, r.signal) {
+                    InvalidateRect(hwnd, null(), 0);
+                }
+            }
             0
         }
         WM_KEYDOWN => {
@@ -299,6 +332,9 @@ unsafe fn wndproc_impl(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> 
                 if !is_vertical {
                     state.goal_x = None;
                 }
+                // Editing keys (Delete/Cut/Paste) changed content — submit a reparse (N4). A
+                // pure motion leaves content_gen untouched, so this no-ops for those.
+                reparse_if_dirty(state);
                 // Scroll-follows-caret: keep the caret on screen after it moves (§6).
                 if moves_caret {
                     ensure_caret_visible(state);
@@ -465,6 +501,20 @@ unsafe fn wndproc_impl(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> 
             0
         }
         _ => DefWindowProcW(hwnd, msg, wparam, lparam),
+    }
+}
+
+/// Submit a fresh parse to the off-thread worker iff the content changed since the last submit
+/// (N4; SCRIPTORIUM-NATIVE-CONCURRENCY.md §6). Hands the worker an O(1) immutable `snapshot()` —
+/// the UI thread never blocks, and the worker never touches `App`. Called from every content-
+/// mutating handler; the `content_gen` guard makes calling it from a no-op key harmless.
+fn reparse_if_dirty(state: &mut WindowState) {
+    let gen = state.app.content_gen();
+    if gen != state.last_submitted_gen {
+        if let Some(p) = state.parse.as_ref() {
+            p.submit(gen, state.app.snapshot());
+            state.last_submitted_gen = gen;
+        }
     }
 }
 
@@ -909,6 +959,9 @@ unsafe fn ime_composition(state: &mut WindowState, hwnd: HWND, gcs: u32) {
         set_ime_candidate_pos(state, hwnd, himc);
     }
     ImmReleaseContext(hwnd, himc);
+    // A GCS_RESULTSTR commit folded provisional text into the rope — submit a reparse (N4).
+    // Provisional-only composition updates don't touch the rope, so this no-ops for those.
+    reparse_if_dirty(state);
     state.caret_visible = true;
     ensure_caret_visible(state);
     InvalidateRect(hwnd, null(), 0);
@@ -1173,6 +1226,8 @@ mod smoke_tests {
             let state = Box::new(WindowState {
                 app: App::new(),
                 renderer: None,
+                parse: None,
+                last_submitted_gen: 0,
                 caret_visible: true,
                 dpi: 96,
                 scroll_y: 0.0,
@@ -1261,6 +1316,27 @@ mod smoke_tests {
             {
                 let cs = &mut *(GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut WindowState);
                 cs.app.clear_composition();
+            }
+
+            // N4: the off-thread parser was spawned in WM_CREATE and every WM_CHAR above submitted
+            // a reparse. Give the real worker a bounded moment, then drive the WM_APP_PARSE_DONE
+            // drain path through the WndProc (the worker's own PostMessage nudges sit in the queue,
+            // which SendMessage bypasses — so we call the handler directly). Assert the async loop
+            // actually closed: a result folded in under the monotonic gate (signal_gen advanced).
+            {
+                let mut caught_up = false;
+                for _ in 0..500 {
+                    SendMessageW(hwnd, WM_APP_PARSE_DONE, 0, 0);
+                    let cs = &*(GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut WindowState);
+                    // Once the worker's result is folded in, the signal catches up to the content
+                    // and the "parsing…" lag marker clears — proof the async loop closed end-to-end.
+                    if !cs.app.status_text().contains("parsing") {
+                        caught_up = true;
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(1));
+                }
+                assert!(caught_up, "off-thread parse should fold a result in via WM_APP_PARSE_DONE");
             }
 
             // Exercise resize (incl. the 0x0 minimize guard) and a caret-blink tick.

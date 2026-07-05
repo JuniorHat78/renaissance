@@ -66,6 +66,10 @@ pub const WM_IME_CHAR: u32 = 0x0286;
 pub const WM_NCCREATE: u32 = 0x0081;
 pub const WM_NCDESTROY: u32 = 0x0082;
 pub const WM_DPICHANGED: u32 = 0x02E0;
+/// App-private message: the off-thread parse worker posts this (contentless) to nudge the UI
+/// thread to drain a finished parse (N4). `WM_APP` (0x8000) is the base of the application-private
+/// range, so it can never collide with a system message.
+pub const WM_APP_PARSE_DONE: u32 = 0x8000; // WM_APP + 0
 
 // IME composition (imm32). GCS_* select which slice of the composition ImmGetCompositionStringW
 // returns; CFS_* style the candidate window placement; ATTR_TARGET_* mark the converting clause;
@@ -730,6 +734,10 @@ extern "system" {
         flags: u32,
     ) -> BOOL;
     pub fn SendMessageW(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT;
+    // The off-thread parse worker posts a contentless WM_APP_PARSE_DONE from its own thread to
+    // wake the UI pump (N4). PostMessageW is the documented thread-safe cross-thread call; posting
+    // to an already-destroyed window fails harmlessly (§6). Async — returns before it's handled.
+    pub fn PostMessageW(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> BOOL;
     pub fn DestroyWindow(hwnd: HWND) -> BOOL;
     pub fn GetKeyState(vk: i32) -> i16;
     // Mouse capture + click-count inputs: a drag tracks past the window edge via SetCapture;
