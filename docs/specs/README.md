@@ -71,6 +71,17 @@ roadmap, but they are not the roadmap itself. For overall orientation read
   heights) with scroll-anchoring, all **behind the unchanged N3 geometry-service seam**. Edit cost drops
   from O(document) to O(viewport + log n). Equivalence oracle (virtualized ≡ whole-doc for small docs) +
   height-index/locality/anchor oracles + a large-doc flat-per-edit-time guard. Checkpoints N5a→N5b→N5c.
+- `SCRIPTORIUM-NATIVE-IO.md`: **file I/O (spec — build queued)** — the first node outside the named
+  N-roadmap and the enabler for the author's feel-loop (you can't judge feel on a real manuscript
+  until you can load one, so it lands **before N5**). Open / Save / Save As / New with a real
+  dirty-state machine (`content_gen != saved_gen`) and a three-way **discard-unsaved-changes guard**
+  (Yes/No/Cancel — a failed or cancelled save never drops the buffer). A platform-free **codec**
+  (`Encoding{Utf8,Utf8Bom,Utf16Le,Utf16Be}` × `Newline{Lf,Crlf,Cr}`, BOM detection, lossy, LF-internal
+  buffer) that **preserves an opened file's encoding + newline byte-faithfully** and **defaults new
+  documents to BOM-less UTF-8 + LF** (coherent with the buffer + markdown pipeline); mixed endings
+  normalize on save. FFI: comdlg32 `GetOpen/SaveFileNameW` (`OPENFILENAMEW` ABI-asserted), `MessageBoxW`,
+  `SetWindowTextW`; bytes via `std::fs`. The codec round-trip is oracled on every platform; the modal
+  dialogs are the author's manual pass. Checkpoints IO-a (codec + document model) → IO-b (win32 wiring).
 
 **Search, recovery, UX:**
 - `ORACLE-SEARCH-SPEC.md`: target AST-native search/index/ranking system for
