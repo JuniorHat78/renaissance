@@ -43,8 +43,12 @@
 > real manuscript is the prerequisite for the author's queued feel verdicts (N2b IME, N3 scroll/caret,
 > N4 latency, N5 scrolling). And **AST-styled rendering Wave 1 is built** (source-highlight: the parser
 > made visible — headings render big+bold, quotes italic, from the in-process AST inside the virtualized
-> layouts; `SCRIPTORIUM-NATIVE-STYLING.md`), with inline styling (Wave 2) + color/indent (Wave-1.5)
-> queued. Last refreshed: 2026-07-06.
+> layouts; `SCRIPTORIUM-NATIVE-STYLING.md`). The **styling node is complete** (Wave 1 + Wave-1.5 color/
+> indent/rules + Wave 2 inline bold/italic/code/link — the shared parser was *taught* to emit inline
+> spans, parity held byte-identical). The frontier is now **Find / Replace** (§7,
+> `SCRIPTORIUM-NATIVE-FIND.md`) — the last table-stakes for real drafting — with an "Editing polish"
+> node queued behind it and the site-authoring through-line deferred as an open fork (§9). Last
+> refreshed: 2026-07-06.
 
 ---
 
@@ -323,9 +327,28 @@ skeleton, not speculation. Each phase below spawns its own JIT component spec.
   `SetFontSize` + `DWRITE_TEXT_RANGE`, ABI-asserted + smoke-exercised). **Wave 2 (inline bold/italic/
   code)** needs inline spans the AST doesn't carry → deferred with the parser-touch-vs-re-tokenize fork;
   **Wave-1.5** = color (`SetDrawingEffect`) + marker dimming + indent/rules/bullets.
-- **N6+ — measure-gated sirens.** Incremental parse, arenas, durability/WAL, search — each only when
-  a number demands it. The `siren` tier stays parked behind measurements; the author's feel-loop
-  (N2b IME, N3 scroll/caret, N4 latency + N5 large-doc scrolling + AST-styling look) is the live thread.
+- **Find / Replace.** `[SPEC → SCRIPTORIUM-NATIVE-FIND.md, building]` The next node — the last
+  table-stakes standing between the editor and *drafting in it for real* (you can't live in a tool
+  that can't search its own document). Chosen by the author over two alternatives (undo-granularity
+  polish, queued as the follow-on "Editing polish" node below; and the site-integration through-line,
+  deferred as an open fork §9). A **reuse node**: it adds *zero* new FFI and one platform-free module
+  (`find.rs`) — the dividend of owning the engine. Literal + whole-word + case-fold match engine
+  (regex sirened behind a provider seam); a **self-drawn find bar** driven by our *own* text engine
+  (a `MiniEdit` — non-negotiable #2 forbids a Win32 `EDIT` child owning input); match highlight via
+  the existing `fill_selection_range` path; active-match reveal via N3/N5; and Replace / Replace-All
+  as clean undo transactions (Replace All = one checkpoint, applied right-to-left so a self-matching
+  superstring can't loop). Match set recomputes on the `content_gen` key, exactly like the layout
+  cache. Off-thread search is sirened behind the recompute seam (measure first). Checkpoints F-a
+  (match engine) → F-b (find-mode + nav + highlight) → F-c (replace).
+- **Editing polish (Lane B).** `[queued — spec just-in-time at build]` The author-chosen follow-on
+  after Find: undo *granularity* (today a continuous typing run is one undo group — `begin_group`
+  only breaks on edit-*kind* change; a word/pause boundary should start a new group so Ctrl+Z reverts
+  a word, not a whole paragraph) + small status-line richness (word/char count). Coupled to the
+  buffer/undo model, so it earns its own short spec when we start it.
+- **N6+ — measure-gated sirens.** Incremental parse, arenas, durability/WAL, sublinear/off-thread
+  search — each only when a number demands it. The `siren` tier stays parked behind measurements; the
+  author's feel-loop (N2b IME, N3 scroll/caret, N4 latency + N5 large-doc scrolling + AST-styling
+  look) is the live thread.
 
 The layout-oracle discipline (§5) is woven in from N0 onward, not a phase.
 
@@ -371,9 +394,19 @@ A monument spec that pretends to know everything up front is lying. These are na
 not forced; each resolves into the ledger (§8) when a reason arrives — usually a
 measurement or a felt problem, not an a-priori argument.
 
+- **The authoring through-line (native editor → published site).** The native editor shares
+  `rust/` with the build, but nothing yet connects *"I drafted a manuscript in the native app"* to
+  *"it's compiled onto the `/renaissance/` site."* The compelling version: draft in the editor →
+  the **same** `rust/` parser → a published manuscript, so the editor is *part of* Renaissance, not
+  a beautiful island beside it. Deferred deliberately (the author: "we'll get around to it") — it is
+  a product-identity call, not a mechanics gap, and it wants a design conversation before a spec. The
+  quarantine (§10) shapes it: the editor stays author tooling; the *output* (compiled content), not
+  the editor, is what reaches readers. Named here so it isn't lost.
 - **Fate of the PWA / `scriptorium/`.** Does the webview editor survive as a second
   target, or degrade to legacy/read-only and eventually die? Maintaining both doubles
   presentation work. Leaning toward native-becomes-the-real-thing — but not yet decided.
+  (Coupled to the through-line fork above: whichever front-end becomes "the real thing" is
+  the one that should feed the site.)
 - **Cross-platform (macOS/Linux) ever?** The seam (§4) leaves the door open; whether
   we walk through it is unanswered. Windows-first regardless.
 - **GPU / Direct2D rendering.** CPU framebuffer to start; escalate only if a frame-time
