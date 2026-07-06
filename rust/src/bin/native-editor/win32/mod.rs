@@ -273,7 +273,7 @@ unsafe fn wndproc_impl(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> 
             let res = state.parse.as_ref().and_then(|p| p.drain_latest());
             if let Some(r) = res {
                 let gen = r.gen;
-                if state.app.apply_parse(gen, r.signal) {
+                if state.app.apply_parse(gen, r.signal, r.styles) {
                     // If this result brought the display level with the live content (no newer edit
                     // is pending), the async round-trip for the settled edit is complete — record
                     // the submit→landed latency (N4b). A newer edit in flight defers the measure.
@@ -1573,6 +1573,24 @@ mod smoke_tests {
                 }
                 assert!(caught_up, "off-thread parse should fold a result in via WM_APP_PARSE_DONE");
             }
+
+            // AST-styled rendering (SCRIPTORIUM-NATIVE-STYLING.md §9): drive the styled draw path on
+            // real DWrite. Fold a Heading style span over the typed text directly (a synthetic parse
+            // result), then paint — `draw` → `lay_out_paragraph` → `apply_paragraph_style` calls the
+            // newly-typed SetFontSize/Weight/Style slots on a live layout inside a real paint (the
+            // integration companion to the bare-layout oracle). Must not panic.
+            {
+                let cs = &mut *(GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut WindowState);
+                let g = cs.app.content_gen() + 1;
+                let span = crate::styles::StyleSpan {
+                    start: 0,
+                    end: cs.app.text.len(),
+                    kind: crate::styles::StyleKind::Heading(1),
+                };
+                cs.app.apply_parse(g, crate::parse::ParseSignal { blocks: 1, words: 1, parse_micros: 0 }, vec![span]);
+            }
+            InvalidateRect(hwnd, null(), 0);
+            SendMessageW(hwnd, WM_PAINT, 0, 0);
 
             // Exercise resize (incl. the 0x0 minimize guard) and a caret-blink tick.
             SendMessageW(hwnd, WM_SIZE, 0, (600isize << 16) | 800);

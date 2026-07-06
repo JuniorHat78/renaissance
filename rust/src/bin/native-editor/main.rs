@@ -23,6 +23,7 @@ mod codec;
 mod grapheme;
 mod heights;
 mod parse;
+mod styles;
 
 #[cfg(windows)]
 mod app;

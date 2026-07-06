@@ -11,6 +11,7 @@
 //! names the other's world (the worker only ever reads an immutable `Snapshot`).
 
 use crate::buffer::Snapshot;
+use crate::styles::{styles_of, StyleSpan};
 use scriptorium_parser::parse_document;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Condvar, Mutex};
@@ -26,11 +27,14 @@ pub struct ParseSignal {
     pub parse_micros: u128,
 }
 
-/// A finished parse headed back to the UI thread: the generation it reflects + the AST stats.
-/// The `gen` is the staleness token the UI side gates on (`apply_parse`, monotonic — §5).
+/// A finished parse headed back to the UI thread: the generation it reflects, the AST stats, and the
+/// block-level **style spans** the renderer source-highlights with (SCRIPTORIUM-NATIVE-STYLING.md). The
+/// compact `Vec<StyleSpan>` crosses the thread boundary — never the `Document`. The `gen` is the
+/// staleness token the UI side gates on (`apply_parse`, monotonic — §5).
 pub struct ParseResult {
     pub gen: u64,
     pub signal: ParseSignal,
+    pub styles: Vec<StyleSpan>,
 }
 
 /// A pending job: the generation and the immutable snapshot to parse.
@@ -152,9 +156,10 @@ fn worker_loop(mailbox: Arc<Mailbox>, tx: Sender<ParseResult>, wake: Arc<dyn Fn(
         let units = snap.to_units();
         let start = Instant::now();
         let doc = parse_document(&units);
+        let styles = styles_of(&doc);
         let parse_micros = start.elapsed().as_micros();
         let signal = ParseSignal { blocks: doc.stats_blocks, words: doc.stats_words, parse_micros };
-        if tx.send(ParseResult { gen, signal }).is_err() {
+        if tx.send(ParseResult { gen, signal, styles }).is_err() {
             return; // the UI side hung up (service dropped) — nothing to report to.
         }
         (wake)();

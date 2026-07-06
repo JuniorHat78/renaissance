@@ -16,6 +16,7 @@ use core::ptr::{null, null_mut};
 
 use crate::app::App;
 use crate::heights::HeightIndex;
+use crate::styles::{StyleKind, StyleSpan};
 use crate::win32::sys::*;
 
 /// RAII wrapper: owns one ref on a COM interface pointer; releases on drop.
@@ -87,6 +88,13 @@ pub struct Renderer {
     // per-edit).
     avg_char_width: f32,
     line_height_dip: f32,
+    // The block-level style spans to source-highlight with (SCRIPTORIUM-NATIVE-STYLING.md), refreshed
+    // from `App` at the start of each paint. Applied per paragraph inside `lay_out_paragraph`, so paint
+    // AND the point-queries AND the height index all see the styled layout (the one-authority rule).
+    // They lag the live text (they reflect the last-landed parse); offsets are used only to pick a
+    // paragraph's kind, and the applied range is always the whole current paragraph, so a stale offset
+    // never reads out of range (§4).
+    styles: Vec<StyleSpan>,
     // Held only to keep our factory ref alive for the Renderer's lifetime (RAII); the
     // render target keeps its own ref, so we never read this after construction.
     // Kept alive for the Renderer's lifetime AND read on device-loss recovery: the
@@ -161,6 +169,7 @@ impl Renderer {
                 heights_width: -1.0,
                 avg_char_width,
                 line_height_dip,
+                styles: Vec::new(),
                 d2d_factory,
                 dwrite_factory,
                 hwnd,
@@ -233,6 +242,9 @@ impl Renderer {
             // (translated by `−scroll_y`). Paragraph layouts are transient; folding each one's
             // measured height in keeps `para_top` converging so the block is internally exact.
             self.rebuild_heights(&app.text, app.content_gen(), text_w);
+            // Refresh the source-highlight spans from the last-landed parse (N-STYLING); applied per
+            // paragraph in `lay_out_paragraph`, so the geometry path between paints uses these too.
+            self.styles = app.styles().to_vec();
             if !self.para_starts.is_empty() {
                 let n = self.para_starts.len();
                 let margin = self.line_height_dip * 2.0;
@@ -290,6 +302,10 @@ impl Renderer {
                         let raw = self.make_layout(&units, self.text_format.as_raw(), text_w, LAYOUT_MAX_HEIGHT);
                         if raw.is_null() {
                             continue;
+                        }
+                        // A heading (etc.) composed via an IME stays heading-styled (§8.3).
+                        if let Some(kind) = self.style_of_para(i) {
+                            apply_paragraph_style(raw, kind, units.len());
                         }
                         let layout = ComPtr::from_raw(raw);
                         let lptr = layout.as_raw();
@@ -470,8 +486,32 @@ impl Renderer {
             return None;
         }
         let layout = ComPtr::from_raw(raw);
+        // Source-highlight (N-STYLING): apply this paragraph's block style BEFORE measuring, so the
+        // folded height reflects the styled (e.g. taller heading) layout and paint + point-queries
+        // agree. The range is always the whole current paragraph — a stale span offset can only pick
+        // the wrong *kind*, never read out of range (§4).
+        if let Some(kind) = self.style_of_para(i) {
+            apply_paragraph_style(layout.as_raw(), kind, end - start);
+        }
         self.fold_paragraph_height(i, layout.as_raw());
         Some((layout, end - start))
+    }
+
+    /// The block style kind for paragraph `i`, or `None` for the default format. The spans are sorted
+    /// by start + non-overlapping, so this is the last span starting at or before the paragraph's
+    /// start offset, if that offset is still within its range (§7).
+    fn style_of_para(&self, i: usize) -> Option<StyleKind> {
+        let off = *self.para_starts.get(i)?;
+        let idx = self.styles.partition_point(|s| s.start <= off);
+        if idx == 0 {
+            return None;
+        }
+        let s = &self.styles[idx - 1];
+        if off < s.end {
+            Some(s.kind)
+        } else {
+            None
+        }
     }
 
     /// Read a laid-out paragraph's real height (`GetMetrics`) and fold it into the index (measured
@@ -858,6 +898,35 @@ unsafe fn probe_font_metrics(factory: *mut IDWriteFactory, format: *mut IDWriteT
     result
 }
 
+/// Apply a block `StyleKind`'s font attributes to the whole paragraph range `[0, len)` of `layout`
+/// (SCRIPTORIUM-NATIVE-STYLING.md §5). Wave 1 is size/weight/style only (no per-run brush, so no color
+/// yet); `ListItem`/`Divider` carry no visual in Wave 1 (indent/rules are Wave-1.5).
+unsafe fn apply_paragraph_style(layout: *mut IDWriteTextLayout, kind: StyleKind, len: usize) {
+    if len == 0 {
+        return;
+    }
+    let range = DWRITE_TEXT_RANGE { startPosition: 0, length: len as u32 };
+    let lv = &*(*layout).vtbl;
+    let (size_mul, weight, italic) = match kind {
+        StyleKind::Heading(1) => (1.7f32, DWRITE_FONT_WEIGHT_BOLD, false),
+        StyleKind::Heading(2) => (1.45, DWRITE_FONT_WEIGHT_BOLD, false),
+        StyleKind::Heading(3) => (1.25, DWRITE_FONT_WEIGHT_SEMIBOLD, false),
+        StyleKind::Heading(_) => (1.1, DWRITE_FONT_WEIGHT_SEMIBOLD, false),
+        StyleKind::PullQuote => (1.15, DWRITE_FONT_WEIGHT_NORMAL, true),
+        StyleKind::BlockQuote => (1.0, DWRITE_FONT_WEIGHT_NORMAL, true),
+        StyleKind::ListItem | StyleKind::Divider => return, // Wave 1: no visual
+    };
+    if (size_mul - 1.0).abs() > 0.001 {
+        (lv.set_font_size)(layout, FONT_SIZE_DIP * size_mul, range);
+    }
+    if weight != DWRITE_FONT_WEIGHT_NORMAL {
+        (lv.set_font_weight)(layout, weight, range);
+    }
+    if italic {
+        (lv.set_font_style)(layout, DWRITE_FONT_STYLE_ITALIC, range);
+    }
+}
+
 /// Call `f` for each on-screen run rectangle of the text range `[start, start+length)`.
 /// DirectWrite returns one metric per run (a wrapped/bidi range is several boxes); we start
 /// with a stack buffer and grow once if the range spans more runs than it holds. The single
@@ -1150,6 +1219,39 @@ mod tests {
             assert_eq!(tm.line_count, 1, "single line expected");
             assert!(tm.height > 0.0, "content height should be positive");
             com_release(layout as *mut c_void);
+        }
+    }
+
+    /// Exercise the newly-typed range-formatting slots (SetFontSize 35 / SetFontWeight 32 /
+    /// SetFontStyle 33) on real DirectWrite — the phantom-slot guard (a never-*called* slot is an AV
+    /// on first use). A heading-styled paragraph must come out taller (styling reached the glyphs),
+    /// and the caret must stay monotonic on the styled layout (the slots didn't corrupt geometry).
+    #[test]
+    fn styled_range_changes_metrics_and_keeps_caret_monotonic() {
+        unsafe {
+            let (_f, _fmt, plain, text) = build_layout("Heading text goes here", 4000.0);
+            let (_f2, _fmt2, styled, _t2) = build_layout("Heading text goes here", 4000.0);
+            let range = DWRITE_TEXT_RANGE { startPosition: 0, length: text.len() as u32 };
+            let sv = &*(*styled).vtbl;
+            assert!((sv.set_font_size)(styled, FONT_SIZE_DIP * 1.7, range) >= 0, "SetFontSize (slot 35)");
+            assert!((sv.set_font_weight)(styled, DWRITE_FONT_WEIGHT_BOLD, range) >= 0, "SetFontWeight (slot 32)");
+            assert!((sv.set_font_style)(styled, DWRITE_FONT_STYLE_ITALIC, range) >= 0, "SetFontStyle (slot 33)");
+
+            let mut pm: DWRITE_TEXT_METRICS = zeroed();
+            let mut sm: DWRITE_TEXT_METRICS = zeroed();
+            assert!(((*(*plain).vtbl).get_metrics)(plain, &mut pm) >= 0);
+            assert!((sv.get_metrics)(styled, &mut sm) >= 0);
+            assert!(sm.height > pm.height + 0.5, "1.7× paragraph is taller: {} vs {}", sm.height, pm.height);
+
+            let mut last = f32::NEG_INFINITY;
+            for i in 0..=text.len() {
+                let (x, _y, h) = caret_geometry(styled, i, text.len()).expect("styled caret");
+                assert!(x + 0.01 >= last, "caret x regressed on the styled layout at {i}");
+                assert!(h > 0.0, "caret height positive on the styled layout at {i}");
+                last = x;
+            }
+            com_release(plain as *mut c_void);
+            com_release(styled as *mut c_void);
         }
     }
 

@@ -15,6 +15,7 @@ use crate::buffer::{Snapshot, TextBuffer};
 use crate::codec::{encode, Decoded, Encoding, Newline};
 use crate::grapheme;
 use crate::parse::ParseSignal;
+use crate::styles::StyleSpan;
 
 /// A provisional IME composition (SCRIPTORIUM-NATIVE-IME.md §2): the in-progress string the
 /// user is composing through an Input Method Editor. It is shown inline by the renderer,
@@ -80,6 +81,11 @@ pub struct App {
     /// SCRIPTORIUM-NATIVE-CONCURRENCY.md §5), so an out-of-order or late parse can never regress
     /// the displayed stats. `content_gen - signal_gen` is how many edits the parse is behind.
     signal_gen: u64,
+    /// The block-level style spans the renderer source-highlights with (SCRIPTORIUM-NATIVE-STYLING.md).
+    /// Folded in by `apply_parse` under the same monotonic gate as `signal` and reflecting the same
+    /// `signal_gen` — so they lag the live text by the parse-in-flight, and the renderer applies them
+    /// as the last-good styling (clamping offsets to each paragraph) until a fresher parse lands.
+    styles: Vec<StyleSpan>,
     /// The last measured end-to-end async round-trip in microseconds — from an edit's submit to
     /// its parse landing back and settling the display (thread scheduling + parse + post-back).
     /// Measured by `win32` (the timing is a platform concern) and stored here only to show in the
@@ -120,6 +126,7 @@ impl App {
             signal: ParseSignal { blocks: 0, words: 0, parse_micros: 0 },
             content_gen: 0,
             signal_gen: 0,
+            styles: Vec::new(),
             roundtrip_micros: 0,
             comp: None,
             path: None,
@@ -422,14 +429,22 @@ impl App {
     /// what's displayed (`gen > signal_gen`). The monotonic gate (SCRIPTORIUM-NATIVE-CONCURRENCY.md
     /// §5) means an out-of-order or late parse is dropped rather than regressing the stats. Returns
     /// whether it was applied (so the caller knows if a repaint is warranted).
-    pub fn apply_parse(&mut self, gen: u64, signal: ParseSignal) -> bool {
+    pub fn apply_parse(&mut self, gen: u64, signal: ParseSignal, styles: Vec<StyleSpan>) -> bool {
         if gen > self.signal_gen {
             self.signal = signal;
+            self.styles = styles;
             self.signal_gen = gen;
             true
         } else {
             false
         }
+    }
+
+    /// The block-level style spans the renderer source-highlights with (SCRIPTORIUM-NATIVE-STYLING.md).
+    /// These lag `content_gen` by the parse-in-flight (they reflect `signal_gen`); the renderer treats
+    /// them as last-good and clamps their offsets to each paragraph.
+    pub fn styles(&self) -> &[StyleSpan] {
+        &self.styles
     }
 
     /// Record the last measured end-to-end async round-trip (µs), for the status line (N4b). The
@@ -636,24 +651,31 @@ mod ime_tests {
 mod parse_apply_tests {
     use super::*;
 
+    fn heading_span() -> Vec<StyleSpan> {
+        use crate::styles::StyleKind;
+        vec![StyleSpan { start: 0, end: 5, kind: StyleKind::Heading(1) }]
+    }
+
     #[test]
     fn apply_parse_folds_in_a_newer_result() {
         let mut app = App::new();
-        assert!(app.apply_parse(3, ParseSignal { blocks: 1, words: 5, parse_micros: 10 }));
+        assert!(app.apply_parse(3, ParseSignal { blocks: 1, words: 5, parse_micros: 10 }, heading_span()));
         assert_eq!(app.signal.words, 5, "a newer generation updates the signal");
         assert_eq!(app.signal_gen, 3);
+        assert_eq!(app.styles().len(), 1, "the style spans fold in with the signal");
     }
 
     #[test]
     fn apply_parse_refuses_to_regress_on_a_stale_result() {
         let mut app = App::new();
-        assert!(app.apply_parse(5, ParseSignal { blocks: 2, words: 9, parse_micros: 20 }));
-        // A later-arriving OLDER parse (gen 4 < 5) must be dropped, not overwrite the newer stats.
-        assert!(!app.apply_parse(4, ParseSignal { blocks: 0, words: 0, parse_micros: 1 }));
+        assert!(app.apply_parse(5, ParseSignal { blocks: 2, words: 9, parse_micros: 20 }, heading_span()));
+        // A later-arriving OLDER parse (gen 4 < 5) must be dropped, not overwrite the newer stats/styles.
+        assert!(!app.apply_parse(4, ParseSignal { blocks: 0, words: 0, parse_micros: 1 }, Vec::new()));
         assert_eq!(app.signal.words, 9, "the stale result did not regress the display");
         assert_eq!(app.signal_gen, 5, "signal_gen never moves backwards");
+        assert_eq!(app.styles().len(), 1, "the stale result did not clear the newer styles");
         // The same generation is also a no-op (idempotent — no duplicate apply).
-        assert!(!app.apply_parse(5, ParseSignal { blocks: 0, words: 0, parse_micros: 1 }));
+        assert!(!app.apply_parse(5, ParseSignal { blocks: 0, words: 0, parse_micros: 1 }, Vec::new()));
         assert_eq!(app.signal.words, 9);
     }
 
@@ -664,7 +686,7 @@ mod parse_apply_tests {
         assert!(app.status_text().contains("parsing"), "in flight before the first parse lands");
         // The parse for gen 1 lands: caught up, so the "parsing…" marker clears. No round-trip
         // measured yet (that's win32's to record), so no async figure either.
-        app.apply_parse(1, ParseSignal { blocks: 0, words: 0, parse_micros: 5 });
+        app.apply_parse(1, ParseSignal { blocks: 0, words: 0, parse_micros: 5 }, Vec::new());
         assert!(!app.status_text().contains("parsing"), "not in flight once caught up");
         assert!(!app.status_text().contains("async"), "no round-trip shown until one is measured");
         // Once win32 records the settle latency, the status surfaces the felt end-to-end figure.

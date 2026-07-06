@@ -180,6 +180,10 @@ pub const DWRITE_FACTORY_TYPE_SHARED: u32 = 0;
 pub const DWRITE_FONT_WEIGHT_NORMAL: u32 = 400;
 pub const DWRITE_FONT_STYLE_NORMAL: u32 = 0;
 pub const DWRITE_FONT_STRETCH_NORMAL: u32 = 5;
+// Heavier weights + italic for AST-styled rendering (SCRIPTORIUM-NATIVE-STYLING.md §5).
+pub const DWRITE_FONT_WEIGHT_SEMIBOLD: u32 = 600;
+pub const DWRITE_FONT_WEIGHT_BOLD: u32 = 700;
+pub const DWRITE_FONT_STYLE_ITALIC: u32 = 2;
 
 // --- plain structs ----------------------------------------------------------
 
@@ -374,6 +378,16 @@ pub struct DWRITE_HIT_TEST_METRICS {
     pub bidi_level: u32,
     pub is_text: BOOL,
     pub is_trimmed: BOOL,
+}
+
+// A sub-range of a text layout `[startPosition, startPosition+length)`, passed by value to the
+// range-formatting methods (SetFontWeight/Style/Size). Two u32 = 8 bytes. `Copy` so one range can
+// drive several attribute calls.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct DWRITE_TEXT_RANGE {
+    pub startPosition: u32,
+    pub length: u32,
 }
 
 // IDWriteTextLayout::GetMetrics out-param: the whole laid-out text's box. We read
@@ -668,10 +682,13 @@ pub struct IDWriteTextLayoutVtbl {
     pub set_max_height: usize,       // 29
     pub set_font_collection: usize,  // 30
     pub set_font_family_name: usize, // 31
-    pub set_font_weight: usize,      // 32
-    pub set_font_style: usize,       // 33
+    // Range formatting for AST-styled rendering (SCRIPTORIUM-NATIVE-STYLING.md §6): apply a font
+    // attribute to a sub-range of the layout. Each takes the attribute then a by-value
+    // DWRITE_TEXT_RANGE (an 8-byte aggregate, passed in a register on x64).
+    pub set_font_weight: unsafe extern "system" fn(*mut IDWriteTextLayout, u32, DWRITE_TEXT_RANGE) -> HRESULT, // 32
+    pub set_font_style: unsafe extern "system" fn(*mut IDWriteTextLayout, u32, DWRITE_TEXT_RANGE) -> HRESULT, // 33
     pub set_font_stretch: usize,     // 34
-    pub set_font_size: usize,        // 35
+    pub set_font_size: unsafe extern "system" fn(*mut IDWriteTextLayout, f32, DWRITE_TEXT_RANGE) -> HRESULT, // 35
     pub set_underline: usize,        // 36
     pub set_strikethrough: usize,    // 37
     pub set_drawing_effect: usize,   // 38
@@ -903,6 +920,9 @@ mod layout_tests {
         assert_eq!(offset_of!(IDWriteFactoryVtbl, create_text_format), 15 * P);
         assert_eq!(offset_of!(IDWriteFactoryVtbl, create_text_layout), 18 * P);
 
+        assert_eq!(offset_of!(IDWriteTextLayoutVtbl, set_font_weight), 32 * P);
+        assert_eq!(offset_of!(IDWriteTextLayoutVtbl, set_font_style), 33 * P);
+        assert_eq!(offset_of!(IDWriteTextLayoutVtbl, set_font_size), 35 * P);
         assert_eq!(offset_of!(IDWriteTextLayoutVtbl, get_metrics), 60 * P);
         assert_eq!(offset_of!(IDWriteTextLayoutVtbl, hit_test_point), 64 * P);
         assert_eq!(offset_of!(IDWriteTextLayoutVtbl, hit_test_text_position), 65 * P);
@@ -925,6 +945,8 @@ mod layout_tests {
         assert_eq!(size_of::<SCROLLINFO>(), 28);
         // DWORD(4) + POINT(8) + RECT(16), no padding — passed by pointer to ImmSetCompositionWindow.
         assert_eq!(size_of::<COMPOSITIONFORM>(), 28);
+        // Two u32, passed BY VALUE to the range-formatting methods — the 8-byte size is the ABI risk.
+        assert_eq!(size_of::<DWRITE_TEXT_RANGE>(), 8);
         // OPENFILENAMEW (comdlg32): the x64 risk is the WORD pair (nFileOffset/nFileExtension at
         // 100/102) then 4 bytes of padding before the next pointer (lpstrDefExt @104). Pin Flags,
         // lpstrDefExt, and the total size — a miscount would hand comdlg32 a malformed block.
