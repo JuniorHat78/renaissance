@@ -87,8 +87,8 @@ roadmap, but they are not the roadmap itself. For overall orientation read
   `SetWindowTextW`; bytes via `std::fs`. The codec round-trip is oracled on every platform; the modal
   dialogs are the author's manual pass. Checkpoints IO-a (codec + document model) → IO-b (win32 wiring).
 
-- `SCRIPTORIUM-NATIVE-STYLING.md`: **AST-styled rendering (spec — build queued)** — the node that makes
-  the in-process parser *visible*. **Source-highlight** (decided): keep every markdown marker on screen
+- `SCRIPTORIUM-NATIVE-STYLING.md`: **AST-styled rendering (Wave 1 built; inline + color queued)** — the
+  node that makes the in-process parser *visible*. **Source-highlight** (decided): keep every markdown marker on screen
   but style the spans (headings sized+weighted by level, block/pull quotes italic) — a faithful source
   editor (display offsets == buffer offsets, caret walks real characters), sidestepping the hide-markers
   (WYSIWYG) display↔source-mapping landmark. The AST gives **block spans but not inline spans** (inline

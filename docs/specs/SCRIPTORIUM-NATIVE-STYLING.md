@@ -1,10 +1,18 @@
 # Scriptorium Native Editor — AST-styled rendering (source-highlight)
 
-**Status: spec — build queued.** The node that makes the parser *visible*. Every prior node built
-the text engine (rope, input, IME, off-thread parse, virtualized layout, file I/O); the editor
-reuses the `rust/` parser in-process — but renders every character in one flat format. The AST is
-computed and thrown away (only `blocks`/`words` counts reach the UI). This node applies the parsed
-structure as real per-run DirectWrite formatting: headings look like headings.
+**Status: Wave 1 BUILT + locally validated (2026-07-06, commit `cc81115`). Wave 2 (inline) + Wave-1.5
+(color/indent/rules) queued.** The node that makes the parser *visible*. Every prior node built the
+text engine (rope, input, IME, off-thread parse, virtualized layout, file I/O); the editor reused the
+`rust/` parser in-process — but rendered every character in one flat format. This node applies the
+parsed structure as real per-run DirectWrite formatting: **headings now render big + bold, block/pull
+quotes italic**, source-highlighted from the in-process AST inside the virtualized per-paragraph
+layouts. Validated: 66 oracles debug+release, windowed smoke (styled paint), ASan-clean across the new
+range-formatting FFI, warning-free. **Two build notes:** the dialect **clamps heading levels to 3**
+(`parser.rs`), so §5's `Heading(4..=6)` row never occurs (the `Heading(_)` arm handles it defensively);
+and **Style-a + Style-b landed as one commit** — `App.styles` is dead code in a bin crate until the
+renderer reads it (the file-I/O / N5b reality), the platform-free `styles.rs` oracle running regardless.
+The size/weight table (§5) is the author's feel knob. The `rust/` lib re-exports `Block`/`Inline`/
+`Position` (purely additive visibility so the bin can walk a parsed `Document`).
 
 Built against the umbrella (`SCRIPTORIUM-NATIVE-EDITOR.md`): same seam (`app` platform-free, only
 `render`/`win32` touch the OS), same depth discipline (new COM slots typed + ABI-asserted +
@@ -182,21 +190,23 @@ rebuilds paragraph layouts per paint, so re-styling on a fresh AST is free.
 
 We do **not** oracle "does the styling *look* right" — the size/weight table is the author's feel knob.
 
-## 10. Checkpoints
+## 10. Checkpoints — Wave 1 BUILT (landed together, `cc81115`)
 
 - **Style-a — the style model + plumbing (platform-free core + the async carry).** `styles.rs`
-  (`StyleKind`/`StyleSpan`/`styles_of`) + its derivation oracle; the worker builds it and `ParseResult`
-  carries it; `App` folds `styles`/`styles_gen` under the staleness gate + its oracle. Lands green on
-  all three platforms (the derivation is pure). No COM yet.
-- **Style-b — the range-formatting COM + the apply.** Type + ABI-assert `SetFontWeight`/`SetFontStyle`/
-  `SetFontSize` + `DWRITE_TEXT_RANGE`; the `StyleKind`→attributes table; apply in `lay_out_paragraph`
-  (so paint + geometry + heights all see it); the smoke extension (range formatting on real DWrite, the
-  styled-height check), ASan-clean. Validate locally (oracles debug+release, smoke, ASan, clippy,
-  warning-free) before the push. Then the author's feel pass on the size/weight table with a real doc.
+  (`StyleKind`/`StyleSpan`/`styles_of` — a walk over the block tree into a sorted, non-overlapping span
+  list) + its end-to-end derivation oracle over the real parser (every CI platform); the worker builds
+  it and `ParseResult` carries it; `App` folds `styles` under the same monotonic staleness gate as the
+  signal (`apply_parse`) + its oracle. (`lib.rs` re-exports `Block`/`Inline`/`Position`.)
+- **Style-b — the range-formatting COM + the apply.** `SetFontWeight`(32)/`SetFontStyle`(33)/
+  `SetFontSize`(35) + `DWRITE_TEXT_RANGE` (by-value, 8 bytes), ABI-asserted; the `StyleKind`→attributes
+  table; applied in `lay_out_paragraph` so paint + geometry + heights all see it; the bare-layout oracle
+  (all three slots on real DWrite → heading taller, caret still monotonic) + the windowed styled-paint
+  smoke, ASan-clean.
 
-*(Checkpointing note: if `Style-a`'s `App.styles` would be dead code until `Style-b` consumes it — the
-bin-crate reality we hit at file I/O and N5b — the two land as one warning-free commit, ledgered. The
-platform-free `styles.rs` oracle runs regardless.)*
+**Landed as one commit** (the checkpointing reality first hit at file I/O / N5b): `App.styles` is dead
+code in a bin crate until the renderer reads it, so the two waves' commits merge to keep the tree
+warning-free; the platform-free `styles.rs` oracle validates the derivation on all platforms regardless.
+The author's feel pass on the size/weight table (§5), on a real manuscript, is what's left of Wave 1.
 
 ## 11. Deferred (named)
 
