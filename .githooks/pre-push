@@ -1,0 +1,12 @@
+#!/bin/sh
+# Heavier local gate before code leaves the machine (push is far less frequent than commit,
+# so it can afford more). A release build + all the IN-PROCESS oracles for the native editor
+# — the same `cargo test --release` I run by hand per checkpoint — so a red CI run is caught
+# here first. When nothing recompiles this is near-instant.
+#
+# Still NOT here (CI's job): ASan, the windowed smoke (--features smoke), the wasm/render/
+# parser golden oracles, Miri, and the cross-platform stub builds. Those are slow and/or
+# platform-specific — CI runs the full matrix.
+
+echo "pre-push: cargo test --release (native editor)…"
+cargo test --release --manifest-path rust/Cargo.toml --bin scriptorium-native-editor

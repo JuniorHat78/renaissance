@@ -1,0 +1,32 @@
+#!/bin/sh
+# Fast local gate for Scriptorium's Rust (SCRIPTORIUM-NATIVE-EDITOR). Deliberately THIN:
+# it only catches the embarrassing stuff (a compile error, a new clippy lint) in a few
+# seconds so committing never becomes a slog. The heavy validation — the full test suite,
+# ASan, the windowed smoke, the wasm/render/parser oracles, cross-platform builds — lives
+# in CI and in the pre-push hook, NOT here.
+#
+# Runs ONLY when rust/ is touched, so docs-only commits stay instant.
+#
+# clippy is a compile-check AND a lint, so it covers "does it build" + "any new lint".
+# The -A list mirrors CI's informative clippy job PLUS the two known pre-existing N3
+# debts (unnecessary_map_or / too_many_arguments — the deliberate is_some_and toolchain
+# floor), so this passes on the clean tree and only turns red on a NEW finding.
+
+if ! git diff --cached --name-only | grep -q '^rust/'; then
+    exit 0
+fi
+
+echo "pre-commit: clippy (native editor)…"
+cargo clippy --manifest-path rust/Cargo.toml --bin scriptorium-native-editor --all-features --tests -- \
+    -D warnings \
+    -A clippy::uninlined_format_args \
+    -A clippy::needless_range_loop \
+    -A clippy::needless_late_init \
+    -A clippy::manual_range_contains \
+    -A clippy::manual_flatten \
+    -A clippy::manual_find \
+    -A clippy::manual_contains \
+    -A clippy::manual_clamp \
+    -A clippy::enum_variant_names \
+    -A clippy::unnecessary_map_or \
+    -A clippy::too_many_arguments
