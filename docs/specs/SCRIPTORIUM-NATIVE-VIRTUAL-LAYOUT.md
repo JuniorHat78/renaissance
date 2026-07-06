@@ -15,9 +15,11 @@ It maps 1:1 onto the height index (one `GetMetrics` = one measured height), unif
 and draw coordinate model (no window-local offset juggling, no off-window special-casing — the
 likeliest place to hide an off-by-one in a solo landmark change), and paragraphs are newline-isolated
 so a standalone paragraph's geometry is identical to its geometry in a whole-doc layout — exactly what
-the equivalence oracle pins. A persistent paragraph-layout cache (build-per-query today) + the precise
-rope-driven edit-locality diff (a count-preserving heuristic today) remain the measure-gated
-refinements §3/§6 named. The **"does scrolling a real manuscript feel right" verdict is the author's.**
+the equivalence oracle pins. The precise edit-locality diff (§6) is **built** (N5d): a paragraph-count-
+changing edit splices the height index at only the changed region and keeps every other paragraph's
+measured height, so content above and below the caret does not jump. A persistent paragraph-layout cache
+(build-per-query today) remains the measure-gated §3 refinement. The **"does scrolling a real manuscript
+feel right" verdict is the author's.**
 
 ## 1. Why this node — the measurement that promoted it
 
@@ -284,4 +286,16 @@ document to the author.
   (`rebuild_heights` preserves measured heights across a same-width, same-count edit — no per-keystroke
   scrollbar wobble); the large-doc smoke (8 scroll+paint cycles on a 20k-paragraph doc, flat-cost
   bound) as the cliff regression guard. Resize/DPI re-measure falls out of the width-change reset +
-  anchoring. **The feel verdict on a real long manuscript is now queued for the author.**
+  anchoring. N5c's edit stability covered the **same-count** edit (typing within a paragraph); the
+  **count-changing** edit still fell back to a whole-index reset, which is where N5d picks up.
+- **N5d — the precise edit-locality diff (§6).** A paragraph-count-changing edit (Enter, Backspace at a
+  boundary, paste) no longer resets the whole index to estimates. `rebuild_heights` keeps the previous
+  per-paragraph char-lengths and, at the same wrap width, calls `HeightIndex::splice_to`, which diffs
+  old vs new for a common prefix + suffix and replaces only the differing middle with estimates —
+  **preserving the measured heights of every paragraph outside the edit**. The changed paragraphs (which
+  hold the caret, hence on-screen) re-measure on the same paint, so nothing above or below the caret
+  jumps. This closes the visible "judder" the reset caused. Built on the already-fuzzed `insert`/`remove`
+  substrate; three focused `splice_to` oracles (middle split, merge, paste; + a "matches a fresh reset on
+  content but keeps measured truth" check) join the height-index model fuzz, and the headline
+  `virtualized_geometry_matches_whole_doc` equivalence oracle still holds. **The feel verdict on a real
+  long manuscript is queued for the author.**

@@ -12,11 +12,12 @@
 //! module owns only the prefix-sum algebra.
 //!
 //! The renderer wires `reset_estimated`/`measure`/`total`/`para_top`/`locate`/`len` into the
-//! geometry service + scroll-anchoring (N5b/N5c). `invalidate`/`insert`/`remove`/`estimate`/
-//! `is_measured`/`height` are the **fuzzed substrate for the deferred precise edit-locality diff**
-//! (§6): N5c's edit stability uses a count-preserving heuristic in `rebuild_heights` rather than the
-//! per-paragraph diff, so these operations are exercised by the model-based oracle but not yet by
-//! production — hence the module-level allow (the whole structure is oracle-validated regardless).
+//! geometry service + scroll-anchoring (N5b/N5c), and `splice_to` (built on `insert`/`remove`) into
+//! `rebuild_heights` for the **precise edit-locality diff** (§6): a paragraph-count-changing edit
+//! preserves the measured heights of every paragraph outside the edit, so content above and below the
+//! caret does not jump. `invalidate`/`estimate`/`is_measured`/`height` remain the model-fuzz's
+//! substrate (exercised by the oracle, not all by production) — hence the module-level allow (the
+//! whole structure is oracle-validated regardless).
 #![allow(dead_code)]
 
 /// A mutable prefix-sum over paragraph heights. Queries (`total`/`para_top`/`locate`) take `&mut
@@ -108,6 +109,44 @@ impl HeightIndex {
             self.heights.remove(i);
             self.measured.remove(i);
             self.dirty = true;
+        }
+    }
+
+    /// Reconcile the index to a new paragraph layout after a **paragraph-count-changing edit**,
+    /// preserving the measured heights of every paragraph outside the changed region (§6, edit
+    /// locality). Diffs the old vs new per-paragraph char-lengths for a common **prefix** (leading
+    /// paragraphs the edit did not touch — same offset, same length) and a common **suffix** (trailing
+    /// paragraphs, matched from the end — their length is unchanged even though their start offset
+    /// shifted by the inserted/removed bytes). The differing middle is replaced with fresh estimates,
+    /// which re-measure on the next paint (they contain the caret, so they are on screen). `old_lens`
+    /// must be the char-lengths the index currently reflects (`old_lens.len() == self.len()`).
+    ///
+    /// The prefix/suffix are matched by length only, so a coincidental length match at the edit's edge
+    /// can pull one extra unchanged paragraph into the re-estimated middle — harmless: it re-measures
+    /// when next painted (or scroll-anchoring corrects it), never a permanent error.
+    pub fn splice_to(&mut self, old_lens: &[usize], new_lens: &[usize], chars_per_line: f32, line_height: f32) {
+        let old_n = old_lens.len();
+        let new_n = new_lens.len();
+        // Common prefix: leading paragraphs identical old vs new (offset unchanged before the edit).
+        let mut p = 0;
+        while p < old_n && p < new_n && old_lens[p] == new_lens[p] {
+            p += 1;
+        }
+        // Common suffix: trailing paragraphs identical, matched from the end and not overlapping the
+        // prefix (`s < old_n - p && s < new_n - p`).
+        let mut s = 0;
+        while s < old_n - p && s < new_n - p && old_lens[old_n - 1 - s] == new_lens[new_n - 1 - s] {
+            s += 1;
+        }
+        // The middle `[p, n-s)` differs: drop the old middle, insert the new middle as estimates.
+        // Prefix `[0, p)` and suffix (last `s`) keep their stored heights + measured flags untouched.
+        let old_mid = old_n - p - s;
+        let new_mid = new_n - p - s;
+        for _ in 0..old_mid {
+            self.remove(p);
+        }
+        for j in 0..new_mid {
+            self.insert(p + j, estimate_paragraph_height(new_lens[p + j], chars_per_line, line_height));
         }
     }
 
@@ -288,6 +327,86 @@ mod tests {
         idx.remove(1);
         assert_eq!(idx.len(), 3);
         assert!(approx(idx.total(), before), "remove restores the total");
+    }
+
+    #[test]
+    fn splicing_a_middle_edit_preserves_heights_outside_the_edit() {
+        // Five paragraphs, all measured to distinct heights (not their estimates).
+        let old_lens = [10usize, 20, 30, 40, 50];
+        let mut idx = HeightIndex::new();
+        idx.reset_estimated(&old_lens, 80.0, 24.0);
+        let measured = [11.0f32, 22.0, 33.0, 44.0, 55.0];
+        for (i, &h) in measured.iter().enumerate() {
+            idx.measure(i, h);
+        }
+
+        // Edit paragraph 2: Enter splits its 30 chars into 12 + 15 (count 5 -> 6). The prefix (0,1)
+        // and the suffix (old 3,4) are untouched.
+        let new_lens = [10usize, 20, 12, 15, 40, 50];
+        idx.splice_to(&old_lens, &new_lens, 80.0, 24.0);
+
+        assert_eq!(idx.len(), 6, "count tracks the split");
+        // Prefix paragraphs kept their MEASURED heights (this is the anti-judder invariant).
+        assert!(idx.is_measured(0) && approx(idx.height(0), 11.0));
+        assert!(idx.is_measured(1) && approx(idx.height(1), 22.0));
+        // Suffix paragraphs (old 3,4 -> new 4,5) kept their measured heights — nothing below jumped.
+        assert!(idx.is_measured(4) && approx(idx.height(4), 44.0), "the paragraph below the edit kept its height");
+        assert!(idx.is_measured(5) && approx(idx.height(5), 55.0));
+        // The two new middle paragraphs are fresh estimates, to be re-measured on paint.
+        assert!(!idx.is_measured(2) && !idx.is_measured(3));
+        // `para_top` of the first suffix paragraph is exactly prefix(11+22) + the two middle estimates
+        // — the measured prefix is intact regardless of the (still-estimated) middle.
+        let est = estimate_paragraph_height(12, 80.0, 24.0) + estimate_paragraph_height(15, 80.0, 24.0);
+        assert!(approx(idx.para_top(4), 11.0 + 22.0 + est), "suffix sits on the intact measured prefix");
+    }
+
+    #[test]
+    fn splicing_a_merge_and_a_paste_track_the_count_and_keep_the_ends() {
+        let old_lens = [10usize, 20, 30, 40];
+        let mut idx = HeightIndex::new();
+        idx.reset_estimated(&old_lens, 80.0, 20.0);
+        for i in 0..4 {
+            idx.measure(i, (i as f32 + 1.0) * 7.0); // 7,14,21,28
+        }
+        // Merge paragraphs 1 and 2 (Backspace at the boundary): count 4 -> 3.
+        let merged = [10usize, 50, 40];
+        idx.splice_to(&old_lens, &merged, 80.0, 20.0);
+        assert_eq!(idx.len(), 3);
+        assert!(idx.is_measured(0) && approx(idx.height(0), 7.0), "prefix kept");
+        assert!(idx.is_measured(2) && approx(idx.height(2), 28.0), "the tail kept its measured height");
+
+        // Paste two paragraphs after the first (count 3 -> 5) — a pure insert, ends preserved.
+        let pasted = [10usize, 5, 6, 50, 40];
+        idx.splice_to(&merged, &pasted, 80.0, 20.0);
+        assert_eq!(idx.len(), 5);
+        assert!(idx.is_measured(0) && approx(idx.height(0), 7.0));
+        assert!(idx.is_measured(4) && approx(idx.height(4), 28.0));
+        assert!(!idx.is_measured(1) && !idx.is_measured(2), "the pasted paragraphs are estimates");
+    }
+
+    #[test]
+    fn splice_matches_a_full_reset_on_content_but_keeps_measured_truth() {
+        // After a splice, the index must be structurally identical to a from-scratch reset of the new
+        // lengths (same count, same estimates for the un-measured), differing only in that the
+        // untouched paragraphs retain their measured heights instead of estimates.
+        let old_lens = [10usize, 20, 30, 40, 50, 60];
+        let mut spliced = HeightIndex::new();
+        spliced.reset_estimated(&old_lens, 70.0, 18.0);
+        for i in 0..old_lens.len() {
+            spliced.measure(i, 100.0 + i as f32); // all measured to distinct heights
+        }
+        let new_lens = [10usize, 20, 30, 999, 40, 50, 60]; // insert a big paragraph at index 3
+        spliced.splice_to(&old_lens, &new_lens, 70.0, 18.0);
+
+        let mut fresh = HeightIndex::new();
+        fresh.reset_estimated(&new_lens, 70.0, 18.0);
+
+        assert_eq!(spliced.len(), fresh.len());
+        // The inserted paragraph (index 3) is an estimate in both; the rest keep the spliced index's
+        // measured truth, so its total is >= the all-estimate fresh total by the measured surplus.
+        assert!(!spliced.is_measured(3), "the inserted paragraph is an estimate");
+        assert!(approx(spliced.height(3), fresh.height(3)), "same estimate for the new paragraph");
+        assert!(spliced.total() > fresh.total(), "the untouched paragraphs kept their (larger) measured heights");
     }
 
     #[test]

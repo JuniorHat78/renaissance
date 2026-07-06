@@ -81,6 +81,12 @@ pub struct Renderer {
     // height is folded in whenever a paragraph is laid out, so the total converges to the truth.
     heights: HeightIndex,
     para_starts: Vec<usize>,
+    // The per-paragraph content char-lengths of the last `rebuild_heights`, kept so a
+    // paragraph-count-changing edit (Enter/Backspace/paste) can DIFF old vs new and splice the
+    // height index at just the changed region — preserving the measured heights of every paragraph
+    // above and below the edit (SCRIPTORIUM-NATIVE-VIRTUAL-LAYOUT.md §6, edit locality) rather than
+    // resetting them all to estimates (which made content below the caret visibly jump).
+    para_char_lens: Vec<usize>,
     heights_gen: u64,
     heights_width: f32,
     // Font metrics for the estimate of a not-yet-laid-out paragraph (`ceil(chars / (width /
@@ -165,6 +171,7 @@ impl Renderer {
                 status_format,
                 heights: HeightIndex::new(),
                 para_starts: Vec::new(),
+                para_char_lens: Vec::new(),
                 heights_gen: u64::MAX, // sentinel: forces the first rebuild_heights
                 heights_width: -1.0,
                 avg_char_width,
@@ -438,12 +445,24 @@ impl Renderer {
         let width_changed = (self.heights_width - width).abs() > 0.5;
         let count_changed = char_lens.len() != self.heights.len();
         self.para_starts = starts;
-        if first_build || width_changed || count_changed {
-            let cpl = (width / self.avg_char_width).max(1.0);
+        let cpl = (width / self.avg_char_width).max(1.0);
+        if first_build || width_changed {
+            // A new wrap width (resize/DPI) invalidates every measured height — wrapping changed for
+            // all paragraphs — so rebuild the whole index from estimates (§8.4). Same on first build.
             self.heights.reset_estimated(&char_lens, cpl, self.line_height_dip);
+        } else if count_changed {
+            // A paragraph-count-changing edit (Enter/Backspace-at-a-boundary/paste) at the SAME wrap
+            // width: diff the old vs new per-paragraph char-lengths and splice the height index at
+            // only the changed region, KEEPING the measured heights of every paragraph above and
+            // below (§6). The old whole-index reset here is what made content below the caret jump to
+            // estimates and snap back — the visible "judder". The changed paragraphs drop to fresh
+            // estimates and re-measure on this same paint (they contain the caret, so they're on
+            // screen); nothing outside the edit moves.
+            self.heights.splice_to(&self.para_char_lens, &char_lens, cpl, self.line_height_dip);
         }
         // else: same width, same paragraph count → keep the index (measured heights survive); the
         // edited (visible) paragraph re-measures on the next paint.
+        self.para_char_lens = char_lens;
         self.heights_gen = gen;
         self.heights_width = width;
     }
