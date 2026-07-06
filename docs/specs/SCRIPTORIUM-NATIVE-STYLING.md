@@ -260,14 +260,20 @@ inline span that falls in the paragraph (offsets relative to the paragraph start
 Inline attributes compose with the block style (a `**bold**` word in a heading is bold-and-heading).
 The markers (`**`, `` ` ``, `[...]()`) dim like block markers — a Wave-2 refinement once the spans land.
 
-### 5B.3 Checkpoints
+### 5B.3 Checkpoints — Wave 2 BUILT
 
-- **2a — the parser emits `inline_spans`** (`ast.rs` + `parser.rs`, platform-free): the collector, a
-  lib oracle over the real parser (nesting, code-suppression, a link, an escape), and — the load-bearing
-  guard — the **frozen-golden parity oracle stays byte-identical** (inline_spans is not serialized).
-- **2b — the editor applies inline styles**: worker carries per-paragraph inline spans under the
-  staleness gate; `SetUnderline` (slot 36) typed + ABI-asserted + smoke; a `code`/`link` brush; applied
-  in `lay_out_paragraph`; the styled-range smoke extended (bold/italic/code/link on real DWrite), ASan.
+- **2a — the parser emits `inline_spans` (`224d1d8`).** `ast.rs` `InlineKind`/`InlineSpan` +
+  `Document.inline_spans`; `parser.rs` threads a `&mut Vec<InlineSpan>` collector through the inline
+  path, with a **joined→source offset map** so spans stay source-accurate across a multi-line paragraph
+  join. +5 platform-free oracles; the frozen-golden parity oracle stayed **byte-identical** on every
+  AST-consuming surface (rust-parser 2065, rust-render 565, rust-wasm 2065) — surgical, not serialized.
+- **2b — the editor applies inline styles.** The worker carries `doc.inline_spans` back under the N4
+  staleness gate (`App.inline_spans`, no provisional guess — inline doesn't reflow); `apply_inline_styles`
+  in `lay_out_paragraph` intersects each span with the paragraph and applies Strong→`SetFontWeight`,
+  Emphasis→`SetFontStyle`, Code→`code` brush, Link→`link` brush + `SetUnderline` (**slot 36** typed +
+  ABI-asserted + gated-oracle + real-brush paint smoke), composing with the block style. ASan-clean.
+  (The IME composition paragraph pauses inline styling — the splice shifts source offsets; it resumes on
+  commit.)
 
 ## 6. The COM surface (typed, ABI-asserted, smoke-exercised)
 

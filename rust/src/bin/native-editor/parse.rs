@@ -12,7 +12,7 @@
 
 use crate::buffer::Snapshot;
 use crate::styles::{styles_of, StyleSpan};
-use scriptorium_parser::parse_document;
+use scriptorium_parser::{parse_document, InlineSpan};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
@@ -35,6 +35,10 @@ pub struct ParseResult {
     pub gen: u64,
     pub signal: ParseSignal,
     pub styles: Vec<StyleSpan>,
+    /// Styled inline spans (strong/emphasis/code/link, source offsets) from the parser's
+    /// `Document.inline_spans` (SCRIPTORIUM-NATIVE-STYLING.md §5B), carried back under the same
+    /// staleness gate as the block styles and applied within each paragraph by the renderer.
+    pub inline_spans: Vec<InlineSpan>,
 }
 
 /// A pending job: the generation and the immutable snapshot to parse.
@@ -157,9 +161,10 @@ fn worker_loop(mailbox: Arc<Mailbox>, tx: Sender<ParseResult>, wake: Arc<dyn Fn(
         let start = Instant::now();
         let doc = parse_document(&units);
         let styles = styles_of(&doc);
+        let inline_spans = doc.inline_spans.clone();
         let parse_micros = start.elapsed().as_micros();
         let signal = ParseSignal { blocks: doc.stats_blocks, words: doc.stats_words, parse_micros };
-        if tx.send(ParseResult { gen, signal, styles }).is_err() {
+        if tx.send(ParseResult { gen, signal, styles, inline_spans }).is_err() {
             return; // the UI side hung up (service dropped) — nothing to report to.
         }
         (wake)();

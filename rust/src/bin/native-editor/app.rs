@@ -16,6 +16,7 @@ use crate::codec::{encode, Decoded, Encoding, Newline};
 use crate::grapheme;
 use crate::parse::ParseSignal;
 use crate::styles::StyleSpan;
+use scriptorium_parser::InlineSpan;
 
 /// A provisional IME composition (SCRIPTORIUM-NATIVE-IME.md §2): the in-progress string the
 /// user is composing through an Input Method Editor. It is shown inline by the renderer,
@@ -86,6 +87,9 @@ pub struct App {
     /// `signal_gen` — so they lag the live text by the parse-in-flight, and the renderer applies them
     /// as the last-good styling (clamping offsets to each paragraph) until a fresher parse lands.
     styles: Vec<StyleSpan>,
+    /// The inline style spans (strong/emphasis/code/link) — folded in alongside `styles` under the
+    /// same gate (§5B); source offsets the renderer clamps into each paragraph.
+    inline_spans: Vec<InlineSpan>,
     /// The last measured end-to-end async round-trip in microseconds — from an edit's submit to
     /// its parse landing back and settling the display (thread scheduling + parse + post-back).
     /// Measured by `win32` (the timing is a platform concern) and stored here only to show in the
@@ -127,6 +131,7 @@ impl App {
             content_gen: 0,
             signal_gen: 0,
             styles: Vec::new(),
+            inline_spans: Vec::new(),
             roundtrip_micros: 0,
             comp: None,
             path: None,
@@ -437,10 +442,17 @@ impl App {
     /// what's displayed (`gen > signal_gen`). The monotonic gate (SCRIPTORIUM-NATIVE-CONCURRENCY.md
     /// §5) means an out-of-order or late parse is dropped rather than regressing the stats. Returns
     /// whether it was applied (so the caller knows if a repaint is warranted).
-    pub fn apply_parse(&mut self, gen: u64, signal: ParseSignal, styles: Vec<StyleSpan>) -> bool {
+    pub fn apply_parse(
+        &mut self,
+        gen: u64,
+        signal: ParseSignal,
+        styles: Vec<StyleSpan>,
+        inline_spans: Vec<InlineSpan>,
+    ) -> bool {
         if gen > self.signal_gen {
             self.signal = signal;
             self.styles = styles;
+            self.inline_spans = inline_spans;
             self.signal_gen = gen;
             true
         } else {
@@ -453,6 +465,14 @@ impl App {
     /// them as last-good and clamps their offsets to each paragraph.
     pub fn styles(&self) -> &[StyleSpan] {
         &self.styles
+    }
+
+    /// The inline style spans (strong/emphasis/code/link, source offsets) the renderer applies WITHIN
+    /// each paragraph (§5B). Like `styles`, they lag by the parse-in-flight and are treated as
+    /// last-good, clamped to each paragraph. Inline styling doesn't reflow (unlike a heading's size),
+    /// so the ~1 ms lag on the edited paragraph is not jarring — no provisional guess (unlike blocks).
+    pub fn inline_spans(&self) -> &[InlineSpan] {
+        &self.inline_spans
     }
 
     /// Record the last measured end-to-end async round-trip (µs), for the status line (N4b). The
@@ -664,26 +684,33 @@ mod parse_apply_tests {
         vec![StyleSpan { start: 0, end: 5, kind: StyleKind::Heading(1) }]
     }
 
+    fn inline_span() -> Vec<InlineSpan> {
+        use scriptorium_parser::InlineKind;
+        vec![InlineSpan { start: 0, end: 4, kind: InlineKind::Strong }]
+    }
+
     #[test]
     fn apply_parse_folds_in_a_newer_result() {
         let mut app = App::new();
-        assert!(app.apply_parse(3, ParseSignal { blocks: 1, words: 5, parse_micros: 10 }, heading_span()));
+        assert!(app.apply_parse(3, ParseSignal { blocks: 1, words: 5, parse_micros: 10 }, heading_span(), inline_span()));
         assert_eq!(app.signal.words, 5, "a newer generation updates the signal");
         assert_eq!(app.signal_gen, 3);
         assert_eq!(app.styles().len(), 1, "the style spans fold in with the signal");
+        assert_eq!(app.inline_spans().len(), 1, "the inline spans fold in too");
     }
 
     #[test]
     fn apply_parse_refuses_to_regress_on_a_stale_result() {
         let mut app = App::new();
-        assert!(app.apply_parse(5, ParseSignal { blocks: 2, words: 9, parse_micros: 20 }, heading_span()));
+        assert!(app.apply_parse(5, ParseSignal { blocks: 2, words: 9, parse_micros: 20 }, heading_span(), inline_span()));
         // A later-arriving OLDER parse (gen 4 < 5) must be dropped, not overwrite the newer stats/styles.
-        assert!(!app.apply_parse(4, ParseSignal { blocks: 0, words: 0, parse_micros: 1 }, Vec::new()));
+        assert!(!app.apply_parse(4, ParseSignal { blocks: 0, words: 0, parse_micros: 1 }, Vec::new(), Vec::new()));
         assert_eq!(app.signal.words, 9, "the stale result did not regress the display");
         assert_eq!(app.signal_gen, 5, "signal_gen never moves backwards");
         assert_eq!(app.styles().len(), 1, "the stale result did not clear the newer styles");
+        assert_eq!(app.inline_spans().len(), 1, "nor the newer inline spans");
         // The same generation is also a no-op (idempotent — no duplicate apply).
-        assert!(!app.apply_parse(5, ParseSignal { blocks: 0, words: 0, parse_micros: 1 }, Vec::new()));
+        assert!(!app.apply_parse(5, ParseSignal { blocks: 0, words: 0, parse_micros: 1 }, Vec::new(), Vec::new()));
         assert_eq!(app.signal.words, 9);
     }
 
@@ -694,7 +721,7 @@ mod parse_apply_tests {
         assert!(app.status_text().contains("parsing"), "in flight before the first parse lands");
         // The parse for gen 1 lands: caught up, so the "parsing…" marker clears. No round-trip
         // measured yet (that's win32's to record), so no async figure either.
-        app.apply_parse(1, ParseSignal { blocks: 0, words: 0, parse_micros: 5 }, Vec::new());
+        app.apply_parse(1, ParseSignal { blocks: 0, words: 0, parse_micros: 5 }, Vec::new(), Vec::new());
         assert!(!app.status_text().contains("parsing"), "not in flight once caught up");
         assert!(!app.status_text().contains("async"), "no round-trip shown until one is measured");
         // Once win32 records the settle latency, the status surfaces the felt end-to-end figure.

@@ -273,7 +273,7 @@ unsafe fn wndproc_impl(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> 
             let res = state.parse.as_ref().and_then(|p| p.drain_latest());
             if let Some(r) = res {
                 let gen = r.gen;
-                if state.app.apply_parse(gen, r.signal, r.styles) {
+                if state.app.apply_parse(gen, r.signal, r.styles, r.inline_spans) {
                     // If this result brought the display level with the live content (no newer edit
                     // is pending), the async round-trip for the settled edit is complete — record
                     // the submit→landed latency (N4b). A newer edit in flight defers the measure.
@@ -1588,7 +1588,7 @@ mod smoke_tests {
                     end: cs.app.text.len(),
                     kind: crate::styles::StyleKind::Heading(1),
                 };
-                cs.app.apply_parse(g, crate::parse::ParseSignal { blocks: 1, words: 1, parse_micros: 0 }, vec![span]);
+                cs.app.apply_parse(g, crate::parse::ParseSignal { blocks: 1, words: 1, parse_micros: 0 }, vec![span], Vec::new());
             }
             InvalidateRect(hwnd, null(), 0);
             SendMessageW(hwnd, WM_PAINT, 0, 0);
@@ -1603,7 +1603,30 @@ mod smoke_tests {
                     end: cs.app.text.len(),
                     kind: crate::styles::StyleKind::Divider,
                 };
-                cs.app.apply_parse(g, crate::parse::ParseSignal { blocks: 1, words: 1, parse_micros: 0 }, vec![span]);
+                cs.app.apply_parse(g, crate::parse::ParseSignal { blocks: 1, words: 1, parse_micros: 0 }, vec![span], Vec::new());
+            }
+            InvalidateRect(hwnd, null(), 0);
+            SendMessageW(hwnd, WM_PAINT, 0, 0);
+
+            // Inline styling (STYLING §5B.2): fold strong/emphasis/code/link spans over the text and
+            // paint — drives apply_inline_styles' SetFontWeight/Style + code/link SetDrawingEffect +
+            // SetUnderline (slot 36) with a real brush on real DWrite. Clamped to the text length.
+            {
+                let cs = &mut *(GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut WindowState);
+                let g = cs.app.content_gen() + 1;
+                let n = cs.app.text.len();
+                let q = |a: usize, b: usize| (a.min(n), b.min(n));
+                let mk = |a: usize, b: usize, k: scriptorium_parser::InlineKind| {
+                    let (s, e) = q(a, b);
+                    scriptorium_parser::InlineSpan { start: s, end: e.max(s), kind: k }
+                };
+                let inline = vec![
+                    mk(0, 2, scriptorium_parser::InlineKind::Strong),
+                    mk(2, 4, scriptorium_parser::InlineKind::Emphasis),
+                    mk(4, 6, scriptorium_parser::InlineKind::Code),
+                    mk(6, 9, scriptorium_parser::InlineKind::Link),
+                ];
+                cs.app.apply_parse(g, crate::parse::ParseSignal { blocks: 1, words: 1, parse_micros: 0 }, Vec::new(), inline);
             }
             InvalidateRect(hwnd, null(), 0);
             SendMessageW(hwnd, WM_PAINT, 0, 0);

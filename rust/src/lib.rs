@@ -30,7 +30,7 @@ pub use ast::Document;
 // AST-styled rendering, SCRIPTORIUM-NATIVE-STYLING.md) can walk a parsed `Document`. Purely additive
 // visibility of already-`pub` types — no behaviour change, no effect on the JSON serializer / JS
 // parity / the equivalence oracle.
-pub use ast::{Block, Inline, Position};
+pub use ast::{Block, Inline, InlineKind, InlineSpan, Position};
 pub use json_value::Json;
 
 // --- content-AST compiler surface (Pass 1 step 2) ---------------------------

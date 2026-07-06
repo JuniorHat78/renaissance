@@ -18,6 +18,7 @@ use crate::app::App;
 use crate::heights::HeightIndex;
 use crate::styles::{StyleKind, StyleSpan};
 use crate::win32::sys::*;
+use scriptorium_parser::{InlineKind, InlineSpan};
 
 /// RAII wrapper: owns one ref on a COM interface pointer; releases on drop.
 pub struct ComPtr<T> {
@@ -67,6 +68,8 @@ struct Palette {
     marker_dim: ComPtr<ID2D1SolidColorBrush>,
     quote: ComPtr<ID2D1SolidColorBrush>,
     rule: ComPtr<ID2D1SolidColorBrush>,
+    code: ComPtr<ID2D1SolidColorBrush>,
+    link: ComPtr<ID2D1SolidColorBrush>,
 }
 
 pub struct Renderer {
@@ -119,6 +122,10 @@ pub struct Renderer {
     // paragraph's kind, and the applied range is always the whole current paragraph, so a stale offset
     // never reads out of range (§4).
     styles: Vec<StyleSpan>,
+    // The inline style spans (strong/emphasis/code/link, SOURCE offsets) applied WITHIN each paragraph
+    // (§5B), refreshed from `App` each paint. Intersected with each paragraph and clamped, so a stale
+    // offset never reads out of range. No provisional guess (unlike blocks) — inline doesn't reflow.
+    inline_spans: Vec<InlineSpan>,
     // Whether `styles` lags the live text (a parse is in flight since the last edit), captured from
     // `App` at the start of each paint and read by `resolve_style`. While true, the paragraph being
     // edited is styled from a cheap lexical guess of its own markers (immediate) instead of the
@@ -153,6 +160,9 @@ const MARKER_DIM_COLOR: D2D1_COLOR_F = D2D1_COLOR_F { r: 0.66, g: 0.66, b: 0.70,
 const QUOTE_COLOR: D2D1_COLOR_F = D2D1_COLOR_F { r: 0.42, g: 0.44, b: 0.50, a: 1.0 };
 // The drawn divider rule (STYLING §5A.4) — a soft hairline; the `---` source stays but dimmed.
 const RULE_COLOR: D2D1_COLOR_F = D2D1_COLOR_F { r: 0.80, g: 0.80, b: 0.84, a: 1.0 };
+// Inline styling (STYLING §5B) — `code` a warm terracotta, links the accent blue (+ underline).
+const CODE_COLOR: D2D1_COLOR_F = D2D1_COLOR_F { r: 0.60, g: 0.32, b: 0.24, a: 1.0 };
+const LINK_COLOR: D2D1_COLOR_F = D2D1_COLOR_F { r: 0.16, g: 0.40, b: 0.85, a: 1.0 };
 
 /// The left indent (DIPs) for a paragraph's block kind (STYLING §5A.3): blockquotes and list items
 /// shift right; everything else is flush left. Pure — the ONE place kind → indent, shared by the
@@ -224,6 +234,7 @@ impl Renderer {
                 avg_char_width,
                 line_height_dip,
                 styles: Vec::new(),
+                inline_spans: Vec::new(),
                 d2d_factory,
                 dwrite_factory,
                 hwnd,
@@ -310,6 +321,7 @@ impl Renderer {
             // cheap immediate lexical guess (STYLING §4, the pop-in fix) — captured so every paragraph in
             // this frame (and any point-query before the next paint) resolves consistently.
             self.styles = app.styles().to_vec();
+            self.inline_spans = app.inline_spans().to_vec();
             self.styles_stale = !app.styles_current();
             if !self.para_starts.is_empty() {
                 let n = self.para_starts.len();
@@ -600,6 +612,8 @@ impl Renderer {
             let marker_len = crate::styles::marker_len_of_line(&text[start..end]);
             self.apply_paragraph_color(layout.as_raw(), k, marker_len, end - start);
         }
+        // Inline styling (§5B) composes on top of the block style, within the paragraph.
+        self.apply_inline_styles(layout.as_raw(), start, end - start);
         self.fold_paragraph_height(i, layout.as_raw());
         Some((layout, end - start, indent))
     }
@@ -640,6 +654,43 @@ impl Renderer {
         if marker_len > 0 {
             let m = marker_len.min(content_len) as u32;
             (lv.set_drawing_effect)(layout, self.palette.marker_dim.as_raw() as *mut c_void, DWRITE_TEXT_RANGE { startPosition: 0, length: m });
+        }
+    }
+
+    /// Apply the inline styles (strong/emphasis/code/link, §5B) that fall in paragraph `[para_start,
+    /// para_start + content_len)` to `layout`. Each span's SOURCE range is intersected with the
+    /// paragraph and shifted to a local range, so a stale/overhanging span is clamped, never
+    /// out-of-range. Inline attributes compose with the block style (a `**bold**` word in a heading is
+    /// bold-and-heading-sized) and with each other (nested spans overlap — `b` in `*a **b** c*` is
+    /// bold-italic). `code`/`link` recolor via SetDrawingEffect; a link also underlines (slot 36).
+    unsafe fn apply_inline_styles(&self, layout: *mut IDWriteTextLayout, para_start: usize, content_len: usize) {
+        if self.inline_spans.is_empty() || content_len == 0 {
+            return;
+        }
+        let lv = &*(*layout).vtbl;
+        let pe = para_start + content_len;
+        for s in &self.inline_spans {
+            let a = s.start.max(para_start);
+            let b = s.end.min(pe);
+            if b <= a {
+                continue; // no overlap with this paragraph
+            }
+            let range = DWRITE_TEXT_RANGE { startPosition: (a - para_start) as u32, length: (b - a) as u32 };
+            match s.kind {
+                InlineKind::Strong => {
+                    (lv.set_font_weight)(layout, DWRITE_FONT_WEIGHT_BOLD, range);
+                }
+                InlineKind::Emphasis => {
+                    (lv.set_font_style)(layout, DWRITE_FONT_STYLE_ITALIC, range);
+                }
+                InlineKind::Code => {
+                    (lv.set_drawing_effect)(layout, self.palette.code.as_raw() as *mut c_void, range);
+                }
+                InlineKind::Link => {
+                    (lv.set_drawing_effect)(layout, self.palette.link.as_raw() as *mut c_void, range);
+                    (lv.set_underline)(layout, 1, range);
+                }
+            }
         }
     }
 
@@ -957,6 +1008,8 @@ unsafe fn create_palette(rt: *mut ID2D1HwndRenderTarget) -> Result<Palette, HRES
         marker_dim: ComPtr::from_raw(make_brush(rt, MARKER_DIM_COLOR)?),
         quote: ComPtr::from_raw(make_brush(rt, QUOTE_COLOR)?),
         rule: ComPtr::from_raw(make_brush(rt, RULE_COLOR)?),
+        code: ComPtr::from_raw(make_brush(rt, CODE_COLOR)?),
+        link: ComPtr::from_raw(make_brush(rt, LINK_COLOR)?),
     })
 }
 
@@ -1424,6 +1477,8 @@ mod tests {
             // lesson: a never-*called* slot AVs on first use; the windowed smoke calls it with a real
             // brush during paint, this calls it in the normal test run). Must not AV and returns S_OK.
             assert!((sv.set_drawing_effect)(styled, null_mut(), range) >= 0, "SetDrawingEffect (slot 38)");
+            // SetUnderline (slot 36, the Wave-2 link visual) — same gated real-DWrite exercise.
+            assert!((sv.set_underline)(styled, 1, range) >= 0, "SetUnderline (slot 36)");
 
             let mut pm: DWRITE_TEXT_METRICS = zeroed();
             let mut sm: DWRITE_TEXT_METRICS = zeroed();

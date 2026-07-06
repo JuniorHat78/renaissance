@@ -689,7 +689,8 @@ pub struct IDWriteTextLayoutVtbl {
     pub set_font_style: unsafe extern "system" fn(*mut IDWriteTextLayout, u32, DWRITE_TEXT_RANGE) -> HRESULT, // 33
     pub set_font_stretch: usize,     // 34
     pub set_font_size: unsafe extern "system" fn(*mut IDWriteTextLayout, f32, DWRITE_TEXT_RANGE) -> HRESULT, // 35
-    pub set_underline: usize,        // 36
+    // Underline a sub-range — the link visual (STYLING §5B.2). `has_underline` is a BOOL (i32).
+    pub set_underline: unsafe extern "system" fn(*mut IDWriteTextLayout, BOOL, DWRITE_TEXT_RANGE) -> HRESULT, // 36
     pub set_strikethrough: usize,    // 37
     // Attach a drawing effect (an ID2D1Brush*, as IUnknown*) to a sub-range; DrawTextLayout paints
     // that range with the brush automatically — the consume-only color path (STYLING §5A.1). The
@@ -927,6 +928,7 @@ mod layout_tests {
         assert_eq!(offset_of!(IDWriteTextLayoutVtbl, set_font_weight), 32 * P);
         assert_eq!(offset_of!(IDWriteTextLayoutVtbl, set_font_style), 33 * P);
         assert_eq!(offset_of!(IDWriteTextLayoutVtbl, set_font_size), 35 * P);
+        assert_eq!(offset_of!(IDWriteTextLayoutVtbl, set_underline), 36 * P);
         assert_eq!(offset_of!(IDWriteTextLayoutVtbl, set_drawing_effect), 38 * P);
         assert_eq!(offset_of!(IDWriteTextLayoutVtbl, get_metrics), 60 * P);
         assert_eq!(offset_of!(IDWriteTextLayoutVtbl, hit_test_point), 64 * P);
