@@ -261,6 +261,8 @@ pub fn parse_document(source: &[u16]) -> Document {
 
     let mut blocks: Vec<Block> = Vec::new();
     let mut pending: Vec<ParagraphLine> = Vec::new();
+    // Styled inline spans, collected during the walk (§5B.1); source-accurate offsets, not serialized.
+    let mut inline_spans: Vec<InlineSpan> = Vec::new();
 
     let mut index = 0usize;
     while index < lines.len() {
@@ -268,22 +270,22 @@ pub fn parse_document(source: &[u16]) -> Document {
         let line_number = (index + 1) as u32;
 
         if is_blank(line) {
-            flush_paragraph(&mut blocks, &mut pending, &mut diagnostics);
+            flush_paragraph(&mut blocks, &mut pending, &mut diagnostics, &mut inline_spans);
             index += 1;
             continue;
         }
 
         // heading — parse_heading_line pushes the clamp diagnostic BEFORE flush,
         // exactly as parse.js (order matters for diagnostic sequence).
-        if let Some(heading) = parse_heading_line(line, line_number, offset, &mut diagnostics) {
-            flush_paragraph(&mut blocks, &mut pending, &mut diagnostics);
+        if let Some(heading) = parse_heading_line(line, line_number, offset, &mut diagnostics, &mut inline_spans) {
+            flush_paragraph(&mut blocks, &mut pending, &mut diagnostics, &mut inline_spans);
             blocks.push(heading);
             index += 1;
             continue;
         }
 
         if is_divider_line(line) {
-            flush_paragraph(&mut blocks, &mut pending, &mut diagnostics);
+            flush_paragraph(&mut blocks, &mut pending, &mut diagnostics, &mut inline_spans);
             blocks.push(Block::Divider {
                 position: Position { line: line_number, start: offset, end: offset + line.len() },
             });
@@ -292,7 +294,7 @@ pub fn parse_document(source: &[u16]) -> Document {
         }
 
         if parse_block_quote_line(line, line_number, offset).is_some() {
-            flush_paragraph(&mut blocks, &mut pending, &mut diagnostics);
+            flush_paragraph(&mut blocks, &mut pending, &mut diagnostics, &mut inline_spans);
             let mut quote_lines: Vec<ParagraphLine> = Vec::new();
             while index < lines.len() {
                 let (o, l) = lines[index];
@@ -304,13 +306,13 @@ pub fn parse_document(source: &[u16]) -> Document {
                     None => break,
                 }
             }
-            let bq = create_block_quote(quote_lines, &mut diagnostics);
+            let bq = create_block_quote(quote_lines, &mut diagnostics, &mut inline_spans);
             blocks.push(bq);
             continue;
         }
 
         if let Some(first_ll) = parse_list_line(line, line_number, offset) {
-            flush_paragraph(&mut blocks, &mut pending, &mut diagnostics);
+            flush_paragraph(&mut blocks, &mut pending, &mut diagnostics, &mut inline_spans);
             let ordered = first_ll.ordered;
             let mut list_lines: Vec<ListLine> = Vec::new();
             while index < lines.len() {
@@ -323,7 +325,7 @@ pub fn parse_document(source: &[u16]) -> Document {
                     _ => break,
                 }
             }
-            let list = create_list(list_lines, ordered, &mut diagnostics);
+            let list = create_list(list_lines, ordered, &mut diagnostics, &mut inline_spans);
             blocks.push(list);
             continue;
         }
@@ -332,7 +334,7 @@ pub fn parse_document(source: &[u16]) -> Document {
         index += 1;
     }
 
-    flush_paragraph(&mut blocks, &mut pending, &mut diagnostics);
+    flush_paragraph(&mut blocks, &mut pending, &mut diagnostics, &mut inline_spans);
 
     // attachDiagnosticPosition — derive {line, column} from each offset.
     for d in diagnostics.iter_mut() {
@@ -346,7 +348,7 @@ pub fn parse_document(source: &[u16]) -> Document {
     let searchable = searchable_text(&blocks);
     let stats_words = word_count(&searchable);
 
-    Document { children: blocks, diagnostics, stats_blocks, stats_words }
+    Document { children: blocks, diagnostics, stats_blocks, stats_words, inline_spans }
 }
 
 // --- stats: toSearchableText + wordCount (faithful port of core.js) ---------
@@ -448,12 +450,13 @@ fn flush_paragraph(
     blocks: &mut Vec<Block>,
     pending: &mut Vec<ParagraphLine>,
     diagnostics: &mut Vec<Diagnostic>,
+    spans: &mut Vec<InlineSpan>,
 ) {
     if pending.is_empty() {
         return;
     }
     let lines = std::mem::take(pending);
-    blocks.push(create_paragraph(lines, diagnostics));
+    blocks.push(create_paragraph(lines, diagnostics, spans));
 }
 
 fn is_blank(line: &[u16]) -> bool {
@@ -471,6 +474,7 @@ fn parse_heading_line(
     line_number: u32,
     offset: usize,
     diagnostics: &mut Vec<Diagnostic>,
+    spans: &mut Vec<InlineSpan>,
 ) -> Option<Block> {
     let len = line.len();
     let mut i = 0;
@@ -519,7 +523,7 @@ fn parse_heading_line(
 
     // parse.js: textOffset = offset + marker.length + 1 (assumes ONE space).
     let text_offset = offset + marker_len + 1;
-    let children = parse_inline(text, text_offset, diagnostics, 0, false);
+    let children = parse_inline(text, text_offset, diagnostics, 0, false, spans);
 
     Some(Block::Heading {
         level: level as u8,
@@ -597,7 +601,11 @@ fn parse_list_line(line: &[u16], line_number: u32, offset: usize) -> Option<List
     })
 }
 
-fn create_paragraph(lines: Vec<ParagraphLine>, diagnostics: &mut Vec<Diagnostic>) -> Block {
+fn create_paragraph(
+    lines: Vec<ParagraphLine>,
+    diagnostics: &mut Vec<Diagnostic>,
+    spans: &mut Vec<InlineSpan>,
+) -> Block {
     let first_line = lines[0].line_number;
     let first_offset = lines[0].offset;
     let last = &lines[lines.len() - 1];
@@ -607,7 +615,7 @@ fn create_paragraph(lines: Vec<ParagraphLine>, diagnostics: &mut Vec<Diagnostic>
         end: last.offset + last.source_length,
     };
     let pull = lines.len() == 1 && is_pull_quote_text(&lines[0].text);
-    let children = parse_inline_lines(&lines, diagnostics);
+    let children = parse_inline_lines(&lines, diagnostics, spans);
     if pull {
         Block::PullQuote { children, position }
     } else {
@@ -615,7 +623,11 @@ fn create_paragraph(lines: Vec<ParagraphLine>, diagnostics: &mut Vec<Diagnostic>
     }
 }
 
-fn create_block_quote(lines: Vec<ParagraphLine>, diagnostics: &mut Vec<Diagnostic>) -> Block {
+fn create_block_quote(
+    lines: Vec<ParagraphLine>,
+    diagnostics: &mut Vec<Diagnostic>,
+    spans: &mut Vec<InlineSpan>,
+) -> Block {
     let first_line = lines[0].line_number;
     let first_offset = lines[0].offset;
     let last = &lines[lines.len() - 1];
@@ -624,11 +636,16 @@ fn create_block_quote(lines: Vec<ParagraphLine>, diagnostics: &mut Vec<Diagnosti
         start: first_offset,
         end: last.offset + last.source_length,
     };
-    let para = create_paragraph(lines, diagnostics);
+    let para = create_paragraph(lines, diagnostics, spans);
     Block::BlockQuote { children: vec![para], position }
 }
 
-fn create_list(lines: Vec<ListLine>, ordered: bool, diagnostics: &mut Vec<Diagnostic>) -> Block {
+fn create_list(
+    lines: Vec<ListLine>,
+    ordered: bool,
+    diagnostics: &mut Vec<Diagnostic>,
+    spans: &mut Vec<InlineSpan>,
+) -> Block {
     let first_line = lines[0].line_number;
     let first_source_offset = lines[0].source_offset;
     let last = &lines[lines.len() - 1];
@@ -639,7 +656,7 @@ fn create_list(lines: Vec<ListLine>, ordered: bool, diagnostics: &mut Vec<Diagno
     };
     let mut children: Vec<Block> = Vec::with_capacity(lines.len());
     for l in &lines {
-        let item_children = parse_inline(&l.text, l.offset, diagnostics, 0, false);
+        let item_children = parse_inline(&l.text, l.offset, diagnostics, 0, false, spans);
         children.push(Block::ListItem {
             children: item_children,
             position: Position {
@@ -674,29 +691,59 @@ fn is_pull_quote_text(text: &[u16]) -> bool {
 
 // --- inline-line joining + separator normalization --------------------------
 
-fn parse_inline_lines(lines: &[ParagraphLine], diagnostics: &mut Vec<Diagnostic>) -> Vec<Inline> {
-    let (joined, offset) = join_inline_lines(lines);
-    let nodes = parse_inline(&joined, offset, diagnostics, 0, false);
+fn parse_inline_lines(
+    lines: &[ParagraphLine],
+    diagnostics: &mut Vec<Diagnostic>,
+    spans: &mut Vec<InlineSpan>,
+) -> Vec<Inline> {
+    let (joined, offset, src) = join_inline_lines(lines);
+    // Inline styling needs SOURCE offsets, but a multi-line paragraph is parsed over a JOINED buffer
+    // whose separator units (1 sentinel/newline) don't match the source gap (newline + stripped
+    // leading whitespace) — so `base + cursor` diverges from the source on continuation lines. Collect
+    // the paragraph's spans in joined coordinates, then translate each endpoint through `src` (joined
+    // index → source offset) before handing them up, so inline styles land right across line joins (§5B.1).
+    let mut local: Vec<InlineSpan> = Vec::new();
+    let nodes = parse_inline(&joined, offset, diagnostics, 0, false, &mut local);
+    for mut s in local {
+        let js = s.start - offset; // joined index of the token start
+        let je = s.end - offset; // joined index of the token end (exclusive)
+        s.start = src[js];
+        s.end = if je == 0 { src[0] } else { src[je - 1] + 1 };
+        spans.push(s);
+    }
     normalize_inline_separators(nodes)
 }
 
-fn join_inline_lines(lines: &[ParagraphLine]) -> (Vec<u16>, usize) {
+/// Join a paragraph's lines into one inline buffer, returning the joined units, the base source
+/// offset, and a `src` map from each joined-unit index to its **source** UTF-16 offset. Content units
+/// map to their true source position; a separator maps to the position just after the preceding line's
+/// content — separators are never inline-token endpoints (markers are content), so the map is exact
+/// where it matters (§5B.1).
+fn join_inline_lines(lines: &[ParagraphLine]) -> (Vec<u16>, usize, Vec<usize>) {
     if lines.is_empty() {
-        return (Vec::new(), 0);
+        return (Vec::new(), 0, Vec::new());
     }
     let mut text = Vec::new();
+    let mut src = Vec::new();
     for (i, line) in lines.iter().enumerate() {
-        text.extend_from_slice(&line.text);
+        for (k, &u) in line.text.iter().enumerate() {
+            text.push(u);
+            src.push(line.offset + k);
+        }
         if i < lines.len() - 1 {
+            let gap = line.offset + line.text.len(); // just past this line's content
             if line.hard_break_after {
                 text.push(0x01); // HARD_BREAK_SENTINEL
+                src.push(gap);
                 text.push(0x0A);
+                src.push(gap);
             } else {
                 text.push(0x0A);
+                src.push(gap);
             }
         }
     }
-    (text, lines[0].offset)
+    (text, lines[0].offset, src)
 }
 
 fn normalize_inline_separators(nodes: Vec<Inline>) -> Vec<Inline> {
@@ -787,6 +834,7 @@ fn parse_inline(
     diagnostics: &mut Vec<Diagnostic>,
     depth: i32,
     suppress: bool,
+    spans: &mut Vec<InlineSpan>,
 ) -> Vec<Inline> {
     let mut nodes: Vec<Inline> = Vec::new();
     let len = units.len();
@@ -811,6 +859,8 @@ fn parse_inline(
                     cursor += 1;
                 }
                 Some(close) => {
+                    // Full token range incl. the surrounding backticks (§5B.1).
+                    spans.push(InlineSpan { start: base + cursor, end: base + close + 1, kind: InlineKind::Code });
                     push_node(&mut nodes, Inline::Code(units[cursor + 1..close].to_vec()));
                     cursor = close + 1;
                 }
@@ -831,7 +881,9 @@ fn parse_inline(
                     ));
                     cursor = link.end_index;
                 } else {
-                    let children = parse_inline_children(&link.label, base + cursor + 1, diagnostics, depth);
+                    // Full `[label](href)` range (§5B.1); children recurse and push nested spans.
+                    spans.push(InlineSpan { start: base + cursor, end: base + link.end_index, kind: InlineKind::Link });
+                    let children = parse_inline_children(&link.label, base + cursor + 1, diagnostics, depth, spans);
                     nodes.push(Inline::Link { href: link.href, children });
                     cursor = link.end_index;
                 }
@@ -863,8 +915,10 @@ fn parse_inline(
                     cursor += 2;
                 }
                 Some(close) => {
+                    // Full `**…**` range (§5B.1); children recurse and push nested spans.
+                    spans.push(InlineSpan { start: base + cursor, end: base + close + 2, kind: InlineKind::Strong });
                     let children =
-                        parse_inline_children(&units[cursor + 2..close], base + cursor + 2, diagnostics, depth);
+                        parse_inline_children(&units[cursor + 2..close], base + cursor + 2, diagnostics, depth, spans);
                     nodes.push(Inline::Strong(children));
                     cursor = close + 2;
                 }
@@ -893,8 +947,10 @@ fn parse_inline(
                     cursor += 1;
                 }
                 Some(close) => {
+                    // Full `*…*` range (§5B.1); children recurse and push nested spans.
+                    spans.push(InlineSpan { start: base + cursor, end: base + close + 1, kind: InlineKind::Emphasis });
                     let children =
-                        parse_inline_children(&units[cursor + 1..close], base + cursor + 1, diagnostics, depth);
+                        parse_inline_children(&units[cursor + 1..close], base + cursor + 1, diagnostics, depth, spans);
                     nodes.push(Inline::Emphasis(children));
                     cursor = close + 1;
                 }
@@ -914,6 +970,7 @@ fn parse_inline_children(
     base: usize,
     diagnostics: &mut Vec<Diagnostic>,
     depth: i32,
+    spans: &mut Vec<InlineSpan>,
 ) -> Vec<Inline> {
     if depth >= MAX_INLINE_DEPTH {
         return if units.is_empty() {
@@ -922,7 +979,7 @@ fn parse_inline_children(
             vec![Inline::Text(units.to_vec())]
         };
     }
-    parse_inline(units, base, diagnostics, depth + 1, true)
+    parse_inline(units, base, diagnostics, depth + 1, true, spans)
 }
 
 struct LinkToken {
@@ -1084,5 +1141,84 @@ fn can_close_emphasis(units: &[u16], index: usize) -> bool {
     match next {
         None => true,
         Some(n) => is_ws(n) || is_closing_boundary(n),
+    }
+}
+
+// --- inline-span oracle (SCRIPTORIUM-NATIVE-STYLING.md §5B.3) -----------------
+// The parser-emitted `Document.inline_spans` (strong/emphasis/code/link, full source ranges) drive
+// the native editor's inline source-highlighting. Because it is the REAL parse, nesting, code
+// suppression, and escapes come out right; the load-bearing case is the multi-line paragraph join,
+// where a joined-buffer offset must be translated back to the source (§5B.1).
+#[cfg(test)]
+mod inline_span_tests {
+    use super::*;
+
+    fn spans(src: &str) -> (Vec<u16>, Vec<InlineSpan>) {
+        let units: Vec<u16> = src.encode_utf16().collect();
+        let doc = parse_document(&units);
+        (units.clone(), doc.inline_spans)
+    }
+    fn slice(units: &[u16], s: &InlineSpan) -> String {
+        String::from_utf16_lossy(&units[s.start..s.end])
+    }
+
+    #[test]
+    fn strong_emphasis_code_link_cover_the_full_token() {
+        let (u, sp) = spans("the **bold** word");
+        assert_eq!(sp.len(), 1);
+        assert_eq!(sp[0].kind, InlineKind::Strong);
+        assert_eq!(slice(&u, &sp[0]), "**bold**");
+
+        let (u, sp) = spans("an *em* here");
+        assert_eq!(sp.len(), 1);
+        assert_eq!(sp[0].kind, InlineKind::Emphasis);
+        assert_eq!(slice(&u, &sp[0]), "*em*");
+
+        let (u, sp) = spans("a `code` bit");
+        assert_eq!(sp.len(), 1);
+        assert_eq!(sp[0].kind, InlineKind::Code);
+        assert_eq!(slice(&u, &sp[0]), "`code`");
+
+        let (u, sp) = spans("see [text](http://example.com) ok");
+        assert_eq!(sp.len(), 1);
+        assert_eq!(sp[0].kind, InlineKind::Link);
+        assert_eq!(slice(&u, &sp[0]), "[text](http://example.com)");
+    }
+
+    #[test]
+    fn nested_emphasis_yields_overlapping_spans() {
+        // `*a **b** c*` → an Emphasis over the outer range AND a Strong over the inner, so `b` is
+        // styled by both (bold-italic) — the property re-tokenizing would get wrong.
+        let (u, sp) = spans("*a **b** c*");
+        let em = sp.iter().find(|s| s.kind == InlineKind::Emphasis).expect("emphasis");
+        let st = sp.iter().find(|s| s.kind == InlineKind::Strong).expect("strong");
+        assert_eq!(slice(&u, em), "*a **b** c*");
+        assert_eq!(slice(&u, st), "**b**");
+        assert!(em.start <= st.start && st.end <= em.end, "strong nests inside emphasis");
+    }
+
+    #[test]
+    fn a_code_span_suppresses_inner_markers() {
+        let (u, sp) = spans("`a *b* c`");
+        assert_eq!(sp.len(), 1, "only the code span; the inner * stays literal");
+        assert_eq!(sp[0].kind, InlineKind::Code);
+        assert_eq!(slice(&u, &sp[0]), "`a *b* c`");
+    }
+
+    #[test]
+    fn plain_prose_has_no_inline_spans() {
+        let (_u, sp) = spans("just ordinary words with no markup at all");
+        assert!(sp.is_empty());
+    }
+
+    #[test]
+    fn spans_are_source_accurate_across_a_multiline_paragraph_join() {
+        // Two source lines join into ONE paragraph. The strong is on the second line, which has
+        // leading whitespace stripped in the joined buffer — so its joined offset diverges from the
+        // source by that whitespace. The src-map translation must recover the true source range,
+        // else the style lands two units early (on the spaces). This is the load-bearing §5B.1 case.
+        let (u, sp) = spans("first\n  **second**");
+        let st = sp.iter().find(|s| s.kind == InlineKind::Strong).expect("strong");
+        assert_eq!(slice(&u, st), "**second**", "source-accurate across the join, not shifted onto the leading ws");
     }
 }

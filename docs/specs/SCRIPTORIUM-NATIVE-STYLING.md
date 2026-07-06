@@ -216,6 +216,59 @@ the literal `-`/`*`/`1.`, just dimmed and indented. (Named deferral, not an omis
 
 **List bullet glyphs stay deferred** (a display≠source divergence — the rendered model, §11).
 
+## 5B. Wave 2 — inline styling (teaching the parser)
+
+Wave 1/1.5 styled whole paragraphs; Wave 2 styles spans **inside** a line: **strong**, *emphasis*,
+`code`, and links. This needs each inline node's source position — which the AST doesn't carry (inline
+nodes mirror the JS parser's offset-less output). **Decision (fork resolved 2026-07-06):** teach the
+shared Rust parser to emit the positions, NOT re-tokenize markers in the editor. Re-tokenizing would be
+a second, dumber inline parser that drifts on the hard cases (nested emphasis, a code span suppressing
+its inner markers, escapes); the real parser already gets them right, and the parser is ours to extend.
+
+### 5B.1 The parser extension — `Document.inline_spans` (internal, non-serialized)
+
+`parse_inline` already walks the source with an absolute base offset (`base + cursor` is the source
+offset of every token). So the extension is small and surgical: thread a `&mut Vec<InlineSpan>`
+collector through `parse_inline`/`parse_inline_children`, and at each `Strong`/`Emphasis`/`Code`/`Link`
+construction push `InlineSpan { start, end, kind }` (the token's **full** source range, markers
+included). Because it is the real parse, nesting falls out for free — `*a **b** c*` pushes an Emphasis
+span over the outer range AND a Strong span over the inner, so `b` ends up bold-italic; a `` `*x*` ``
+code span pushes only a Code span (its inner `*` never becomes emphasis); escapes are already handled.
+
+- `ast.rs`: `pub enum InlineKind { Emphasis, Strong, Code, Link }`, `pub struct InlineSpan { start,
+  end, kind }`, and `pub inline_spans: Vec<InlineSpan>` on `Document`.
+- **Not serialized.** `json.rs`/`docjson.rs` take `&Document` and emit only `children`/`diagnostics`/
+  `stats`, so the JSON is **byte-identical** and the frozen-golden parity oracle stays green with zero
+  downstream churn — the Inline enum shape is unchanged, so the two serializers AND the server renderer
+  are untouched. This is the "make it ours, but keep the change surgical" path: the website doesn't need
+  inline positions yet (only the editor does, in-process), so we don't pay for serializing them. If a
+  web feature ever wants them, serialize then + regenerate the golden ([[feedback_parser_extension_freedom]]).
+
+### 5B.2 The editor side — apply inline styles within the paragraph
+
+The worker distills `doc.inline_spans` into per-paragraph editor spans carried back under the same N4
+staleness gate as the block styles. In `lay_out_paragraph`, after the block style/color, apply each
+inline span that falls in the paragraph (offsets relative to the paragraph start):
+
+| kind | attribute | slot |
+|---|---|---|
+| `Strong` | `SetFontWeight(bold)` | 32 (have) |
+| `Emphasis` | `SetFontStyle(italic)` | 33 (have) |
+| `Code` | color tint (a `code` brush) via `SetDrawingEffect` | 38 (have) |
+| `Link` | link-color brush + `SetUnderline` | 38 + **36 (new)** |
+
+Inline attributes compose with the block style (a `**bold**` word in a heading is bold-and-heading).
+The markers (`**`, `` ` ``, `[...]()`) dim like block markers — a Wave-2 refinement once the spans land.
+
+### 5B.3 Checkpoints
+
+- **2a — the parser emits `inline_spans`** (`ast.rs` + `parser.rs`, platform-free): the collector, a
+  lib oracle over the real parser (nesting, code-suppression, a link, an escape), and — the load-bearing
+  guard — the **frozen-golden parity oracle stays byte-identical** (inline_spans is not serialized).
+- **2b — the editor applies inline styles**: worker carries per-paragraph inline spans under the
+  staleness gate; `SetUnderline` (slot 36) typed + ABI-asserted + smoke; a `code`/`link` brush; applied
+  in `lay_out_paragraph`; the styled-range smoke extended (bold/italic/code/link on real DWrite), ASan.
+
 ## 6. The COM surface (typed, ABI-asserted, smoke-exercised)
 
 `IDWriteTextLayout` range formatting — three slots currently `usize` placeholders in the vtable, now

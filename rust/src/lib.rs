@@ -43,7 +43,7 @@ pub use json_value::Json;
 /// original diagnostics and stats (Object.assign keeps them — only `children` is
 /// replaced, so stats stay the FULL-document counts).
 pub fn without_leading_headings(doc: Document) -> Document {
-    let Document { children, diagnostics, stats_blocks, stats_words } = doc;
+    let Document { children, diagnostics, stats_blocks, stats_words, inline_spans } = doc;
     let mut first_content = 0;
     while first_content < children.len()
         && matches!(children[first_content], ast::Block::Heading { .. })
@@ -51,7 +51,9 @@ pub fn without_leading_headings(doc: Document) -> Document {
         first_content += 1;
     }
     let kept = children.into_iter().skip(first_content).collect();
-    Document { children: kept, diagnostics, stats_blocks, stats_words }
+    // inline_spans carry original-buffer offsets; this content view isn't source-highlighted (it
+    // feeds the serializer, which ignores them), so pass them through unchanged.
+    Document { children: kept, diagnostics, stats_blocks, stats_words, inline_spans }
 }
 
 /// parseDocument(text) then withoutLeadingHeadings — the reader's content AST.
