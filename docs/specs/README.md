@@ -87,6 +87,21 @@ roadmap, but they are not the roadmap itself. For overall orientation read
   `SetWindowTextW`; bytes via `std::fs`. The codec round-trip is oracled on every platform; the modal
   dialogs are the author's manual pass. Checkpoints IO-a (codec + document model) → IO-b (win32 wiring).
 
+- `SCRIPTORIUM-NATIVE-STYLING.md`: **AST-styled rendering (spec — build queued)** — the node that makes
+  the in-process parser *visible*. **Source-highlight** (decided): keep every markdown marker on screen
+  but style the spans (headings sized+weighted by level, block/pull quotes italic) — a faithful source
+  editor (display offsets == buffer offsets, caret walks real characters), sidestepping the hide-markers
+  (WYSIWYG) display↔source-mapping landmark. The AST gives **block spans but not inline spans** (inline
+  nodes mirror the JS parser's offset-less output), so **Wave 1 = block-level** (AST as-is), **Wave 2 =
+  inline** later with the parser-touch-vs-re-tokenize fork. The parse worker distills the `Document` into
+  a compact `Vec<StyleSpan>` carried back under N4's `content_gen` staleness gate (style with the
+  last-good AST, clamp offsets, re-style on fresh, degrade to plain); styling is applied in
+  `lay_out_paragraph` so paint + caret/hit-test + the N5 height index all share the styled layout (the
+  one-authority invariant; styled heights fold for free). New range-formatting COM (`SetFontWeight`/
+  `SetFontStyle`/`SetFontSize` + `DWRITE_TEXT_RANGE`, ABI-asserted + smoke-exercised); color
+  (`SetDrawingEffect`) + indent/rules/bullets are Wave-1.5. Checkpoints Style-a (model + plumbing,
+  platform-free) → Style-b (COM + apply).
+
 **Search, recovery, UX:**
 - `ORACLE-SEARCH-SPEC.md`: target AST-native search/index/ranking system for
   Spotlight and existing search surfaces.
