@@ -62,15 +62,19 @@ roadmap, but they are not the roadmap itself. For overall orientation read
   oracles + real-worker smoke, ASan-clean. **Honest scope:** no latency win at section scale — N4 is
   the *architecture* (pre-paid by N1's rope; the siren substrate) and its feel on book-scale content
   is **queued for the author**. With N4 the named roadmap (N0–N4) is complete.
-- `SCRIPTORIUM-NATIVE-VIRTUAL-LAYOUT.md`: **N5 (spec — build queued)** — virtualized layout, the first
-  `siren` **promoted to `need-now` by a measurement**. The N4 latency dig found the whole-document
-  `IDWriteTextLayout` rebuild (not parse) is the UI-thread cliff: **15–34× the parse cost, superlinear,
-  crossing 60 fps at ~8K words** (1M units = 851 ms/keystroke). Fix: lay out only the viewport-snapped
-  paragraph span (grain = the rope's newline paragraphs — synchronous, O(log n), no coupling to the
-  async parse), synthesize document geometry from a **paragraph height index** (measured + estimated
-  heights) with scroll-anchoring, all **behind the unchanged N3 geometry-service seam**. Edit cost drops
-  from O(document) to O(viewport + log n). Equivalence oracle (virtualized ≡ whole-doc for small docs) +
-  height-index/locality/anchor oracles + a large-doc flat-per-edit-time guard. Checkpoints N5a→N5b→N5c.
+- `SCRIPTORIUM-NATIVE-VIRTUAL-LAYOUT.md`: **N5 (built + locally validated)** — virtualized layout, the
+  first `siren` **promoted to `need-now` by a measurement** and now built. The N4 latency dig found the
+  whole-document `IDWriteTextLayout` rebuild (not parse) was the UI-thread cliff: **15–34× the parse cost,
+  superlinear, crossing 60 fps at ~8K words** (1M units = 851 ms/keystroke). Fix, built: the whole-doc
+  layout is **gone** — geometry is synthesized from a **paragraph height index** (`heights.rs`, platform-
+  free, fuzz-oracled; measured heights fold in, estimates for the rest) + **per-paragraph transient
+  layouts** (only the touched paragraph is shaped; grain = the rope's newline paragraphs), with
+  **scroll-anchoring** keeping the reader's content still as estimates resolve — all behind the unchanged
+  N3 geometry-service seam. Layout cost per keystroke/paint drops O(document) → O(viewport). Headline
+  **equivalence oracle** (virtualized ≡ whole-doc caret + content-height across every offset, on real
+  DWrite) + the height-index fuzz + a large-doc flat-cost smoke guard. Checkpoints N5a→N5b→N5c all built;
+  the scrolling *feel* on a real manuscript is queued for the author. (Deviation: per-paragraph transient
+  rather than the spec's single-windowed first cut — ledgered.)
 - `SCRIPTORIUM-NATIVE-IO.md`: **file I/O (built + locally validated)** — the first node outside the
   named N-roadmap and the enabler for the author's feel-loop (you can't judge feel on a real manuscript
   until you can load one, so it landed **before N5**). Open / Save / Save As / New with a real

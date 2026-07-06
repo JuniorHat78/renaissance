@@ -1,12 +1,23 @@
 # SCRIPTORIUM-NATIVE-VIRTUAL-LAYOUT — N5: virtualized layout
 
-**Status:** spec (2026-07-05). Part of the native-editor umbrella
-(`SCRIPTORIUM-NATIVE-EDITOR.md` §5 "Virtualized layout" — **promoted from `siren` to `need-now` by
-measurement**; §7 roadmap N5). This is the first node whose gate was opened by a number rather than
-a felt problem: N3 built the retained `IDWriteTextLayout` as the single geometry authority spanning
-the whole document, and N4 measured that **rebuilding it on every edit is the editor's real
-scaling cliff** — 15–34× the parse cost and *superlinear*. N5 makes the layout cost depend on the
-**viewport**, not the document.
+**Status: BUILT + locally validated (2026-07-06, checkpoints N5a `03ea2be` + N5b `f3808e2` + N5c
+`c826b11` + this reconcile).** Part of the native-editor umbrella (`SCRIPTORIUM-NATIVE-EDITOR.md` §5
+"Virtualized layout" — **promoted from `siren` to `need-now` by measurement**; §7 roadmap N5). This is
+the first node whose gate was opened by a number rather than a felt problem: N3 built the retained
+`IDWriteTextLayout` as the single geometry authority spanning the whole document, and N4 measured that
+**rebuilding it on every edit is the editor's real scaling cliff** — 15–34× the parse cost and
+*superlinear*. N5 makes the layout cost depend on the **viewport**, not the document.
+
+**One design deviation from this spec, ledgered (umbrella §8):** §3 chose a *single windowed layout*
+as the first cut, deferring per-paragraph layouts. The build went **per-paragraph, transient**
+instead — lay out only the one paragraph a query/paint touches; `content-y = para_top(i) + local`.
+It maps 1:1 onto the height index (one `GetMetrics` = one measured height), unifies the point-query
+and draw coordinate model (no window-local offset juggling, no off-window special-casing — the
+likeliest place to hide an off-by-one in a solo landmark change), and paragraphs are newline-isolated
+so a standalone paragraph's geometry is identical to its geometry in a whole-doc layout — exactly what
+the equivalence oracle pins. A persistent paragraph-layout cache (build-per-query today) + the precise
+rope-driven edit-locality diff (a count-preserving heuristic today) remain the measure-gated
+refinements §3/§6 named. The **"does scrolling a real manuscript feel right" verdict is the author's.**
 
 ## 1. Why this node — the measurement that promoted it
 
@@ -255,18 +266,22 @@ oracles pin the geometry; the large-doc smoke guards the flat-per-edit-time prop
 DirectWrite, ASan-clean. Then run it on a real manuscript and hand the *feel* of scrolling a long
 document to the author.
 
-## 12. Checkpoints
+## 12. Checkpoints — all BUILT
 
-- **N5a — the paragraph height index.** The mutable prefix-sum structure (measured + estimated
-  heights; prefix-sum / locate / update / insert / delete) + its model-based oracle, and
-  `content_height()` re-pointed at it. Platform-free, oracle-tested on every CI platform. No DWrite
-  yet — estimates only; proves the coordinate math in isolation.
-- **N5b — the windowed layout + geometry service.** Lay out the viewport-snapped paragraph span as
-  one retained layout; re-point `caret_xywh` / `hit_test_point` / selection through the height index
-  + local hit-testing; measure real paragraph heights on layout and fold them into the index. The
-  equivalence oracle (virtualized ≡ whole-doc for small docs) on real DWrite. Edit locality wired to
-  `refresh()`'s paragraph diff.
-- **N5c — estimate correction, scroll-anchoring & the flat-cost guard.** Scroll-anchor on
-  above-viewport corrections; resize/DPI re-measure; the large-doc scrolling/edit smoke asserting
-  per-edit time stays flat as the doc grows (the cliff regression guard, via N4b instrumentation).
-  Then the author's feel-loop on a real long manuscript.
+- **N5a — the paragraph height index (`03ea2be`).** `heights.rs`, un-gated + platform-free: the
+  mutable prefix-sum structure (measured + estimated heights; `reset_estimated`/`measure`/`estimate`/
+  `invalidate`/`insert`/`remove` + `total`/`para_top`/`locate`) + its model-based fuzz oracle (à la
+  the rope's), on every CI platform, no DWrite. Landed alone (with a one-commit `dead_code` allow) so
+  the coordinate math was validated before the risky COM swap.
+- **N5b — the geometry-authority swap (`f3808e2`).** The whole-doc `IDWriteTextLayout` is gone;
+  `content_height`/`caret_xywh`/`hit_test_content`/`display_caret_xywh`/`draw` all synthesize geometry
+  from the height index + per-paragraph transient layouts (the deviation above). Measured heights fold
+  in on layout so the total converges. **Headline equivalence oracle** (`virtualized_geometry_matches_
+  whole_doc`) on real DWrite: per-paragraph + `para_top` caret geometry and Σ-heights content-height
+  match the whole-doc layout within tolerance across every offset (wrapping paragraphs + an empty one).
+- **N5c — correction, anchoring & the flat-cost guard (`c826b11`).** Scroll-anchoring (`draw` takes
+  `&mut scroll_y`, pins the top visible paragraph across estimate corrections); edit stability
+  (`rebuild_heights` preserves measured heights across a same-width, same-count edit — no per-keystroke
+  scrollbar wobble); the large-doc smoke (8 scroll+paint cycles on a 20k-paragraph doc, flat-cost
+  bound) as the cliff regression guard. Resize/DPI re-measure falls out of the width-change reset +
+  anchoring. **The feel verdict on a real long manuscript is now queued for the author.**
