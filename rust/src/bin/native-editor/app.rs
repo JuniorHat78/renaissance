@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 
 use crate::buffer::{Snapshot, TextBuffer};
 use crate::codec::{encode, Decoded, Encoding, Newline};
+use crate::find::{FindState, Focus};
 use crate::grapheme;
 use crate::parse::ParseSignal;
 use crate::styles::StyleSpan;
@@ -115,6 +116,10 @@ pub struct App {
     /// (undo bumps the generation) but never under-reports — it can prompt to save byte-identical
     /// content, it can never drop unsaved work.
     saved_gen: u64,
+    /// The open Find/Replace session, or `None` when find-mode is closed (SCRIPTORIUM-NATIVE-FIND.md).
+    /// When `Some`, keystrokes route to a find-bar field (not the document), the renderer draws the
+    /// bar + match highlights, and the document selection tracks the active match.
+    find: Option<FindState>,
 }
 
 impl App {
@@ -138,6 +143,7 @@ impl App {
             encoding: Encoding::Utf8,
             newline: Newline::Lf,
             saved_gen: 0,
+            find: None,
         };
         app.refresh();
         // The empty untitled document is clean: closing it prompts for nothing (§4). `refresh`
@@ -385,6 +391,237 @@ impl App {
         }
         self.replace_selection(units, EditKind::Insert);
         self.group = None; // a paste is its own undo step
+    }
+
+    // --- Find / Replace (SCRIPTORIUM-NATIVE-FIND.md) --------------------------
+    // Find-mode is a focus state: while `find` is `Some`, keystrokes route to a bar field (not the
+    // document), the renderer draws the bar + match highlights, and the document selection tracks
+    // the active match. Every command leaves the match cache fresh (`ensure`), so the renderer reads
+    // a set consistent with the current content + query. The take/put-back pattern on `self.find`
+    // sidesteps borrowing `self.text` and `self.find` at once.
+
+    /// Whether find-mode is open (the renderer draws the bar; `win32` routes keys to it).
+    pub fn is_finding(&self) -> bool {
+        self.find.is_some()
+    }
+
+    /// Read access to the session — the renderer's source for bar text, matches, active, counter.
+    pub fn find_state(&self) -> Option<&FindState> {
+        self.find.as_ref()
+    }
+
+    /// Open (or refocus) find-mode. `with_replace` shows the replace field (Ctrl+H vs Ctrl+F).
+    /// Seeds the query from the document selection, seeks the first match at/after the caret, and
+    /// selects it. Re-invoking while open refocuses + reselects the query (standard Ctrl+F feel).
+    pub fn find_begin(&mut self, with_replace: bool) {
+        if let Some(fs) = &mut self.find {
+            fs.focus = Focus::Query;
+            fs.replace_visible |= with_replace;
+            fs.query.select_all();
+            return;
+        }
+        let seed = self.selected_units();
+        let mut fs = FindState::open(&seed, with_replace);
+        fs.seek_from(&self.text, self.content_gen, self.caret);
+        self.find = Some(fs);
+        self.apply_active_match();
+    }
+
+    /// Close find-mode, leaving the caret on the active match (already the selection).
+    pub fn find_end(&mut self) {
+        self.find = None;
+    }
+
+    /// Point the document selection at the active match — the highlight + reveal target. No-op with
+    /// no match (the query is empty or unmatched); the document selection then simply stays put.
+    fn apply_active_match(&mut self) {
+        let r = self.find.as_ref().and_then(|fs| fs.active_range());
+        if let Some(r) = r {
+            self.set_selection(r.start, r.end);
+        }
+    }
+
+    /// Whether the replace field currently has focus (Enter → Replace vs Find-next).
+    pub fn find_focus_is_replace(&self) -> bool {
+        matches!(self.find.as_ref().map(|fs| fs.focus), Some(Focus::Replace))
+    }
+
+    /// Tab between the query and replace fields (only when the replace field is visible).
+    pub fn find_toggle_focus(&mut self) {
+        if let Some(fs) = &mut self.find {
+            if fs.replace_visible {
+                fs.focus = if fs.focus == Focus::Query { Focus::Replace } else { Focus::Query };
+            }
+        }
+    }
+
+    /// Advance / retreat the active match, wrapping, and reselect it (Enter/F3, Shift+Enter/F3).
+    pub fn find_next(&mut self) {
+        let mut fs = match self.find.take() {
+            Some(f) => f,
+            None => return,
+        };
+        fs.next(&self.text, self.content_gen);
+        self.find = Some(fs);
+        self.apply_active_match();
+    }
+    pub fn find_prev(&mut self) {
+        let mut fs = match self.find.take() {
+            Some(f) => f,
+            None => return,
+        };
+        fs.prev(&self.text, self.content_gen);
+        self.find = Some(fs);
+        self.apply_active_match();
+    }
+
+    /// Route a typed unit into the focused bar field. When the *query* changes, re-run the match
+    /// set (incremental find) and reselect the nearest match. A newline is stripped by the field.
+    pub fn find_input(&mut self, unit: u16) {
+        self.find_edit(|f| f.insert(&[unit]));
+    }
+    /// Paste `units` into the focused field (find-mode clipboard).
+    pub fn find_paste(&mut self, units: &[u16]) {
+        self.find_edit(|f| f.insert(units));
+    }
+    pub fn find_backspace(&mut self) {
+        self.find_edit(|f| f.backspace());
+    }
+    pub fn find_delete(&mut self) {
+        self.find_edit(|f| f.delete_forward());
+    }
+
+    /// Apply an edit `op` to the focused field, then — if the query changed — re-run matches and
+    /// reselect. The single choke point for "the field's text changed."
+    fn find_edit(&mut self, op: impl FnOnce(&mut crate::minedit::MiniEdit)) {
+        let mut fs = match self.find.take() {
+            Some(f) => f,
+            None => return,
+        };
+        let is_query = fs.focus == Focus::Query;
+        op(fs.focused());
+        if is_query {
+            fs.ensure(&self.text, self.content_gen);
+        }
+        self.find = Some(fs);
+        if is_query {
+            self.apply_active_match();
+        }
+    }
+
+    /// Move the caret within the focused field (arrows/Home/End in the bar). Field motion never
+    /// changes the match set, so no re-run.
+    pub fn find_field_motion(&mut self, motion: Motion, extend: bool) {
+        if let Some(fs) = &mut self.find {
+            let f = fs.focused();
+            match motion {
+                Motion::Left => f.left(extend),
+                Motion::Right => f.right(extend),
+                Motion::WordLeft => f.word_left(extend),
+                Motion::WordRight => f.word_right(extend),
+                Motion::Home => f.home(extend),
+                Motion::End => f.end(extend),
+            }
+        }
+    }
+    pub fn find_field_select_all(&mut self) {
+        if let Some(fs) = &mut self.find {
+            fs.focused().select_all();
+        }
+    }
+    /// Copy the focused field's selection (find-mode Ctrl+C).
+    pub fn find_field_copy(&self) -> Vec<u16> {
+        match &self.find {
+            Some(fs) => match fs.focus {
+                Focus::Query => fs.query.selected_units(),
+                Focus::Replace => fs.replace.selected_units(),
+            },
+            None => Vec::new(),
+        }
+    }
+
+    pub fn find_toggle_case(&mut self) {
+        self.find_retune(|o| o.case_sensitive = !o.case_sensitive);
+    }
+    pub fn find_toggle_word(&mut self) {
+        self.find_retune(|o| o.whole_word = !o.whole_word);
+    }
+    fn find_retune(&mut self, op: impl FnOnce(&mut crate::find::FindOpts)) {
+        let mut fs = match self.find.take() {
+            Some(f) => f,
+            None => return,
+        };
+        op(&mut fs.opts);
+        fs.ensure(&self.text, self.content_gen);
+        self.find = Some(fs);
+        self.apply_active_match();
+    }
+
+    /// Replace the active match with the replace field's text as **one** undo step, then advance to
+    /// the next match at/after the edit (never re-hitting the just-inserted text). Returns whether a
+    /// replacement happened (there was an active match).
+    pub fn find_replace_current(&mut self) -> bool {
+        let mut fs = match self.find.take() {
+            Some(f) => f,
+            None => return false,
+        };
+        fs.ensure(&self.text, self.content_gen);
+        let range = match fs.active_range() {
+            Some(r) => r,
+            None => {
+                self.find = Some(fs);
+                return false;
+            }
+        };
+        let repl = fs.replace.text().to_vec();
+        self.group = None;
+        self.set_selection(range.start, range.end);
+        self.replace_selection(&repl, EditKind::Insert);
+        self.group = None; // isolate: a replace is its own undo step (like paste)
+        let at = range.start + repl.len();
+        fs.invalidate();
+        fs.seek_from(&self.text, self.content_gen, at);
+        self.find = Some(fs);
+        self.apply_active_match();
+        true
+    }
+
+    /// Replace **every** match in one undo transaction (§6). Snapshots the match set once, then
+    /// applies right-to-left so earlier offsets never shift under the edit — which also makes a
+    /// self-matching superstring (`a`→`aa`) impossible to loop, since we never re-scan mid-batch.
+    /// One Ctrl+Z reverses the whole batch. Returns the number replaced.
+    pub fn find_replace_all(&mut self) -> usize {
+        let mut fs = match self.find.take() {
+            Some(f) => f,
+            None => return 0,
+        };
+        fs.ensure(&self.text, self.content_gen);
+        let repl = fs.replace.text().to_vec();
+        let ms = fs.matches().to_vec();
+        let count = ms.len();
+        if count > 0 {
+            // One pre-edit checkpoint for the entire batch (begin_group can't express this — it
+            // keys on edit *kind*; here we want a single snapshot spanning many edits).
+            self.undo.push(Checkpoint { snap: self.buffer.snapshot(), caret: self.caret });
+            self.redo.clear();
+            self.group = None;
+            for m in ms.iter().rev() {
+                self.buffer.delete(m.start..m.end);
+                if !repl.is_empty() {
+                    self.buffer.insert(m.start, &repl);
+                }
+            }
+            // Land the caret at the end of the first replacement (its offset is unshifted, since we
+            // applied right-to-left).
+            self.caret = ms.first().map(|m| m.start + repl.len()).unwrap_or(self.caret);
+            self.anchor = self.caret;
+            self.refresh();
+            fs.invalidate();
+            fs.seek_from(&self.text, self.content_gen, self.caret);
+        }
+        self.find = Some(fs);
+        self.apply_active_match();
+        count
     }
 
     /// Open a new undo group (push a pre-edit checkpoint) when the edit kind changes.
@@ -805,5 +1042,165 @@ mod document_tests {
         app.load_document(decode(&original), Some(PathBuf::from("doc.txt")));
         // Saving with no further edits reproduces the original bytes (preserve-on-save, §3).
         assert_eq!(app.bytes_to_save(), original, "save round-trips the file's encoding + newline");
+    }
+}
+
+// --- Find / Replace command oracle (SCRIPTORIUM-NATIVE-FIND.md) ---------------
+// The deterministic half: open/seek, incremental query, wrap navigation, the option toggles, and —
+// the correctness heart — the Replace transactions (one-undo-per-replace, one-undo-for-all,
+// right-to-left batch, self-matching-superstring safety). The bar's *look* is the author's (§9).
+#[cfg(test)]
+mod find_app_tests {
+    use super::*;
+
+    fn s(app: &App) -> String {
+        String::from_utf16(&app.text).unwrap()
+    }
+    fn app_with(text: &str) -> App {
+        let mut app = App::new();
+        for c in text.encode_utf16() {
+            app.input_char(c);
+        }
+        app
+    }
+    fn query(app: &mut App, q: &str) {
+        for c in q.encode_utf16() {
+            app.find_input(c);
+        }
+    }
+    fn into_replace(app: &mut App, r: &str) {
+        app.find_toggle_focus(); // requires replace_visible
+        for c in r.encode_utf16() {
+            app.find_input(c);
+        }
+    }
+
+    #[test]
+    fn open_seeds_from_selection_and_selects_a_match() {
+        let mut app = app_with("cat dog cat");
+        app.set_selection(0, 3); // select "cat"; caret lands at 3
+        app.find_begin(false);
+        assert!(app.is_finding());
+        // Seeded query "cat"; first match at/after the caret (3) is the one at 8.
+        assert_eq!(app.selection(), (8, 11));
+    }
+
+    #[test]
+    fn incremental_query_tracks_the_first_match() {
+        let mut app = app_with("alpha beta alpha");
+        app.set_caret(0, false);
+        app.find_begin(false);
+        query(&mut app, "alpha");
+        assert_eq!(app.find_state().unwrap().match_count(), 2);
+        assert_eq!(app.selection(), (0, 5)); // the doc selection tracks the active match
+    }
+
+    #[test]
+    fn next_prev_wrap_and_move_the_selection() {
+        let mut app = app_with("x x x");
+        app.set_caret(0, false);
+        app.find_begin(false);
+        query(&mut app, "x");
+        assert_eq!(app.selection(), (0, 1));
+        app.find_next();
+        assert_eq!(app.selection(), (2, 3));
+        app.find_next();
+        assert_eq!(app.selection(), (4, 5));
+        app.find_next(); // wrap to first
+        assert_eq!(app.selection(), (0, 1));
+        app.find_prev(); // wrap back to last
+        assert_eq!(app.selection(), (4, 5));
+    }
+
+    #[test]
+    fn toggles_refilter_the_match_set() {
+        let mut app = app_with("cat Cat category");
+        app.set_caret(0, false);
+        app.find_begin(false);
+        query(&mut app, "cat");
+        assert_eq!(app.find_state().unwrap().match_count(), 3); // ci substring
+        app.find_toggle_case();
+        assert_eq!(app.find_state().unwrap().match_count(), 2); // "cat", "cat"egory
+        app.find_toggle_word();
+        assert_eq!(app.find_state().unwrap().match_count(), 1); // standalone "cat" only
+    }
+
+    #[test]
+    fn replace_current_is_one_undo_step_and_advances() {
+        let mut app = app_with("cat cat cat");
+        app.set_caret(0, false);
+        app.find_begin(true);
+        query(&mut app, "cat");
+        into_replace(&mut app, "dog");
+        assert!(app.find_replace_current());
+        assert_eq!(s(&app), "dog cat cat");
+        // The active match advanced past the edit (to the next "cat").
+        assert_eq!(app.selection(), (4, 7));
+        // One undo reverses just this replacement.
+        app.input_char(0x1A);
+        assert_eq!(s(&app), "cat cat cat");
+    }
+
+    #[test]
+    fn replace_all_is_one_undo_for_the_whole_batch() {
+        let mut app = app_with("cat cat cat");
+        app.set_caret(0, false);
+        app.find_begin(true);
+        query(&mut app, "cat");
+        into_replace(&mut app, "dog");
+        assert_eq!(app.find_replace_all(), 3);
+        assert_eq!(s(&app), "dog dog dog");
+        app.input_char(0x1A); // a single undo
+        assert_eq!(s(&app), "cat cat cat");
+    }
+
+    #[test]
+    fn replace_all_superstring_terminates_and_is_correct() {
+        // The self-match hazard: query "a", replacement "aa". A live match→replace→re-scan loop
+        // would never terminate; the snapshot-then-apply-right-to-left design replaces each
+        // original 'a' exactly once. "banana" -> b|aa|n|aa|n|aa.
+        let mut app = app_with("banana");
+        app.set_caret(0, false);
+        app.find_begin(true);
+        query(&mut app, "a");
+        into_replace(&mut app, "aa");
+        assert_eq!(app.find_replace_all(), 3);
+        assert_eq!(s(&app), "baanaanaa");
+    }
+
+    #[test]
+    fn replace_all_with_empty_deletes_every_match() {
+        let mut app = app_with("a-b-c-");
+        app.set_caret(0, false);
+        app.find_begin(true);
+        query(&mut app, "-");
+        // The replace field is left empty.
+        assert_eq!(app.find_replace_all(), 3);
+        assert_eq!(s(&app), "abc");
+    }
+
+    #[test]
+    fn replace_all_right_to_left_keeps_offsets_valid() {
+        // Different-length replacement across several matches: right-to-left application means no
+        // earlier match's offset shifts before it's applied.
+        let mut app = app_with("x.x.x");
+        app.set_caret(0, false);
+        app.find_begin(true);
+        query(&mut app, "x");
+        into_replace(&mut app, "yyy");
+        assert_eq!(app.find_replace_all(), 3);
+        assert_eq!(s(&app), "yyy.yyy.yyy");
+    }
+
+    #[test]
+    fn close_leaves_the_caret_on_the_active_match() {
+        let mut app = app_with("find me here");
+        app.set_caret(0, false);
+        app.find_begin(false);
+        query(&mut app, "here");
+        assert_eq!(app.selection(), (8, 12));
+        app.find_end();
+        assert!(!app.is_finding());
+        assert_eq!(app.selection(), (8, 12)); // ready to edit exactly where you landed
     }
 }

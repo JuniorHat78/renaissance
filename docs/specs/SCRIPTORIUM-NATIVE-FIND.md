@@ -1,10 +1,22 @@
 # Scriptorium Native Editor — Find / Replace
 
-**Status: SPEC (planned) — 2026-07-06.** The next node after the styling work, and the
-last piece of table-stakes standing between the editor and *drafting in it for real*: an
+**Status: BUILT + locally validated (2026-07-07).** The next node after the styling work, and
+the last piece of table-stakes standing between the editor and *drafting in it for real*: an
 author cannot live in a tool that can't search its own document. Chosen by the author over
 two alternatives (undo-granularity polish — queued as the follow-on "Editing polish" node;
-and the site-integration through-line — deferred as an open fork, §11 of the umbrella).
+and the site-integration through-line — deferred as an open fork, §11 of the umbrella). Built
+in two commits: **F-a** the pure match engine (`5989dff`), then **F-b + F-c together** (find-mode +
+navigation + the self-drawn bar + both Replace transactions) — collapsed like IO-a+IO-b and
+style-a+style-b, because the `App` find/replace methods are dead in a bin crate until `win32`
+routes to them (`pub` ≠ reachability), so a warning-free tree per commit outweighed the split.
+Validated: 107 oracles (11 match-engine incl. a 20k-iter differential fuzz, 4 `FindState`, 7
+`MiniEdit`, 10 App find/replace incl. the self-match + right-to-left transaction proofs) + the
+windowed smoke driving find-mode on real DirectWrite (both input branches, the bar + highlight
+render, both Replace transactions) + ASan-clean across the new draw calls, clippy clean. The
+bar's *look* (colors/geometry/wrap affordance) is the author's feel-loop (§9). One deferral noted
+below: undo *while find-mode is open* (Ctrl+Z routes nowhere in the find key table — Esc then
+undo); and full IME *composition preview* in the query field (committed input works; the inline
+preview is the document's, suppressed in find-mode).
 
 Built against the umbrella (`SCRIPTORIUM-NATIVE-EDITOR.md`) — same dependency line (the OS
 API, no crate), same seam (`app` platform-free; only `win32`/`render` touch the OS), same
@@ -209,17 +221,27 @@ Bin-crate reality (from IO/styling): `pub` is not reachability in a binary, so a
 must land warning-free. Planned split (may collapse to fewer commits if the dead-code line
 forces it, as IO's two did):
 
-- **F-a — the match engine (`find.rs`).** Literal scan, case-fold, whole-word, surrogate-safe,
-  overlap rule, empty-query rule. Pure, fully oracled (including a differential fuzz: our scan
-  vs a trivially-correct reference over random haystack/query/opts). No UI yet — dead in the bin
-  until F-b wires it, so F-a + F-b likely land together (like IO-a+IO-b).
-- **F-b — find-mode + navigation + highlight.** `FindState`, `MiniEdit`, focus routing, Ctrl+F
-  seed-from-selection, next/prev/wrap, viewport highlight + active-match reveal, the self-drawn
-  bar. The smoke test drives Ctrl+F → type a query → Enter-through-matches → Esc on a real
-  window and asserts the caret lands on a match and nothing leaks/crashes.
-- **F-c — replace + replace-all.** The one-undo-per-replace and one-undo-for-all transactions,
-  right-to-left application, the self-match-safety oracle, count reporting. Smoke drives a
-  Replace All on a live window and asserts the byte result + a single Ctrl+Z reversal.
+- **F-a — the match engine (`find.rs`). ✅ BUILT (`5989dff`).** Literal scan, case-fold,
+  whole-word, surrogate-safe, overlap rule, empty-query rule. Pure, fully oracled (including a
+  differential fuzz: our scan vs a trivially-correct reference over random haystack/query/opts).
+  `MiniEdit` (`minedit.rs`, platform-free) landed in F-b as its own oracled module.
+- **F-b — find-mode + navigation + highlight. ✅ BUILT.** `FindState` (in `find.rs`), `MiniEdit`,
+  focus routing, Ctrl+F/Ctrl+H seed-from-selection, next/prev/wrap, viewport highlight (binary-
+  searched, sorted matches) + active-match reveal, the self-drawn bar (query/replace fields, caret,
+  counter, `Aa`/`W` toggles). The blue selection is suppressed in find-mode (the amber active-match
+  fill stands in). The smoke drives find-mode → query → Enter-through-matches → Esc on a real window.
+- **F-c — replace + replace-all. ✅ BUILT (with F-b).** The one-undo-per-replace and one-undo-
+  for-all transactions, right-to-left application, the self-match-safety oracle, count reporting.
+  Alt+Enter = Replace All; Enter in the replace field = Replace + advance. Smoke drives both on a
+  live window.
+
+**Key wiring facts (built):** VK constants for the find keys added to `win32::sys`; `handle_find_key`
+is the find command table (returns `false` for plain typing → falls to WM_CHAR → the field); WM_CHAR
+routes printable units to the focused field while find-mode is open and swallows control units so
+Enter/Backspace/Ctrl+H don't double-handle. Six new palette brushes (match wash + active, bar bg/
+border, field well, dim) — all `FillRectangle`-based (no new COM slot; `stroke_rect` frames with four
+thin rects). The active match is also the document selection, so `ensure_caret_visible` reveals it for
+free. Colors + geometry constants at the top of `render.rs` are the tunable feel knobs.
 
 Every checkpoint: debug + release oracles, ASan-clean (there's no new FFI, but the highlight
 path touches the render target — run it), clippy clean, warning-free, per-checkpoint commit +

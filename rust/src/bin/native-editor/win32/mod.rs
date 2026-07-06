@@ -254,17 +254,31 @@ unsafe fn wndproc_impl(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> 
             0
         }
         WM_CHAR => {
-            state.app.input_char(wparam as u16);
-            // An edit is a horizontal move: it ends any vertical run, so the next Up/Down
-            // re-seeds the goal column from the caret's new x (§5).
-            state.goal_x = None;
-            // Hand the new content to the off-thread parser (N4). No-op if nothing changed.
-            reparse_if_dirty(state);
-            // Typing at the bottom must keep the caret on screen (scroll-follows-caret, §6).
-            ensure_caret_visible(state);
-            // An edit makes the caret solid again so it's visible right after typing.
-            state.caret_visible = true;
-            InvalidateRect(hwnd, null(), 0);
+            let ch = wparam as u16;
+            if state.app.is_finding() {
+                // Find-mode (FIND §4): only printable units reach the focused bar field; control
+                // units (Enter/Backspace/Tab/Esc) are handled as commands in WM_KEYDOWN, so they're
+                // swallowed here to avoid double-handling (e.g. Ctrl+H's 0x08, Enter's 0x0D).
+                if ch >= 0x20 && ch != 0x7F {
+                    state.app.find_input(ch);
+                    // Reveal the re-sought active match (the document caret tracks it).
+                    ensure_caret_visible(state);
+                    state.caret_visible = true;
+                    InvalidateRect(hwnd, null(), 0);
+                }
+            } else {
+                state.app.input_char(ch);
+                // An edit is a horizontal move: it ends any vertical run, so the next Up/Down
+                // re-seeds the goal column from the caret's new x (§5).
+                state.goal_x = None;
+                // Hand the new content to the off-thread parser (N4). No-op if nothing changed.
+                reparse_if_dirty(state);
+                // Typing at the bottom must keep the caret on screen (scroll-follows-caret, §6).
+                ensure_caret_visible(state);
+                // An edit makes the caret solid again so it's visible right after typing.
+                state.caret_visible = true;
+                InvalidateRect(hwnd, null(), 0);
+            }
             0
         }
         WM_APP_PARSE_DONE => {
@@ -290,6 +304,7 @@ unsafe fn wndproc_impl(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> 
         WM_KEYDOWN => {
             let shift = key_down(VK_SHIFT);
             let ctrl = key_down(VK_CONTROL);
+            let alt = key_down(VK_MENU);
             let vk = wparam as u32;
 
             // Map VK (+ modifiers) to one editor action. `None` => not ours, fall through
@@ -299,6 +314,24 @@ unsafe fn wndproc_impl(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> 
             let mut handled = true;
             let mut is_vertical = false;
             let mut moves_caret = true;
+
+            // Find-mode owns the keyboard while open (FIND §4): its command table runs instead of
+            // the document's. Unhandled keys fall through to DefWindowProc → WM_CHAR → the field.
+            // The shared tail still runs (reveal the active match, repaint), so a nav/replace scrolls
+            // its match into view exactly like a caret move.
+            if state.app.is_finding() {
+                handled = handle_find_key(state, hwnd, vk, shift, ctrl, alt);
+                if handled {
+                    state.goal_x = None;
+                    reparse_if_dirty(state); // a replace changed content; a query edit no-ops
+                    ensure_caret_visible(state);
+                    state.caret_visible = true;
+                    InvalidateRect(hwnd, null(), 0);
+                    return 0;
+                }
+                return DefWindowProcW(hwnd, msg, wparam, lparam);
+            }
+
             match vk {
                 VK_LEFT => {
                     let m = if ctrl { Motion::WordLeft } else { Motion::Left };
@@ -362,6 +395,10 @@ unsafe fn wndproc_impl(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> 
                     do_save(state, hwnd, false);
                     moves_caret = false;
                 }
+                // Open find-mode (FIND §4): Ctrl+F find, Ctrl+H find+replace. Seeds from the
+                // selection and reveals the first match (so leave `moves_caret` true).
+                VK_F if ctrl => state.app.find_begin(false),
+                VK_H if ctrl => state.app.find_begin(true),
                 _ => handled = false,
             }
 
@@ -555,6 +592,60 @@ unsafe fn wndproc_impl(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> 
         }
         _ => DefWindowProcW(hwnd, msg, wparam, lparam),
     }
+}
+
+/// The find-mode command table (FIND §4). Returns `true` if the key was consumed; `false` for a
+/// plain typing key, which then falls through to DefWindowProc → WM_CHAR → the focused field.
+/// Enter navigates from the query field / replaces from the replace field; Alt+Enter replaces all;
+/// Esc closes; the letter chords edit/toggle. Field arrows move within the field, not the document.
+unsafe fn handle_find_key(state: &mut WindowState, hwnd: HWND, vk: u32, shift: bool, ctrl: bool, alt: bool) -> bool {
+    let a = &mut state.app;
+    match vk {
+        VK_ESCAPE => a.find_end(),
+        VK_RETURN => {
+            if alt {
+                a.find_replace_all();
+            } else if a.find_focus_is_replace() {
+                a.find_replace_current();
+            } else if shift {
+                a.find_prev();
+            } else {
+                a.find_next();
+            }
+        }
+        VK_F3 => {
+            if shift {
+                a.find_prev();
+            } else {
+                a.find_next();
+            }
+        }
+        VK_TAB => a.find_toggle_focus(),
+        VK_BACK => a.find_backspace(),
+        VK_DELETE => a.find_delete(),
+        VK_LEFT => a.find_field_motion(if ctrl { Motion::WordLeft } else { Motion::Left }, shift),
+        VK_RIGHT => a.find_field_motion(if ctrl { Motion::WordRight } else { Motion::Right }, shift),
+        VK_HOME => a.find_field_motion(Motion::Home, shift),
+        VK_END => a.find_field_motion(Motion::End, shift),
+        VK_A if ctrl => a.find_field_select_all(),
+        VK_C if ctrl => clipboard_set(hwnd, &a.find_field_copy()),
+        VK_X if ctrl => {
+            let picked = a.find_field_copy();
+            clipboard_set(hwnd, &picked);
+            a.find_backspace(); // deletes the selection
+        }
+        VK_V if ctrl => {
+            if let Some(units) = clipboard_get(hwnd) {
+                a.find_paste(&units);
+            }
+        }
+        VK_F if ctrl => a.find_begin(false),
+        VK_H if ctrl => a.find_begin(true),
+        VK_C if alt => a.find_toggle_case(),
+        VK_W if alt => a.find_toggle_word(),
+        _ => return false,
+    }
+    true
 }
 
 /// Submit a fresh parse to the off-thread worker iff the content changed since the last submit
@@ -1673,6 +1764,43 @@ mod smoke_tests {
             let st = &*(GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut WindowState);
             assert_eq!(st.app.text.len(), 2, "expected two typed units");
             assert_eq!(st.app.selection(), (0, 2), "whole document should be selected");
+
+            // Find/Replace (SCRIPTORIUM-NATIVE-FIND.md §8): drive find-mode on real DirectWrite. Ctrl
+            // can't be synthesized (the modifiers read the real keyboard state), so open find-mode
+            // directly — as the composition block above sets `comp` directly — then drive the
+            // *unmodified* find keys through the real WndProc so the WM_CHAR + WM_KEYDOWN find
+            // branches AND `handle_find_key` AND the self-drawn bar / match-highlight render paths all
+            // run crash/leak-free (ASan-guarded — the phantom-slot lesson: new draw calls on a live
+            // target). Paint each step, exercise both Replace transactions, then close. Runs after the
+            // content assertions above (it mutates the buffer) and before the File I/O block (which
+            // replaces the document wholesale anyway).
+            {
+                let cs = &mut *(GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut WindowState);
+                cs.app.find_begin(true); // open with the replace field visible
+                assert!(cs.app.is_finding(), "find-mode should open");
+            }
+            SendMessageW(hwnd, WM_CHAR, 'i' as usize, 0); // -> find_input via the WM_CHAR find branch
+            SendMessageW(hwnd, WM_KEYDOWN, VK_RETURN as usize, 0); // find_next
+            SendMessageW(hwnd, WM_KEYDOWN, VK_F3 as usize, 0); // find_next
+            SendMessageW(hwnd, WM_KEYDOWN, VK_TAB as usize, 0); // focus the replace field
+            SendMessageW(hwnd, WM_CHAR, 'Z' as usize, 0); // -> the replace field
+            SendMessageW(hwnd, WM_KEYDOWN, VK_BACK as usize, 0); // find_backspace
+            InvalidateRect(hwnd, null(), 0);
+            SendMessageW(hwnd, WM_PAINT, 0, 0); // paint the bar (both fields, caret, counter, toggles) + highlights
+            {
+                let cs = &mut *(GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut WindowState);
+                cs.app.find_replace_current();
+                cs.app.find_replace_all();
+            }
+            InvalidateRect(hwnd, null(), 0);
+            SendMessageW(hwnd, WM_PAINT, 0, 0);
+            SendMessageW(hwnd, WM_KEYDOWN, VK_ESCAPE as usize, 0); // close find-mode
+            {
+                let cs = &*(GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut WindowState);
+                assert!(!cs.app.is_finding(), "Esc should close find-mode");
+            }
+            InvalidateRect(hwnd, null(), 0);
+            SendMessageW(hwnd, WM_PAINT, 0, 0);
 
             // File I/O (SCRIPTORIUM-NATIVE-IO.md §9): drive the dialog-free cores + the byte
             // round-trip through the live window. The modal GetOpen/SaveFileNameW can't run

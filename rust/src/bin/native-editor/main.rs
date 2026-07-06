@@ -23,6 +23,7 @@ mod codec;
 mod find;
 mod grapheme;
 mod heights;
+mod minedit;
 mod parse;
 mod styles;
 

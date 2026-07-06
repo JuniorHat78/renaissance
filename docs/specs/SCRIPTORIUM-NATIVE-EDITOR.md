@@ -45,10 +45,12 @@
 > made visible — headings render big+bold, quotes italic, from the in-process AST inside the virtualized
 > layouts; `SCRIPTORIUM-NATIVE-STYLING.md`). The **styling node is complete** (Wave 1 + Wave-1.5 color/
 > indent/rules + Wave 2 inline bold/italic/code/link — the shared parser was *taught* to emit inline
-> spans, parity held byte-identical). The frontier is now **Find / Replace** (§7,
-> `SCRIPTORIUM-NATIVE-FIND.md`) — the last table-stakes for real drafting — with an "Editing polish"
-> node queued behind it and the site-authoring through-line deferred as an open fork (§9). Last
-> refreshed: 2026-07-06.
+> spans, parity held byte-identical). **Find / Replace is now built** (§7,
+> `SCRIPTORIUM-NATIVE-FIND.md`): a literal/whole-word/case-fold match engine + a self-drawn find bar
+> driven by our own text engine + Replace/Replace-All undo transactions, zero new FFI, 107 oracles +
+> smoke + ASan. The **"Editing polish"** node (undo granularity + word count) is queued next; the
+> site-authoring through-line is deferred as an open fork (§9). The author's feel-loop (styling look,
+> find-bar look, N2b/N3/N4/N5 verdicts) is the live thread. Last refreshed: 2026-07-07.
 
 ---
 
@@ -327,19 +329,21 @@ skeleton, not speculation. Each phase below spawns its own JIT component spec.
   `SetFontSize` + `DWRITE_TEXT_RANGE`, ABI-asserted + smoke-exercised). **Wave 2 (inline bold/italic/
   code)** needs inline spans the AST doesn't carry → deferred with the parser-touch-vs-re-tokenize fork;
   **Wave-1.5** = color (`SetDrawingEffect`) + marker dimming + indent/rules/bullets.
-- **Find / Replace.** `[SPEC → SCRIPTORIUM-NATIVE-FIND.md, building]` The next node — the last
+- **Find / Replace. ✅ BUILT (2026-07-07).** `[SPEC → SCRIPTORIUM-NATIVE-FIND.md]` The last
   table-stakes standing between the editor and *drafting in it for real* (you can't live in a tool
   that can't search its own document). Chosen by the author over two alternatives (undo-granularity
   polish, queued as the follow-on "Editing polish" node below; and the site-integration through-line,
-  deferred as an open fork §9). A **reuse node**: it adds *zero* new FFI and one platform-free module
-  (`find.rs`) — the dividend of owning the engine. Literal + whole-word + case-fold match engine
-  (regex sirened behind a provider seam); a **self-drawn find bar** driven by our *own* text engine
-  (a `MiniEdit` — non-negotiable #2 forbids a Win32 `EDIT` child owning input); match highlight via
-  the existing `fill_selection_range` path; active-match reveal via N3/N5; and Replace / Replace-All
-  as clean undo transactions (Replace All = one checkpoint, applied right-to-left so a self-matching
-  superstring can't loop). Match set recomputes on the `content_gen` key, exactly like the layout
-  cache. Off-thread search is sirened behind the recompute seam (measure first). Checkpoints F-a
-  (match engine) → F-b (find-mode + nav + highlight) → F-c (replace).
+  deferred as an open fork §9). A **reuse node**: it added *zero* new FFI and two platform-free modules
+  (`find.rs` match engine + `FindState`, `minedit.rs`) — the dividend of owning the engine. Literal +
+  whole-word + case-fold match engine (regex sirened behind a provider seam); a **self-drawn find bar**
+  driven by our *own* text engine (a `MiniEdit` — non-negotiable #2 forbids a Win32 `EDIT` child owning
+  input); match highlight via the existing `fill_selection_range` path; active-match reveal via N3/N5;
+  and Replace / Replace-All as clean undo transactions (Replace All = one checkpoint, applied
+  right-to-left so a self-matching superstring can't loop). Match set recomputes on the `content_gen`
+  key, exactly like the layout cache. Built as F-a (match engine, `5989dff`) then F-b+F-c together
+  (find-mode + nav + highlight + both Replace transactions). Validated: 107 oracles + windowed smoke on
+  real DirectWrite + ASan-clean. **The bar's *look* is queued for the author's feel-loop.** Off-thread
+  search stays sirened behind the recompute seam (measure first).
 - **Editing polish (Lane B).** `[queued — spec just-in-time at build]` The author-chosen follow-on
   after Find: undo *granularity* (today a continuous typing run is one undo group — `begin_group`
   only breaks on edit-*kind* change; a word/pause boundary should start a new group so Ctrl+Z reverts

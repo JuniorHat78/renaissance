@@ -122,6 +122,16 @@ pub const SB_BOTTOM: u32 = 7;
 // service, not from `app` (SCRIPTORIUM-NATIVE-LAYOUT.md §5).
 pub const VK_SHIFT: i32 = 0x10;
 pub const VK_CONTROL: i32 = 0x11;
+pub const VK_MENU: i32 = 0x12; // Alt (find-mode option toggles)
+// Find/Replace (SCRIPTORIUM-NATIVE-FIND.md §4) — the find-mode command keys + letter chords.
+pub const VK_BACK: u32 = 0x08;
+pub const VK_TAB: u32 = 0x09;
+pub const VK_RETURN: u32 = 0x0D;
+pub const VK_ESCAPE: u32 = 0x1B;
+pub const VK_F3: u32 = 0x72;
+pub const VK_F: u32 = 0x46;
+pub const VK_H: u32 = 0x48;
+pub const VK_W: u32 = 0x57;
 pub const VK_PRIOR: u32 = 0x21; // Page Up
 pub const VK_NEXT: u32 = 0x22; // Page Down
 pub const VK_END: u32 = 0x23;

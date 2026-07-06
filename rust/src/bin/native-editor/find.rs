@@ -19,6 +19,158 @@
 use std::ops::Range;
 
 use crate::grapheme;
+use crate::minedit::MiniEdit;
+
+/// Which find-bar field holds focus while find-mode is open (§4). Tab toggles them; the
+/// document has focus only when find-mode is closed (`App::find` is `None`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Focus {
+    Query,
+    Replace,
+}
+
+/// The live state of an open find session (§4/§7): the query + replace fields, the options, and a
+/// **cached match set keyed on `(content_gen, query, opts)`** — recomputed lazily exactly like the
+/// N3 layout cache, so a stale set is never navigated. `App` owns one of these as `Option<FindState>`
+/// (`None` ⇒ find-mode closed). Platform-free: it holds no COM and drives no OS — the caret it
+/// moves is applied by `App`, the highlight it lists is drawn by `render`.
+pub struct FindState {
+    pub query: MiniEdit,
+    pub replace: MiniEdit,
+    pub opts: FindOpts,
+    /// Ctrl+H opens with the replace field shown; Ctrl+F without it.
+    pub replace_visible: bool,
+    pub focus: Focus,
+    /// The last navigation wrapped past an end — the quiet flash affordance (§5), read + cleared
+    /// by the renderer.
+    pub wrapped: bool,
+    // ---- the match cache (keyed like the layout cache) ----
+    cache: Vec<Range<usize>>,
+    cache_gen: u64,
+    cache_query: Vec<u16>,
+    cache_opts: FindOpts,
+    cache_valid: bool,
+    /// Index into `cache` of the active match (the one the next Enter/Replace acts on). Only
+    /// meaningful when `cache` is non-empty; preserved by offset across a recompute.
+    active: usize,
+}
+
+impl FindState {
+    /// Open a session, seeding the query from the document selection (`seed`) — the universal
+    /// "select a word, Ctrl+F, it's pre-filled and selected" affordance (§4).
+    pub fn open(seed: &[u16], replace_visible: bool) -> FindState {
+        FindState {
+            query: MiniEdit::seeded(seed),
+            replace: MiniEdit::new(),
+            opts: FindOpts::default(),
+            replace_visible,
+            focus: Focus::Query,
+            wrapped: false,
+            cache: Vec::new(),
+            cache_gen: 0,
+            cache_query: Vec::new(),
+            cache_opts: FindOpts::default(),
+            cache_valid: false,
+            active: 0,
+        }
+    }
+
+    /// The field that currently has focus (for routing input + drawing the caret).
+    pub fn focused(&mut self) -> &mut MiniEdit {
+        match self.focus {
+            Focus::Query => &mut self.query,
+            Focus::Replace => &mut self.replace,
+        }
+    }
+
+    /// Recompute the match set if `(content_gen, query, opts)` changed since last time — the lazy,
+    /// keyed rebuild (§3). Preserves the active match **by offset** (stay on the same spot as the
+    /// set shifts under an edit) rather than by raw index.
+    pub fn ensure(&mut self, text: &[u16], content_gen: u64) {
+        if self.cache_valid
+            && self.cache_gen == content_gen
+            && self.cache_opts == self.opts
+            && self.cache_query == self.query.text()
+        {
+            return;
+        }
+        let old_start = self.cache.get(self.active).map(|r| r.start);
+        self.cache = matches(text, self.query.text(), self.opts);
+        self.cache_gen = content_gen;
+        self.cache_opts = self.opts;
+        self.cache_query = self.query.text().to_vec();
+        self.cache_valid = true;
+        self.active = match old_start {
+            Some(o) => self.cache.iter().position(|m| m.start >= o).unwrap_or(0),
+            None => 0,
+        };
+        if self.active >= self.cache.len() {
+            self.active = 0;
+        }
+    }
+
+    /// Mark the cache stale (e.g. after a document edit) so the next `ensure` rebuilds.
+    pub fn invalidate(&mut self) {
+        self.cache_valid = false;
+    }
+
+    pub fn match_count(&self) -> usize {
+        self.cache.len()
+    }
+    pub fn matches(&self) -> &[Range<usize>] {
+        &self.cache
+    }
+    /// The active match's index (`1`-based display is `active_ordinal`), or `None` when empty.
+    pub fn active(&self) -> Option<usize> {
+        (!self.cache.is_empty()).then_some(self.active)
+    }
+    /// The active match's range, or `None` when there are no matches.
+    pub fn active_range(&self) -> Option<Range<usize>> {
+        self.cache.get(self.active).cloned()
+    }
+    /// The `1`-based ordinal of the active match for the `N / M` counter (`0` when empty).
+    pub fn active_ordinal(&self) -> usize {
+        if self.cache.is_empty() {
+            0
+        } else {
+            self.active + 1
+        }
+    }
+
+    /// Seed the active match to the first one at/after `from` (the document caret) — used on open
+    /// so the first shown match is where the reader is, not the top of the document (§4).
+    pub fn seek_from(&mut self, text: &[u16], content_gen: u64, from: usize) {
+        self.ensure(text, content_gen);
+        if let Some(i) = next_index(&self.cache, from) {
+            self.active = i;
+        }
+        self.wrapped = false;
+    }
+
+    /// Advance to the next match, wrapping (Enter / F3). Sets `wrapped` when it passes the end.
+    pub fn next(&mut self, text: &[u16], content_gen: u64) {
+        self.ensure(text, content_gen);
+        let n = self.cache.len();
+        if n == 0 {
+            return;
+        }
+        let nx = (self.active + 1) % n;
+        self.wrapped = nx <= self.active;
+        self.active = nx;
+    }
+
+    /// Retreat to the previous match, wrapping (Shift+Enter / Shift+F3).
+    pub fn prev(&mut self, text: &[u16], content_gen: u64) {
+        self.ensure(text, content_gen);
+        let n = self.cache.len();
+        if n == 0 {
+            return;
+        }
+        let pv = if self.active == 0 { n - 1 } else { self.active - 1 };
+        self.wrapped = pv >= self.active;
+        self.active = pv;
+    }
+}
 
 /// The two match modifiers the find bar toggles (§4). Regex is out (§10) — a hand-rolled engine
 /// is its own landmark, and lives behind this same `matches` seam when it arrives.
@@ -279,6 +431,72 @@ mod tests {
         fn upto(&mut self, n: usize) -> usize {
             (self.next() % n as u64) as usize
         }
+    }
+
+    // ---- FindState: the stateful find-mode core ----
+
+    #[test]
+    fn findstate_seeds_query_and_seeks_from_caret() {
+        let text = u("cat dog cat bird cat");
+        let mut fs = FindState::open(&u("cat"), false);
+        // Caret at 5 (inside "dog"): the first match at/after is the one at 8.
+        fs.seek_from(&text, 1, 5);
+        assert_eq!(fs.match_count(), 3);
+        assert_eq!(fs.active_range(), Some(8..11));
+        assert_eq!(fs.active_ordinal(), 2); // "2 / 3"
+    }
+
+    #[test]
+    fn findstate_next_prev_wrap() {
+        let text = u("a a a"); // matches at 0, 2, 4
+        let mut fs = FindState::open(&u("a"), false);
+        fs.seek_from(&text, 1, 0); // active = 0
+        assert_eq!(fs.active_range(), Some(0..1));
+        fs.next(&text, 1);
+        assert_eq!(fs.active_range(), Some(2..3));
+        assert!(!fs.wrapped);
+        fs.next(&text, 1);
+        assert_eq!(fs.active_range(), Some(4..5));
+        fs.next(&text, 1); // wrap
+        assert_eq!(fs.active_range(), Some(0..1));
+        assert!(fs.wrapped);
+        fs.prev(&text, 1); // wrap back to last
+        assert_eq!(fs.active_range(), Some(4..5));
+        assert!(fs.wrapped);
+    }
+
+    #[test]
+    fn findstate_cache_is_keyed_and_lazy() {
+        let text = u("xx xx");
+        let mut fs = FindState::open(&u("xx"), false);
+        fs.ensure(&text, 1);
+        assert_eq!(fs.match_count(), 2);
+        // Same key -> no rebuild would change anything; count stays.
+        fs.ensure(&text, 1);
+        assert_eq!(fs.match_count(), 2);
+        // Change opts -> rebuild (whole-word now excludes... still both are whole words here).
+        fs.opts.whole_word = true;
+        fs.ensure(&text, 1);
+        assert_eq!(fs.match_count(), 2);
+        // Empty the query -> no matches.
+        fs.query.clear();
+        fs.ensure(&text, 1);
+        assert_eq!(fs.match_count(), 0);
+        assert_eq!(fs.active(), None);
+        assert_eq!(fs.active_ordinal(), 0);
+    }
+
+    #[test]
+    fn findstate_preserves_active_by_offset_across_recompute() {
+        // Active on the 3rd "cat" (offset 8); a content bump that keeps the same matches must
+        // keep us on the match at offset 8, not snap to index 0.
+        let text = u("cat cat cat");
+        let mut fs = FindState::open(&u("cat"), false);
+        fs.seek_from(&text, 1, 8); // active = match at 8 (index 2)
+        assert_eq!(fs.active_range(), Some(8..11));
+        // A new generation with an unchanged match set: preserve by offset.
+        fs.ensure(&text, 2);
+        assert_eq!(fs.active_range(), Some(8..11));
     }
 
     #[test]

@@ -70,6 +70,13 @@ struct Palette {
     rule: ComPtr<ID2D1SolidColorBrush>,
     code: ComPtr<ID2D1SolidColorBrush>,
     link: ComPtr<ID2D1SolidColorBrush>,
+    // Find/Replace (FIND §5): match wash + active match, and the self-drawn bar's chrome.
+    match_hl: ComPtr<ID2D1SolidColorBrush>,
+    match_active: ComPtr<ID2D1SolidColorBrush>,
+    bar_bg: ComPtr<ID2D1SolidColorBrush>,
+    bar_border: ComPtr<ID2D1SolidColorBrush>,
+    field_bg: ComPtr<ID2D1SolidColorBrush>,
+    bar_dim: ComPtr<ID2D1SolidColorBrush>,
 }
 
 pub struct Renderer {
@@ -163,6 +170,17 @@ const RULE_COLOR: D2D1_COLOR_F = D2D1_COLOR_F { r: 0.80, g: 0.80, b: 0.84, a: 1.
 // Inline styling (STYLING §5B) — `code` a warm terracotta, links the accent blue (+ underline).
 const CODE_COLOR: D2D1_COLOR_F = D2D1_COLOR_F { r: 0.60, g: 0.32, b: 0.24, a: 1.0 };
 const LINK_COLOR: D2D1_COLOR_F = D2D1_COLOR_F { r: 0.16, g: 0.40, b: 0.85, a: 1.0 };
+
+// Find/Replace (FIND §5) — all feel knobs. Matches get a soft amber wash (translucent so glyphs
+// read through, like the selection); the active match a stronger amber so the one Enter acts on is
+// unmistakable. The self-drawn find bar (§4): a light elevated panel with a subtle border, a white
+// field well, and a dim tone for the counter / inactive toggles.
+const MATCH_HL_COLOR: D2D1_COLOR_F = D2D1_COLOR_F { r: 0.98, g: 0.78, b: 0.28, a: 0.38 };
+const MATCH_ACTIVE_COLOR: D2D1_COLOR_F = D2D1_COLOR_F { r: 0.98, g: 0.55, b: 0.14, a: 0.55 };
+const BAR_BG_COLOR: D2D1_COLOR_F = D2D1_COLOR_F { r: 0.94, g: 0.935, b: 0.92, a: 1.0 };
+const BAR_BORDER_COLOR: D2D1_COLOR_F = D2D1_COLOR_F { r: 0.72, g: 0.72, b: 0.75, a: 1.0 };
+const FIELD_BG_COLOR: D2D1_COLOR_F = D2D1_COLOR_F { r: 1.0, g: 1.0, b: 0.99, a: 1.0 };
+const BAR_DIM_COLOR: D2D1_COLOR_F = D2D1_COLOR_F { r: 0.50, g: 0.50, b: 0.55, a: 1.0 };
 
 /// The left indent (DIPs) for a paragraph's block kind (STYLING §5A.3): blockquotes and list items
 /// shift right; everything else is flush left. Pure — the ONE place kind → indent, shared by the
@@ -354,7 +372,10 @@ impl Renderer {
                 let comp_para = comp.map(|_| self.para_of_offset(lo));
                 // The one paragraph that paints the caret: the composition's while composing, else
                 // the caret's — so exactly one paragraph draws it (and none if blinked off).
-                let caret_owner = if !caret_visible {
+                // While find-mode is open, focus (and the caret) live in the find bar, so the
+                // document caret is suppressed — the active match is shown by its amber fill, not a
+                // caret (FIND §5). The field caret is drawn by `draw_find_bar`.
+                let caret_owner = if !caret_visible || app.is_finding() {
                     None
                 } else if comp.is_some() {
                     comp_para
@@ -365,6 +386,15 @@ impl Renderer {
                 let text_brush = self.text_brush.as_raw() as *mut c_void;
                 let sel = self.sel_brush.as_raw() as *mut c_void;
                 let caret_b = self.caret_brush.as_raw() as *mut c_void;
+
+                // Find-mode match highlights (FIND §5): the sorted match set from the open session
+                // (empty when closed). Each visible paragraph washes the matches intersecting it in
+                // amber (the active one stronger); off-screen matches cost nothing.
+                let find_matches: &[std::ops::Range<usize>] =
+                    app.find_state().map(|fs| fs.matches()).unwrap_or(&[]);
+                let find_active: Option<usize> = app.find_state().and_then(|fs| fs.active());
+                let match_hl = self.palette.match_hl.as_raw() as *mut c_void;
+                let match_active = self.palette.match_active.as_raw() as *mut c_void;
 
                 for i in p0..=p1 {
                     let oy = PAD_DIP - scroll + self.heights.para_top(i);
@@ -415,11 +445,27 @@ impl Renderer {
                         };
                         let lptr = layout.as_raw();
                         let ox = PAD_DIP + indent; // blockquote/list shift right (§5A.3)
-                        if app.has_selection() {
+                        // The blue selection is suppressed in find-mode (the active match's amber
+                        // fill stands in for it — the selection *is* the active match, FIND §5).
+                        if app.has_selection() && !app.is_finding() {
                             let s = lo.max(ps);
                             let e = hi.min(pe);
                             if e > s {
                                 fill_selection_range(rt, v, lptr, sel, ox, oy, (s - ps) as u32, (e - s) as u32);
+                            }
+                        }
+                        // Find match washes (FIND §5): matches are sorted by start, so binary-search
+                        // the first that can touch [ps, pe) and stop at the first past it.
+                        if !find_matches.is_empty() {
+                            let mut mi = find_matches.partition_point(|m| m.end <= ps);
+                            while mi < find_matches.len() && find_matches[mi].start < pe {
+                                let s = find_matches[mi].start.max(ps);
+                                let e = find_matches[mi].end.min(pe);
+                                if e > s {
+                                    let brush = if Some(mi) == find_active { match_active } else { match_hl };
+                                    fill_selection_range(rt, v, lptr, brush, ox, oy, (s - ps) as u32, (e - s) as u32);
+                                }
+                                mi += 1;
                             }
                         }
                         (v.draw_text_layout)(rt, D2D_POINT_2F { x: ox, y: oy }, lptr, text_brush, 0);
@@ -458,6 +504,12 @@ impl Renderer {
                 com_release(slayout as *mut c_void);
             }
 
+            // The find bar floats over everything, top-right (FIND §4/§5). Drawn last so it sits
+            // above the document + status strip; only when find-mode is open.
+            if app.is_finding() {
+                self.draw_find_bar(rt, v, app, dip_w, caret_visible);
+            }
+
             // EndDraw reports device loss here rather than failing each draw call. On
             // D2DERR_RECREATE_TARGET the GPU device is gone (driver reset, GPU removed,
             // sleep/resume): drop and rebuild the target + brushes; the next WM_PAINT
@@ -468,6 +520,142 @@ impl Renderer {
                 self.recreate_device_resources();
             }
         }
+    }
+
+    /// Draw the self-drawn find bar (FIND §4/§5): a light floating panel, top-right, with the query
+    /// field (and the replace field when visible), a match counter, and the option toggles — all
+    /// rendered with our own text engine, no OS widget. Every dimension/color here is a feel knob.
+    unsafe fn draw_find_bar(&self, rt: *mut ID2D1HwndRenderTarget, v: &ID2D1HwndRenderTargetVtbl, app: &App, dip_w: f32, caret_visible: bool) {
+        let fs = match app.find_state() {
+            Some(f) => f,
+            None => return,
+        };
+        // Geometry (DIPs).
+        let margin = 12.0;
+        let pad = 8.0;
+        let field_h = 24.0;
+        let row_gap = 6.0;
+        let counter_w = 52.0;
+        let toggle_w = 26.0;
+        let gap = 6.0;
+        let bar_w = 400.0_f32.min(dip_w - margin * 2.0).max(220.0);
+        let rows = if fs.replace_visible { 2 } else { 1 };
+        let bar_h = pad * 2.0 + field_h * rows as f32 + row_gap * (rows - 1) as f32;
+        let bar_x = (dip_w - margin - bar_w).max(margin);
+        let bar_y = margin;
+
+        let text_brush = self.text_brush.as_raw() as *mut c_void;
+        let dim = self.palette.bar_dim.as_raw() as *mut c_void;
+        let caret_b = self.caret_brush.as_raw() as *mut c_void;
+
+        // Panel + 1-DIP border.
+        let panel = D2D1_RECT_F { left: bar_x, top: bar_y, right: bar_x + bar_w, bottom: bar_y + bar_h };
+        (v.fill_rectangle)(rt, &panel, self.palette.bar_bg.as_raw() as *mut c_void);
+        self.stroke_rect(rt, v, &panel, self.palette.bar_border.as_raw() as *mut c_void, 1.0);
+
+        let field_x = bar_x + pad;
+        let field_w = bar_w - pad * 2.0 - counter_w - toggle_w * 2.0 - gap * 3.0;
+
+        // ---- row 1: the query field + counter + toggles ----
+        let r1 = bar_y + pad;
+        let focus_query = fs.focus == crate::find::Focus::Query;
+        self.draw_field(rt, v, field_x, r1, field_w, field_h, fs.query.text(), fs.query.caret(), caret_visible && focus_query, b"Find", caret_b, text_brush, dim);
+
+        // Counter: "3 / 17", or dim "no results" when the query is set but unmatched, or blank empty.
+        let counter_x = field_x + field_w + gap;
+        let counter: String = if fs.query.is_empty() {
+            String::new()
+        } else if fs.match_count() == 0 {
+            "0/0".to_string()
+        } else {
+            format!("{}/{}", fs.active_ordinal(), fs.match_count())
+        };
+        if !counter.is_empty() {
+            let cu: Vec<u16> = counter.encode_utf16().collect();
+            // The counter tints toward the active-match color briefly after a wrap (FIND §5).
+            let cbrush = if fs.wrapped { self.palette.match_active.as_raw() as *mut c_void } else { dim };
+            self.draw_bar_text(rt, v, counter_x, r1 + 4.0, counter_w, &cu, cbrush);
+        }
+
+        // Toggles: "Aa" (case) and "W" (whole word) — tinted when active.
+        let aa_x = counter_x + counter_w + gap;
+        let w_x = aa_x + toggle_w + gap;
+        let on = self.palette.match_active.as_raw() as *mut c_void;
+        let aa: Vec<u16> = "Aa".encode_utf16().collect();
+        let ww: Vec<u16> = "W".encode_utf16().collect();
+        self.draw_bar_text(rt, v, aa_x, r1 + 4.0, toggle_w, &aa, if fs.opts.case_sensitive { on } else { dim });
+        self.draw_bar_text(rt, v, w_x, r1 + 4.0, toggle_w, &ww, if fs.opts.whole_word { on } else { dim });
+
+        // ---- row 2: the replace field (when visible) ----
+        if fs.replace_visible {
+            let r2 = r1 + field_h + row_gap;
+            let focus_replace = fs.focus == crate::find::Focus::Replace;
+            self.draw_field(rt, v, field_x, r2, field_w, field_h, fs.replace.text(), fs.replace.caret(), caret_visible && focus_replace, b"Replace", caret_b, text_brush, dim);
+            // A dim hint of the replace keys.
+            let hint: Vec<u16> = "\u{21B5} one   \u{2325}\u{21B5} all".encode_utf16().collect();
+            self.draw_bar_text(rt, v, counter_x, r2 + 4.0, counter_w + toggle_w * 2.0 + gap * 2.0, &hint, dim);
+        }
+    }
+
+    /// One find-bar text field: a white well, the text (or a dim placeholder when empty), and the
+    /// caret when this field is focused + the blink is on.
+    #[allow(clippy::too_many_arguments)]
+    unsafe fn draw_field(&self, rt: *mut ID2D1HwndRenderTarget, v: &ID2D1HwndRenderTargetVtbl, x: f32, y: f32, w: f32, h: f32, text: &[u16], caret: usize, show_caret: bool, placeholder: &[u8], caret_b: *mut c_void, text_brush: *mut c_void, dim: *mut c_void) {
+        let well = D2D1_RECT_F { left: x, top: y, right: x + w, bottom: y + h };
+        (v.fill_rectangle)(rt, &well, self.palette.field_bg.as_raw() as *mut c_void);
+        self.stroke_rect(rt, v, &well, self.palette.bar_border.as_raw() as *mut c_void, 1.0);
+        let tx = x + 5.0;
+        let ty = y + 3.0;
+        let inner_w = (w - 10.0).max(1.0);
+        if text.is_empty() {
+            // Dim placeholder ("Find" / "Replace").
+            let ph: Vec<u16> = placeholder.iter().map(|&b| b as u16).collect();
+            let l = self.make_layout(&ph, self.text_format.as_raw(), inner_w, h);
+            if !l.is_null() {
+                (v.draw_text_layout)(rt, D2D_POINT_2F { x: tx, y: ty }, l, dim, 0);
+                com_release(l as *mut c_void);
+            }
+            if show_caret {
+                // Caret at the field start.
+                let empty = [0u16; 1];
+                let l2 = self.make_layout(&empty[..0], self.text_format.as_raw(), inner_w, h);
+                if !l2.is_null() {
+                    draw_caret(rt, v, l2, 0, 0, tx, ty, caret_b);
+                    com_release(l2 as *mut c_void);
+                }
+            }
+            return;
+        }
+        let l = self.make_layout(text, self.text_format.as_raw(), inner_w, h);
+        if !l.is_null() {
+            (v.draw_text_layout)(rt, D2D_POINT_2F { x: tx, y: ty }, l, text_brush, 0);
+            if show_caret {
+                draw_caret(rt, v, l, caret.min(text.len()), text.len(), tx, ty, caret_b);
+            }
+            com_release(l as *mut c_void);
+        }
+    }
+
+    /// A short run of bar text (counter / toggle / hint), left-aligned in `[x, x+w)`.
+    unsafe fn draw_bar_text(&self, rt: *mut ID2D1HwndRenderTarget, v: &ID2D1HwndRenderTargetVtbl, x: f32, y: f32, w: f32, text: &[u16], brush: *mut c_void) {
+        let l = self.make_layout(text, self.status_format.as_raw(), w.max(1.0), 40.0);
+        if !l.is_null() {
+            (v.draw_text_layout)(rt, D2D_POINT_2F { x, y }, l, brush, 0);
+            com_release(l as *mut c_void);
+        }
+    }
+
+    /// Stroke a 1-DIP-ish frame around `r` using four thin filled rects (no `DrawRectangle` slot
+    /// needed — stays within the already-proven `FillRectangle`).
+    unsafe fn stroke_rect(&self, rt: *mut ID2D1HwndRenderTarget, v: &ID2D1HwndRenderTargetVtbl, r: &D2D1_RECT_F, brush: *mut c_void, t: f32) {
+        let top = D2D1_RECT_F { left: r.left, top: r.top, right: r.right, bottom: r.top + t };
+        let bottom = D2D1_RECT_F { left: r.left, top: r.bottom - t, right: r.right, bottom: r.bottom };
+        let left = D2D1_RECT_F { left: r.left, top: r.top, right: r.left + t, bottom: r.bottom };
+        let right = D2D1_RECT_F { left: r.right - t, top: r.top, right: r.right, bottom: r.bottom };
+        (v.fill_rectangle)(rt, &top, brush);
+        (v.fill_rectangle)(rt, &bottom, brush);
+        (v.fill_rectangle)(rt, &left, brush);
+        (v.fill_rectangle)(rt, &right, brush);
     }
 
 
@@ -1010,6 +1198,12 @@ unsafe fn create_palette(rt: *mut ID2D1HwndRenderTarget) -> Result<Palette, HRES
         rule: ComPtr::from_raw(make_brush(rt, RULE_COLOR)?),
         code: ComPtr::from_raw(make_brush(rt, CODE_COLOR)?),
         link: ComPtr::from_raw(make_brush(rt, LINK_COLOR)?),
+        match_hl: ComPtr::from_raw(make_brush(rt, MATCH_HL_COLOR)?),
+        match_active: ComPtr::from_raw(make_brush(rt, MATCH_ACTIVE_COLOR)?),
+        bar_bg: ComPtr::from_raw(make_brush(rt, BAR_BG_COLOR)?),
+        bar_border: ComPtr::from_raw(make_brush(rt, BAR_BORDER_COLOR)?),
+        field_bg: ComPtr::from_raw(make_brush(rt, FIELD_BG_COLOR)?),
+        bar_dim: ComPtr::from_raw(make_brush(rt, BAR_DIM_COLOR)?),
     })
 }
 
