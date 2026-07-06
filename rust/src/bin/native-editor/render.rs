@@ -101,6 +101,13 @@ pub struct Renderer {
     // paragraph's kind, and the applied range is always the whole current paragraph, so a stale offset
     // never reads out of range (§4).
     styles: Vec<StyleSpan>,
+    // Whether `styles` lags the live text (a parse is in flight since the last edit), captured from
+    // `App` at the start of each paint and read by `resolve_style`. While true, the paragraph being
+    // edited is styled from a cheap lexical guess of its own markers (immediate) instead of the
+    // stale AST span; while false the AST is the sole authority (STYLING §4, the pop-in fix). Held as a
+    // field (not re-read from `App` per query) so point-queries between paints resolve styles
+    // identically to the frame on screen.
+    styles_stale: bool,
     // Held only to keep our factory ref alive for the Renderer's lifetime (RAII); the
     // render target keeps its own ref, so we never read this after construction.
     // Kept alive for the Renderer's lifetime AND read on device-loss recovery: the
@@ -172,6 +179,7 @@ impl Renderer {
                 heights: HeightIndex::new(),
                 para_starts: Vec::new(),
                 para_char_lens: Vec::new(),
+                styles_stale: false,
                 heights_gen: u64::MAX, // sentinel: forces the first rebuild_heights
                 heights_width: -1.0,
                 avg_char_width,
@@ -251,7 +259,11 @@ impl Renderer {
             self.rebuild_heights(&app.text, app.content_gen(), text_w);
             // Refresh the source-highlight spans from the last-landed parse (N-STYLING); applied per
             // paragraph in `lay_out_paragraph`, so the geometry path between paints uses these too.
+            // `styles_stale` gates whether the edited paragraph is styled from the lagging AST or a
+            // cheap immediate lexical guess (STYLING §4, the pop-in fix) — captured so every paragraph in
+            // this frame (and any point-query before the next paint) resolves consistently.
             self.styles = app.styles().to_vec();
+            self.styles_stale = !app.styles_current();
             if !self.para_starts.is_empty() {
                 let n = self.para_starts.len();
                 let margin = self.line_height_dip * 2.0;
@@ -311,7 +323,7 @@ impl Renderer {
                             continue;
                         }
                         // A heading (etc.) composed via an IME stays heading-styled (§8.3).
-                        if let Some(kind) = self.style_of_para(i) {
+                        if let Some(kind) = self.resolve_style(&app.text, i) {
                             apply_paragraph_style(raw, kind, units.len());
                         }
                         let layout = ComPtr::from_raw(raw);
@@ -507,30 +519,52 @@ impl Renderer {
         let layout = ComPtr::from_raw(raw);
         // Source-highlight (N-STYLING): apply this paragraph's block style BEFORE measuring, so the
         // folded height reflects the styled (e.g. taller heading) layout and paint + point-queries
-        // agree. The range is always the whole current paragraph — a stale span offset can only pick
-        // the wrong *kind*, never read out of range (§4).
-        if let Some(kind) = self.style_of_para(i) {
+        // agree. `resolve_style` uses the immediate lexical guess while a parse is in flight (STYLING
+        // §4) so a
+        // just-typed heading is measured tall right away. The range is always the whole current
+        // paragraph — a stale span offset can only pick the wrong *kind*, never read out of range (§4).
+        if let Some(kind) = self.resolve_style(text, i) {
             apply_paragraph_style(layout.as_raw(), kind, end - start);
         }
         self.fold_paragraph_height(i, layout.as_raw());
         Some((layout, end - start))
     }
 
-    /// The block style kind for paragraph `i`, or `None` for the default format. The spans are sorted
-    /// by start + non-overlapping, so this is the last span starting at or before the paragraph's
-    /// start offset, if that offset is still within its range (§7).
+    /// The block style to actually apply to paragraph `i` (STYLING §4). When the AST styles are current the
+    /// AST is the sole authority (context-aware — it alone knows, e.g., container nesting). While a
+    /// parse is in flight (`styles_stale`) the AST lags the paragraph the user is editing, so for the
+    /// kinds a line's own markers fully determine (heading, blockquote) we trust a cheap immediate
+    /// lexical guess of the live text — the style tracks the keystroke with no frame-late pop-in —
+    /// while keeping the last-good AST style for kinds the guess does not own (pull quote, list), so
+    /// an edit elsewhere never flickers them off. The authoritative AST reasserts on settle.
+    fn resolve_style(&self, text: &[u16], i: usize) -> Option<StyleKind> {
+        if !self.styles_stale {
+            return self.style_of_para(i);
+        }
+        match self.style_of_para(i) {
+            // A kind the lexical scan does not own: keep the last-good AST style (no flicker).
+            Some(k) if !matches!(k, StyleKind::Heading(_) | StyleKind::BlockQuote) => Some(k),
+            // Heading / blockquote / plain: the paragraph's own live markers are the truth right now.
+            _ => self.provisional_style_of_para(text, i),
+        }
+    }
+
+    /// The lexical (parser-free) block style for paragraph `i` from its own text — the immediacy guess
+    /// `resolve_style` uses while a parse is in flight (STYLING §4). Delegates to the platform-free scan.
+    fn provisional_style_of_para(&self, text: &[u16], i: usize) -> Option<StyleKind> {
+        let start = *self.para_starts.get(i)?;
+        let end = self.para_content_end(i, text.len());
+        crate::styles::provisional_style_from_line(&text[start..end])
+    }
+
+    /// The block style kind for paragraph `i` from the last-landed AST spans, or `None` for the
+    /// default format (§7). Resolved by the paragraph's source range `[para_starts[i],
+    /// para_starts[i+1])` — the span whose start falls inside it — so a blockquote (whose span begins
+    /// after its `> ` marker, past the paragraph's own start) is matched, not silently dropped.
     fn style_of_para(&self, i: usize) -> Option<StyleKind> {
-        let off = *self.para_starts.get(i)?;
-        let idx = self.styles.partition_point(|s| s.start <= off);
-        if idx == 0 {
-            return None;
-        }
-        let s = &self.styles[idx - 1];
-        if off < s.end {
-            Some(s.kind)
-        } else {
-            None
-        }
+        let lo = *self.para_starts.get(i)?;
+        let hi = self.para_starts.get(i + 1).copied().unwrap_or(usize::MAX);
+        crate::styles::kind_for_paragraph(&self.styles, lo, hi)
     }
 
     /// Read a laid-out paragraph's real height (`GetMetrics`) and fold it into the index (measured

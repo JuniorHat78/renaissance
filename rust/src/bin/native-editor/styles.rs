@@ -67,6 +67,57 @@ fn walk(blocks: &[Block], out: &mut Vec<StyleSpan>, container: Option<StyleKind>
     }
 }
 
+/// The block style kind for the paragraph occupying source range `[lo, hi)` (`hi` = the next
+/// paragraph's start, or `usize::MAX` for the last), from the sorted, non-overlapping `spans`. A span
+/// belongs to the paragraph when its **start falls within** the paragraph — NOT "starts at or before
+/// the paragraph start": a blockquote's AST span begins after its `> ` marker (the child paragraph's
+/// offset) while the paragraph itself begins at the marker, so an at-or-before test silently misses
+/// it. Intersection by start is exact here because top-level blocks partition the source one-per-
+/// paragraph, so at most one span starts inside any paragraph.
+pub fn kind_for_paragraph(spans: &[StyleSpan], lo: usize, hi: usize) -> Option<StyleKind> {
+    let idx = spans.partition_point(|s| s.start < lo);
+    match spans.get(idx) {
+        Some(s) if s.start < hi => Some(s.kind),
+        _ => None,
+    }
+}
+
+/// A **provisional** block style for a single paragraph line, derived lexically from its own leading
+/// markers — no parser, no document context (SCRIPTORIUM-NATIVE-STYLING.md §4). The renderer uses it
+/// for the paragraph being edited while the authoritative async parse is in flight, so the style
+/// tracks the keystroke immediately instead of popping in a frame later. It covers only the kinds a
+/// line's own prefix fully determines in this dialect (which has no fenced code blocks, so a `#` line
+/// is unambiguously a heading): ATX **headings** (`#{1,6}` + whitespace + ≥1 char, level clamped to 3
+/// to match `parser.rs`) and **blockquotes** (optional leading whitespace, then `>`). Everything else
+/// — including pull quotes and lists, whose styling the renderer keeps from the last-good AST — is
+/// `None` here. Kept byte-rule-faithful to the parser by `provisional_agrees_with_the_parser`.
+pub fn provisional_style_from_line(line: &[u16]) -> Option<StyleKind> {
+    // Heading: a run of 1..=6 '#' at column 0, then whitespace, then at least one more unit
+    // (parser.rs `parse_heading_line`: `!is_ws(line[marker]) || len - marker < 2` rejects).
+    let mut h = 0;
+    while h < line.len() && line[h] == 0x23 {
+        h += 1;
+    }
+    if (1..=6).contains(&h) && h < line.len() && is_ws(line[h]) && line.len() - h >= 2 {
+        return Some(StyleKind::Heading(h.min(3) as u8));
+    }
+    // Blockquote: optional leading whitespace, then '>' (parser.rs `parse_block_quote_line`).
+    let mut g = 0;
+    while g < line.len() && is_ws(line[g]) {
+        g += 1;
+    }
+    if g < line.len() && line[g] == 0x3E {
+        return Some(StyleKind::BlockQuote);
+    }
+    None
+}
+
+/// Space or tab — the whitespace the marker rules test for (a superset isn't needed: a heading with
+/// exotic whitespace after its `#` does not occur in practice, and the AST corrects it on settle).
+fn is_ws(u: u16) -> bool {
+    u == 0x20 || u == 0x09
+}
+
 // --- style-derivation oracle (SCRIPTORIUM-NATIVE-STYLING.md §9) ---------------
 // End-to-end over the real parser (platform-free — the parser lib isn't windows-gated): a document of
 // every block kind derives the right kinds at the right spans, sorted + non-overlapping, and plain
@@ -115,6 +166,73 @@ mod tests {
         // Two headings, no paragraph spans.
         assert_eq!(spans.len(), 2);
         assert!(spans.iter().all(|s| matches!(s.kind, StyleKind::Heading(_))));
+    }
+
+    #[test]
+    fn kind_for_paragraph_matches_a_span_starting_inside_the_paragraph() {
+        // Two paragraphs: a blockquote `> q` (offsets 0..3) then a heading `# H` (offsets 4..7),
+        // with the paragraph boundary at offset 4 (the '\n' is at 3). The blockquote's span begins
+        // AFTER its marker (offset 2), past the paragraph's own start (0) — the regression this fixes.
+        let spans = [
+            StyleSpan { start: 2, end: 3, kind: StyleKind::BlockQuote },
+            StyleSpan { start: 4, end: 7, kind: StyleKind::Heading(1) },
+        ];
+        // Paragraph 0 = [0, 4): picks the blockquote even though its span starts at 2, not 0.
+        assert_eq!(kind_for_paragraph(&spans, 0, 4), Some(StyleKind::BlockQuote));
+        // Paragraph 1 = [4, MAX): the heading.
+        assert_eq!(kind_for_paragraph(&spans, 4, usize::MAX), Some(StyleKind::Heading(1)));
+        // A paragraph range with no span starting inside it is the default format.
+        assert_eq!(kind_for_paragraph(&spans, 8, 12), None);
+        assert_eq!(kind_for_paragraph(&[], 0, usize::MAX), None);
+    }
+
+    #[test]
+    fn provisional_reads_the_leading_markers() {
+        let lex = |s: &str| provisional_style_from_line(&s.encode_utf16().collect::<Vec<u16>>());
+        assert_eq!(lex("# Heading"), Some(StyleKind::Heading(1)));
+        assert_eq!(lex("## Two"), Some(StyleKind::Heading(2)));
+        assert_eq!(lex("### Three"), Some(StyleKind::Heading(3)));
+        assert_eq!(lex("###### Six"), Some(StyleKind::Heading(3)), "level clamps to 3 like the dialect");
+        assert_eq!(lex("#no-space"), None, "a heading needs whitespace after the marker");
+        assert_eq!(lex("#"), None, "just a marker, no content");
+        assert_eq!(lex("# "), None, "marker + space but no content (< 2 past the marker)");
+        assert_eq!(lex("> quote"), Some(StyleKind::BlockQuote));
+        assert_eq!(lex("   > indented quote"), Some(StyleKind::BlockQuote), "leading ws before '>' is allowed");
+        assert_eq!(lex("plain prose"), None);
+        assert_eq!(lex(""), None);
+    }
+
+    #[test]
+    fn provisional_agrees_with_the_parser() {
+        // The immediacy guess must match what the authoritative AST settles to, or typing a marker
+        // would visibly resize twice (provisional, then a different AST result). For each single-line
+        // document, the lexical guess equals the parser's block kind at offset 0 on the kinds it owns.
+        for src in [
+            "# One",
+            "## Two",
+            "### Three",
+            "###### clamped",
+            "> a quote",
+            "  > indented quote",
+            "ordinary prose",
+            "#not-a-heading",
+        ] {
+            let units: Vec<u16> = src.encode_utf16().collect();
+            // A single-line document has at most one styled block; its kind is the settled truth the
+            // provisional guess must match. (Resolved by paragraph range, mirroring the renderer —
+            // `> quote`'s span starts after the marker, so an offset-0 lookup would miss it.)
+            let ast = kind_for_paragraph(&styles_of(&parse_document(&units)), 0, usize::MAX);
+            let lex = provisional_style_from_line(&units);
+            // The provisional owns Heading + BlockQuote; where it yields one, the parser must agree.
+            // Where it yields None on an owned-kind line, the parser must also not produce one.
+            match lex {
+                Some(k) => assert_eq!(ast, Some(k), "provisional vs parser disagree on {src:?}"),
+                None => assert!(
+                    !matches!(ast, Some(StyleKind::Heading(_)) | Some(StyleKind::BlockQuote)),
+                    "provisional said plain but the parser found an owned kind on {src:?}: {ast:?}"
+                ),
+            }
+        }
     }
 
     #[test]

@@ -147,6 +147,14 @@ impl App {
         self.content_gen
     }
 
+    /// Whether the folded-in style spans reflect the live text — `signal_gen == content_gen`, i.e. no
+    /// edit is in flight since the last landed parse. When false (the user just typed and the async
+    /// parse hasn't returned), the renderer uses a cheap per-paragraph lexical guess for immediacy
+    /// instead of the lagging AST styles (SCRIPTORIUM-NATIVE-STYLING.md §4, the style pop-in fix).
+    pub fn styles_current(&self) -> bool {
+        self.signal_gen == self.content_gen
+    }
+
     /// The selection as a half-open `[start, end)` range of UTF-16 offsets (start ≤ end).
     pub fn selection(&self) -> (usize, usize) {
         (self.caret.min(self.anchor), self.caret.max(self.anchor))

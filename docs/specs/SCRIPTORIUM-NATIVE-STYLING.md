@@ -86,16 +86,31 @@ therefore reflect a **past** `content_gen`. The contract mirrors N4's `apply_par
   stamped with the generation they reflect.
 - `App` gains `styles` + `styles_gen` (folded in by `apply_parse` under the same monotonic gate — a
   late/out-of-order parse never regresses the styling).
-- **Apply the last-good styles even when stale.** Block spans are *coarse* (whole paragraphs), so a
-  one-keystroke lag almost never misaligns a block's styling visibly; when the fresh parse lands, the
-  render re-styles (the layout is rebuilt per paint anyway). Every span offset is **clamped to the
-  paragraph's bounds** before use, so a stale offset can never read out of range — worst case a
-  paragraph briefly styles as the wrong kind until the next parse (~1 ms), never a crash or a smear.
-- **Degrade to plain** when there are no styles yet (first parse in flight) — the editor renders flat,
-  exactly as today, until the first `StyleModel` arrives. No flicker: plain → styled once, then stable.
+- **Apply the last-good styles even when stale**, for paragraphs the edit did not touch. Block spans
+  are *coarse* (whole paragraphs), so an unrelated paragraph's styling is unaffected by a keystroke
+  elsewhere; when the fresh parse lands the render re-styles (the layout is rebuilt per paint anyway).
+  Every span offset is resolved **by paragraph range** (`kind_for_paragraph` — the span whose start
+  falls inside the paragraph), so a stale offset can never read out of range.
+- **Degrade to plain** when there are no styles yet (first parse in flight) — the editor renders flat
+  until the first `StyleModel` arrives.
 
-This is the same "never paint a half-updated model" spine as N4 — the UI thread owns `App`, the worker
-only reads a snapshot — extended to carry style spans, not just counts.
+**The pop-in fix (the paragraph being edited).** "Last-good styles even when stale" is right for
+*other* paragraphs but wrong for the one under the caret: type `# ` and the lagging AST still says
+"plain", so the line stays plain for the ~1 ms round-trip and then *pops* to a heading — visible, and
+worse in reverse (delete the `#` and a heading stays big until the parse lands). So while
+`styles_current()` is false (an edit is in flight), the renderer resolves each paragraph's style with
+a cheap, parser-free **lexical guess of its own leading markers** (`provisional_style_from_line`:
+`#{1,6}` + ws heading, `>` blockquote — the kinds a line's own prefix fully determines in this
+fence-free dialect), so the style tracks the keystroke with no lag. For kinds the guess does not own
+(pull quote, list) it keeps the last-good AST style, so an edit elsewhere never flickers them off.
+When the parse settles (`styles_current()`), the **AST is again the sole authority** (it alone knows
+container nesting and context) — the guess never permanently overrides it. The guess is held
+byte-rule-faithful to the parser by a differential oracle (`provisional_agrees_with_the_parser`), so
+it settles to *itself*: no second resize when the AST lands.
+
+This is the same "never paint a half-updated model" + "show the best available now, correct on settle"
+spine as N4 — the UI thread owns `App`, the worker only reads a snapshot — extended to carry style
+spans, with the edited paragraph getting an immediate local guess instead of the round-trip-late truth.
 
 ## 5. The visual mapping (feel knobs — the author's to tune)
 
@@ -156,8 +171,14 @@ rebuilds paragraph layouts per paint, so re-styling on a fresh AST is free.
 
 ## 8. Edges (first-class)
 
-1. **Stale span offsets** — clamp every span to the paragraph before use; a mismatch styles the wrong
-   paragraph for ≤ 1 parse, never reads out of range.
+1. **Stale span offsets / the edited paragraph** — the paragraph under the caret is styled from the
+   immediate lexical guess while a parse is in flight; every AST span is resolved by paragraph range
+   (`kind_for_paragraph`), never read out of range (§4).
+1b. **A block span that doesn't start at the paragraph's start** — a blockquote's AST span begins
+   *after* its `> ` marker (the child-paragraph offset), while the paragraph begins at the marker. The
+   resolver matches the span whose start falls *inside* the paragraph range, not one starting at-or-
+   before the paragraph start, so blockquotes are styled rather than silently dropped (this was a latent
+   Wave-1 miss the pop-in oracle surfaced).
 2. **A block spanning multiple paragraphs** (a blockquote of several lines) — each covered paragraph
    gets the kind (the flatten in §3); styling is per-paragraph, so multi-paragraph blocks just style
    each of their paragraphs.
@@ -184,6 +205,12 @@ rebuilds paragraph layouts per paint, so re-styling on a fresh AST is free.
   height than a body one (styling reached the glyphs).
 - **Staleness apply (pure, in `app`)** — `apply_parse` folds styles under the monotonic gate; a stale
   style set never regresses a newer one (mirrors the existing `parse_apply_tests`).
+- **Provisional-guess parity (platform-free, every CI platform)** — `provisional_agrees_with_the_parser`
+  runs the lexical guess and the real `parse_document` on the same single-line sources and asserts they
+  agree on the kinds the guess owns (heading, blockquote), so a just-typed marker settles to *itself* —
+  no second resize when the AST lands. Plus `provisional_reads_the_leading_markers` (marker rules incl.
+  the level-3 clamp and the "needs whitespace + content" heading guard) and
+  `kind_for_paragraph_matches_a_span_starting_inside_the_paragraph` (the blockquote-marker-offset fix).
 - **Equivalence unaffected** — N5's `virtualized_geometry_matches_whole_doc` continues to pass (styling
   is applied identically whether a paragraph is laid out alone or in a whole-doc layout — same range on
   the same text), so the fearless-refactor net still holds.
