@@ -20,6 +20,7 @@
 // run everywhere (no Win32/DWrite), so they are NOT gated to Windows.
 mod buffer;
 mod codec;
+mod find;
 mod grapheme;
 mod heights;
 mod parse;

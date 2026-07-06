@@ -196,6 +196,19 @@ pub fn word_at(text: &[u16], offset: usize) -> (usize, usize) {
     (start, end)
 }
 
+/// Whether the scalar starting at unit `i` is a "word" character (alphanumeric-ish), by the same
+/// class split N2a's word motion uses — the single authority for word-vs-not. `false` at/past the
+/// end. Used by whole-word find (SCRIPTORIUM-NATIVE-FIND.md §3) to test a match's trailing edge.
+pub fn is_word_char_at(text: &[u16], i: usize) -> bool {
+    i < text.len() && classify(scalar_at(text, i).0) == WordClass::Word
+}
+
+/// Whether the scalar ending just *before* unit `i` is a word character. `false` at the start.
+/// Whole-word find tests a match's leading edge with this.
+pub fn is_word_char_before(text: &[u16], i: usize) -> bool {
+    i > 0 && classify(scalar_at(text, prev_scalar_start(text, i)).0) == WordClass::Word
+}
+
 fn skip_class(text: &[u16], mut idx: usize, class: WordClass) -> usize {
     let len = text.len();
     while idx < len {
