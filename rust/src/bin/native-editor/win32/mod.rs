@@ -1593,6 +1593,21 @@ mod smoke_tests {
             InvalidateRect(hwnd, null(), 0);
             SendMessageW(hwnd, WM_PAINT, 0, 0);
 
+            // Divider rule (STYLING §5A.4): fold a Divider span and paint — drives the fill_rectangle
+            // hairline-rule path + the dimmed-`---` SetDrawingEffect on real D2D. Must not AV.
+            {
+                let cs = &mut *(GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut WindowState);
+                let g = cs.app.content_gen() + 1;
+                let span = crate::styles::StyleSpan {
+                    start: 0,
+                    end: cs.app.text.len(),
+                    kind: crate::styles::StyleKind::Divider,
+                };
+                cs.app.apply_parse(g, crate::parse::ParseSignal { blocks: 1, words: 1, parse_micros: 0 }, vec![span]);
+            }
+            InvalidateRect(hwnd, null(), 0);
+            SendMessageW(hwnd, WM_PAINT, 0, 0);
+
             // Exercise resize (incl. the 0x0 minimize guard) and a caret-blink tick.
             SendMessageW(hwnd, WM_SIZE, 0, (600isize << 16) | 800);
             SendMessageW(hwnd, WM_SIZE, 0, 0); // minimize: must be a no-op, not a panic.

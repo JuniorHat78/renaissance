@@ -66,6 +66,7 @@ struct Palette {
     heading: ComPtr<ID2D1SolidColorBrush>,
     marker_dim: ComPtr<ID2D1SolidColorBrush>,
     quote: ComPtr<ID2D1SolidColorBrush>,
+    rule: ComPtr<ID2D1SolidColorBrush>,
 }
 
 pub struct Renderer {
@@ -150,6 +151,8 @@ const SEL_COLOR: D2D1_COLOR_F = D2D1_COLOR_F { r: 0.16, g: 0.40, b: 0.85, a: 0.2
 const HEADING_COLOR: D2D1_COLOR_F = D2D1_COLOR_F { r: 0.14, g: 0.20, b: 0.42, a: 1.0 };
 const MARKER_DIM_COLOR: D2D1_COLOR_F = D2D1_COLOR_F { r: 0.66, g: 0.66, b: 0.70, a: 1.0 };
 const QUOTE_COLOR: D2D1_COLOR_F = D2D1_COLOR_F { r: 0.42, g: 0.44, b: 0.50, a: 1.0 };
+// The drawn divider rule (STYLING §5A.4) — a soft hairline; the `---` source stays but dimmed.
+const RULE_COLOR: D2D1_COLOR_F = D2D1_COLOR_F { r: 0.80, g: 0.80, b: 0.84, a: 1.0 };
 
 /// The left indent (DIPs) for a paragraph's block kind (STYLING §5A.3): blockquotes and list items
 /// shift right; everything else is flush left. Pure — the ONE place kind → indent, shared by the
@@ -412,6 +415,15 @@ impl Renderer {
                             let local = (app.caret - ps).min(clen);
                             draw_caret(rt, v, lptr, local, clen, ox, oy, caret_b);
                         }
+                        // A divider draws a hairline rule across the content width at the line's
+                        // vertical centre (§5A.4); the dimmed `---` text (above) stays editable behind
+                        // it. Only in the paint path — geometry/point-queries never draw the rule.
+                        if matches!(self.resolve_style(&app.text, i), Some(StyleKind::Divider)) {
+                            let mid = oy + self.line_height_dip * 0.5;
+                            let right = (dip_w - PAD_DIP).max(ox);
+                            let rule = D2D1_RECT_F { left: ox, top: mid - 0.5, right, bottom: mid + 0.5 };
+                            (v.fill_rectangle)(rt, &rule, self.palette.rule.as_raw() as *mut c_void);
+                        }
                     }
                 }
             }
@@ -613,7 +625,9 @@ impl Renderer {
         let content_brush = match kind {
             StyleKind::Heading(_) => Some(self.palette.heading.as_raw()),
             StyleKind::BlockQuote | StyleKind::PullQuote => Some(self.palette.quote.as_raw()),
-            StyleKind::ListItem | StyleKind::Divider => None,
+            // The `---` source stays (editable) but dims to grey — the drawn rule is the visual (§5A.4).
+            StyleKind::Divider => Some(self.palette.marker_dim.as_raw()),
+            StyleKind::ListItem => None,
         };
         // Content color: the range AFTER the marker, so the dimmed marker isn't overpainted.
         if let Some(b) = content_brush {
@@ -942,6 +956,7 @@ unsafe fn create_palette(rt: *mut ID2D1HwndRenderTarget) -> Result<Palette, HRES
         heading: ComPtr::from_raw(make_brush(rt, HEADING_COLOR)?),
         marker_dim: ComPtr::from_raw(make_brush(rt, MARKER_DIM_COLOR)?),
         quote: ComPtr::from_raw(make_brush(rt, QUOTE_COLOR)?),
+        rule: ComPtr::from_raw(make_brush(rt, RULE_COLOR)?),
     })
 }
 
