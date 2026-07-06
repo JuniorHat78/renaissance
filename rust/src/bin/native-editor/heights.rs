@@ -11,10 +11,12 @@
 //! the font-metric estimate and the DWrite measurement are the renderer's to supply (N5b); this
 //! module owns only the prefix-sum algebra.
 //!
-//! N5a lands this structure + its model-based oracle alone; N5b wires `reset_estimated`/`measure`/
-//! `total`/`para_top`/`locate` into the geometry service, and N5c consumes the remainder
-//! (`invalidate`/`insert`/`remove`/`estimate`/`is_measured` for edit-locality + estimate correction)
-//! and removes this module-level allow. Until then the not-yet-wired methods are deliberately unused.
+//! The renderer wires `reset_estimated`/`measure`/`total`/`para_top`/`locate`/`len` into the
+//! geometry service + scroll-anchoring (N5b/N5c). `invalidate`/`insert`/`remove`/`estimate`/
+//! `is_measured`/`height` are the **fuzzed substrate for the deferred precise edit-locality diff**
+//! (§6): N5c's edit stability uses a count-preserving heuristic in `rebuild_heights` rather than the
+//! per-paragraph diff, so these operations are exercised by the model-based oracle but not yet by
+//! production — hence the module-level allow (the whole structure is oracle-validated regardless).
 #![allow(dead_code)]
 
 /// A mutable prefix-sum over paragraph heights. Queries (`total`/`para_top`/`locate`) take `&mut
@@ -256,6 +258,23 @@ mod tests {
         idx.invalidate(0, 99.0);
         assert!(!idx.is_measured(0));
         assert!(approx(idx.height(0), 99.0));
+    }
+
+    #[test]
+    fn correcting_an_above_paragraph_shifts_para_top_by_the_delta() {
+        // The scroll-anchor invariant (§5): measuring a paragraph *above* the anchor by a height
+        // that differs from its estimate shifts `para_top(anchor)` by exactly that delta — the
+        // amount the renderer nudges `scroll_y` to keep the anchor paragraph pinned on screen.
+        let mut idx = HeightIndex::new();
+        idx.reset_estimated(&[40, 40, 40, 40, 40], 80.0, 20.0); // each estimates to one 20-DIP line
+        let anchor = 3;
+        let before = idx.para_top(anchor);
+        idx.measure(1, 55.0); // paragraph 1 (above the anchor) is really 55 DIP, not the 20 estimate
+        let after = idx.para_top(anchor);
+        assert!(
+            approx(after - before, 35.0),
+            "para_top(anchor) shifts by the correction delta (55 − 20)"
+        );
     }
 
     #[test]

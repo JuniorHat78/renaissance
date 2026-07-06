@@ -207,11 +207,14 @@ impl Renderer {
         }
     }
 
-    /// Paint one frame: clear, draw the buffer text (translated by `scroll_y`), the
-    /// selection + caret, then the pinned status strip on top. `px_w`/`px_h` are the
-    /// physical client size; `scroll_y` is the content-space DIP offset of the viewport top
-    /// (SCRIPTORIUM-NATIVE-LAYOUT.md §3 — content→pixel is `+PAD`, `−scroll_y` on y).
-    pub fn draw(&mut self, app: &App, caret_visible: bool, scroll_y: f32, px_w: u32, px_h: u32) {
+    /// Paint one frame: clear, draw the buffer text (translated by `scroll_y`), the selection +
+    /// caret, then the pinned status strip on top. `px_w`/`px_h` are the physical client size;
+    /// `scroll_y` is the content-space DIP offset of the viewport top (SCRIPTORIUM-NATIVE-LAYOUT.md
+    /// §3 — content→pixel is `+PAD`, `−scroll_y` on y). It is `&mut` because virtualized paint may
+    /// **scroll-anchor** it: measuring a paragraph that was estimated corrects the content above the
+    /// viewport, and `scroll_y` is nudged so the reader's content doesn't jump (§5). The caller
+    /// persists the returned value.
+    pub fn draw(&mut self, app: &App, caret_visible: bool, scroll_y: &mut f32, px_w: u32, px_h: u32) {
         unsafe {
             let rt = self.target.as_raw();
             let v = &*(*rt).vtbl;
@@ -233,8 +236,28 @@ impl Renderer {
             if !self.para_starts.is_empty() {
                 let n = self.para_starts.len();
                 let margin = self.line_height_dip * 2.0;
-                let p0 = self.heights.locate((scroll_y - margin).max(0.0)).0;
-                let p1 = self.heights.locate(scroll_y + viewport + margin).0.min(n - 1);
+
+                // Scroll-anchoring (§5): pin the topmost visible paragraph across estimate
+                // corrections. The paragraphs entering the margin just above the viewport top (on a
+                // scroll-up into un-measured text) get measured here; if their true height differs
+                // from the estimate, `para_top(anchor)` shifts by Δ — so nudge `scroll_y` by Δ to
+                // keep the anchor paragraph at the same screen position. Content the reader is
+                // looking at does not move; only off-screen content above grew/shrank.
+                let anchor = self.heights.locate(*scroll_y).0;
+                let before = self.heights.para_top(anchor);
+                let above = self.heights.locate((*scroll_y - margin).max(0.0)).0;
+                for i in above..anchor {
+                    self.lay_out_paragraph(&app.text, i, text_w);
+                }
+                let after = self.heights.para_top(anchor);
+                *scroll_y += after - before;
+                // Re-clamp to the (possibly corrected) extent.
+                let content = self.heights.total();
+                *scroll_y = scroll_y.clamp(0.0, (content - viewport).max(0.0));
+                let scroll = *scroll_y;
+
+                let p0 = self.heights.locate((scroll - margin).max(0.0)).0;
+                let p1 = self.heights.locate(scroll + viewport + margin).0.min(n - 1);
 
                 let comp = app.composition();
                 let (lo, hi) = app.selection();
@@ -254,7 +277,7 @@ impl Renderer {
                 let caret_b = self.caret_brush.as_raw() as *mut c_void;
 
                 for i in p0..=p1 {
-                    let oy = PAD_DIP - scroll_y + self.heights.para_top(i);
+                    let oy = PAD_DIP - scroll + self.heights.para_top(i);
                     let ps = self.para_starts[i];
                     let pe = self.para_content_end(i, app.text.len());
 
@@ -357,39 +380,54 @@ impl Renderer {
         }
     }
 
-    // --- geometry service (SCRIPTORIUM-NATIVE-LAYOUT.md §2) -------------------
-    // The retained-layout choke point and the four queries the input path needs. All go
-    // through `ensure_layout`, so the paint path and the hit-test path can never disagree
-    // about geometry. The layout coords are content-space (origin at the top of the text,
-    // before scroll); callers apply the scroll/padding transform (§3).
+    // --- geometry service (SCRIPTORIUM-NATIVE-LAYOUT.md §2, virtualized at N5) -
+    // The queries the input + paint paths share, now synthesized from the per-paragraph height
+    // index instead of one whole-doc layout — but still one authority (paint + hit-test can't
+    // disagree, because both lay a paragraph out the same way and read the same index). The layout
+    // coords are content-space (origin at the top of the text, before scroll); callers apply the
+    // scroll/padding transform (§3).
 
     // --- the height model (SCRIPTORIUM-NATIVE-VIRTUAL-LAYOUT.md §4/§6) --------
 
-    /// Rebuild the paragraph structure + all-estimated height index when the content or wrap width
-    /// changed (`(gen, width)` drift). A paragraph is text between hard newlines (a rope line);
-    /// `para_starts[i]` is its start offset, its content excludes the trailing `\n`. Estimates come
-    /// from the paragraph's char count + the probed font metrics; measured heights are folded in
-    /// later as paragraphs are laid out (so the total converges to the truth). O(n) in the text — a
-    /// cheap byte scan, ~1000× under the whole-doc DWrite shape it replaces; preserving measured
-    /// heights across edits (the rope-driven paragraph diff, §6) is the measure-gated refinement.
+    /// Refresh the paragraph structure + height index when the content or wrap width changed
+    /// (`(gen, width)` drift). A paragraph is text between hard newlines (a rope line);
+    /// `para_starts[i]` is its start offset, its content excludes the trailing `\n`. A cheap O(n)
+    /// byte scan (~1000× under the whole-doc DWrite shape it replaces) rebuilds `para_starts`.
+    ///
+    /// **Measured heights are preserved across a same-width edit that didn't change the paragraph
+    /// count** — typing within a paragraph: the edited paragraph is visible and re-measures on the
+    /// next paint (fold overwrites), off-screen paragraphs keep their measured heights, so the
+    /// scroll extent stays stable (no per-keystroke wobble). A width change (rewrap invalidates
+    /// every measurement, §8.4) or a count change (Enter/Backspace shifts paragraph *indices*)
+    /// forces a full re-estimate. The precise rope-driven diff (invalidate exactly the touched
+    /// paragraphs, §6) is the deferred refinement; this count-preserving heuristic captures its main
+    /// benefit — a settled scrollbar while typing — without needing the edit range.
     fn rebuild_heights(&mut self, text: &[u16], gen: u64, width: f32) {
         if self.heights_gen == gen && (self.heights_width - width).abs() <= 0.5 {
             return;
         }
-        self.para_starts.clear();
-        self.para_starts.push(0);
+        let mut starts = vec![0usize];
         let mut char_lens: Vec<usize> = Vec::new();
         let mut last = 0usize;
         for (i, &u) in text.iter().enumerate() {
             if u == 0x000A {
                 char_lens.push(i - last); // paragraph content, excluding this '\n'
-                self.para_starts.push(i + 1);
+                starts.push(i + 1);
                 last = i + 1;
             }
         }
         char_lens.push(text.len() - last); // the final paragraph (no trailing '\n')
-        let cpl = (width / self.avg_char_width).max(1.0);
-        self.heights.reset_estimated(&char_lens, cpl, self.line_height_dip);
+
+        let first_build = self.heights_gen == u64::MAX;
+        let width_changed = (self.heights_width - width).abs() > 0.5;
+        let count_changed = char_lens.len() != self.heights.len();
+        self.para_starts = starts;
+        if first_build || width_changed || count_changed {
+            let cpl = (width / self.avg_char_width).max(1.0);
+            self.heights.reset_estimated(&char_lens, cpl, self.line_height_dip);
+        }
+        // else: same width, same paragraph count → keep the index (measured heights survive); the
+        // edited (visible) paragraph re-measures on the next paint.
         self.heights_gen = gen;
         self.heights_width = width;
     }

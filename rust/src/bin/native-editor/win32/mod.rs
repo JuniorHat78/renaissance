@@ -513,10 +513,13 @@ unsafe fn wndproc_impl(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> 
             let mut rc: RECT = zeroed();
             GetClientRect(hwnd, &mut rc);
             if let Some(r) = state.renderer.as_mut() {
+                // `scroll_y` is `&mut`: virtualized paint may scroll-anchor it (N5 §5) when
+                // measuring a paragraph corrects the content above the viewport — the nudged value
+                // is persisted so the anchor holds across frames.
                 r.draw(
                     &state.app,
                     state.caret_visible,
-                    state.scroll_y,
+                    &mut state.scroll_y,
                     (rc.right - rc.left).max(0) as u32,
                     (rc.bottom - rc.top).max(0) as u32,
                 );
@@ -1660,6 +1663,53 @@ mod smoke_tests {
 
                 let _ = std::fs::remove_file(&src);
                 let _ = std::fs::remove_file(&dst);
+            }
+
+            // N5c flat-cost guard (SCRIPTORIUM-NATIVE-VIRTUAL-LAYOUT.md §9/§11): the cliff
+            // regression guard. Painting a large multi-paragraph document — and scrolling through it
+            // — must cost a time *independent of its length*, because virtualized paint shapes only
+            // the viewport. The old whole-doc layout was ~700 ms to shape a doc this size (25× parse,
+            // superlinear); a regression to O(document) paint could not meet the generous bound
+            // below, while the viewport-only path clears it with room to spare. Also exercises
+            // scrolling deep into a big doc on real DWrite (windowed layout + anchoring), crash-free.
+            //
+            // (We deliberately don't type here: an edit would submit the whole 880k-unit snapshot to
+            // the N4 parse worker, whose *debug* parse is seconds — off-thread, so it never blocks
+            // the UI, but the teardown join would wait on it. Paint cost is the N5 claim; the edit
+            // path is covered on the small docs above.)
+            {
+                let line: Vec<u16> = "the quick brown fox jumps over the lazy dog\n".encode_utf16().collect();
+                let mut big: Vec<u16> = Vec::with_capacity(line.len() * 20000);
+                for _ in 0..20000 {
+                    big.extend_from_slice(&line); // ~20k paragraphs, ~880k units
+                }
+                let decoded = crate::codec::Decoded {
+                    units: big,
+                    encoding: crate::codec::Encoding::Utf8,
+                    newline: crate::codec::Newline::Lf,
+                };
+                let cs = &mut *(GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut WindowState);
+                cs.app.load_document(decoded, None);
+                // Warm one paint (builds the paragraph index), then time several scroll+paint cycles
+                // marching down the document — each must stay viewport-bounded, not grow with length.
+                InvalidateRect(hwnd, null(), 0);
+                SendMessageW(hwnd, WM_PAINT, 0, 0);
+                let t = std::time::Instant::now();
+                for _ in 0..8 {
+                    SendMessageW(hwnd, WM_VSCROLL, SB_PAGEDOWN as usize, 0);
+                    SendMessageW(hwnd, WM_PAINT, 0, 0);
+                }
+                let elapsed = t.elapsed();
+                // A deliberately generous bound: the viewport-only path is ~200 ms (plain debug) /
+                // ~500 ms (ASan-instrumented) for 8 cycles, while an O(document) regression at this
+                // size would be *tens of seconds* (the 880k-unit whole-doc shape is ~700 ms in
+                // release alone, far worse instrumented). 3 s clears the slowest instrumented build
+                // with headroom yet trips instantly on the cliff — a robust regression guard, not a
+                // fickle perf gate (which the CI philosophy keeps out of the hard path anyway).
+                assert!(
+                    elapsed.as_millis() < 3000,
+                    "virtualized paint+scroll on a 20k-paragraph doc must be flat (<3s for 8 cycles), was {elapsed:?}"
+                );
             }
 
             // Tear down — WM_DESTROY + WM_NCDESTROY run synchronously and drop the box.
