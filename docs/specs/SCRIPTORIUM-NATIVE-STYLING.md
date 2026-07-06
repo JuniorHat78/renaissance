@@ -198,18 +198,23 @@ Wave-1.5 gives list items the **dimmed marker** (5A.2) and the **indent** (5A.3)
 hide-markers / rendered model, a separate landmark we are deliberately not doing yet. So Wave-1.5 keeps
 the literal `-`/`*`/`1.`, just dimmed and indented. (Named deferral, not an omission.)
 
-### 5A.6 Checkpoints
+### 5A.6 Checkpoints — Wave-1.5 BUILT
 
-- **1.5a — color infra + block color + dimmed markers.** Type slot 38 (ABI-assert + smoke); the brush
-  palette (created/rebuilt with the target); `SetDrawingEffect` in `lay_out_paragraph` for block color
-  (heading accent, quote tint) and the dimmed leading marker range (`marker_len_of_line`). One vertical
-  slice (the bin-crate dead-code reality). Oracles: the slot-38 color smoke + the `marker_len_of_line`
-  parser-faithful oracle (platform-free).
-- **1.5b — indent.** Blockquote/list left indent at the one-authority origin, width reduced by the
-  indent so height stays exact; caret/hit-test read it. The equivalence oracle extended for an indented
-  paragraph.
-- **1.5c — divider rule.** The drawn `FillRectangle` hairline + dimmed `---`; a windowed smoke paints a
-  divider doc (no AV), ASan-clean.
+- **1.5a — color infra + block color + dimmed markers (`500eb11`).** Slot 38 `set_drawing_effect`
+  typed + ABI-asserted (offset 38), exercised in the GATED suite (null effect) AND with a real brush in
+  the windowed paint smoke; the brush palette (`create_palette`, rebuilt with the target on device
+  loss); `SetDrawingEffect` in `lay_out_paragraph` for block color (heading indigo, quote grey) + the
+  dimmed leading marker range. `marker_len_of_line` refactored to share `scan_block_marker` with the
+  style guess. Oracle: `marker_len_covers_the_leading_marker` (platform-free).
+- **1.5b — indent (`a7ffcdb`).** Blockquote/list left indent threaded through the one authority:
+  `lay_out_paragraph` lays out at width − indent (height stays exact) and returns the indent; paint,
+  caret, hit-test, and the IME composition/display-caret paths all shift by it. Oracles: `indent_for`
+  maps blockquote/list only; a narrower indent width can only grow height.
+- **1.5c — divider rule (`e047646`).** A drawn `FillRectangle` hairline across the content width +
+  dimmed `---`; the windowed smoke paints a divider doc (drives the rule + dimmed-`---` on real D2D),
+  ASan-clean.
+
+**List bullet glyphs stay deferred** (a display≠source divergence — the rendered model, §11).
 
 ## 6. The COM surface (typed, ABI-asserted, smoke-exercised)
 
@@ -323,9 +328,9 @@ The author's feel pass on the size/weight table (§5), on a real manuscript, is 
   parity oracle stays green with no downstream churn), NOT a second in-editor tokenizer — the parser is
   ours to extend, and inline markdown is too fiddly to reimplement lexically without drift. Builds on
   the 5A color infra (dim inline markers, tint `Code`, color+underline `Link`).
-- **Color / dimmed markers / indent / divider rule (Wave-1.5)** — §5A; **building now** (color via
-  `SetDrawingEffect` slot 38 consume-only, lexical marker dimming, blockquote/list indent, a drawn
-  divider rule). List *bullet glyphs* remain deferred (a display≠source divergence — the rendered model).
+- **Color / dimmed markers / indent / divider rule (Wave-1.5)** — §5A; **BUILT** (`500eb11`/`a7ffcdb`/
+  `e047646`): color via `SetDrawingEffect` slot 38 consume-only, lexical marker dimming, blockquote/list
+  indent, a drawn divider rule. List *bullet glyphs* remain deferred (a display≠source divergence).
 - **The rendered / hide-markers model** — the display↔source mapping landmark (a different node); real
   bullet glyphs, hidden markers, and mid-line WYSIWYG live here.
 - **Per-run styling *within* a paragraph** beyond inline (mixed sizes mid-line) — falls out of Wave 2.
