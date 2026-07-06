@@ -45,6 +45,10 @@ const FONT_FAMILY: &str = "Consolas";
 const FONT_SIZE_DIP: f32 = 18.0;
 const STATUS_SIZE_DIP: f32 = 12.0;
 const PAD_DIP: f32 = 16.0;
+/// The left indent for a blockquote / list-item paragraph (STYLING §5A.3) — a feel knob. Applied to
+/// the paragraph's draw origin AND its layout width (so wrap → measured height stays exact), and read
+/// back by the caret/hit-test through the same `lay_out_paragraph` result (the one-authority rule).
+const INDENT_DIP: f32 = 24.0;
 const CARET_WIDTH_DIP: f32 = 1.5;
 /// The bottom chrome strip (the status line) — text scrolls *above* this band; the band
 /// is painted over with the background so scrolled glyphs never bleed under the status.
@@ -146,6 +150,16 @@ const SEL_COLOR: D2D1_COLOR_F = D2D1_COLOR_F { r: 0.16, g: 0.40, b: 0.85, a: 0.2
 const HEADING_COLOR: D2D1_COLOR_F = D2D1_COLOR_F { r: 0.14, g: 0.20, b: 0.42, a: 1.0 };
 const MARKER_DIM_COLOR: D2D1_COLOR_F = D2D1_COLOR_F { r: 0.66, g: 0.66, b: 0.70, a: 1.0 };
 const QUOTE_COLOR: D2D1_COLOR_F = D2D1_COLOR_F { r: 0.42, g: 0.44, b: 0.50, a: 1.0 };
+
+/// The left indent (DIPs) for a paragraph's block kind (STYLING §5A.3): blockquotes and list items
+/// shift right; everything else is flush left. Pure — the ONE place kind → indent, shared by the
+/// layout width, the draw origin, and the caret/hit-test x-offset, so they can never disagree.
+fn indent_for(kind: Option<StyleKind>) -> f32 {
+    match kind {
+        Some(StyleKind::BlockQuote) | Some(StyleKind::ListItem) => INDENT_DIP,
+        _ => 0.0,
+    }
+}
 
 impl Renderer {
     /// Build the whole object graph for `hwnd`. Returns the HRESULT of the first
@@ -348,49 +362,55 @@ impl Renderer {
                         // emphasis, the underline, and the caret within the composition (§8.7).
                         let c = comp.unwrap();
                         let units = self.spliced_paragraph(&app.text, i, lo, hi, &c.text);
-                        let raw = self.make_layout(&units, self.text_format.as_raw(), text_w, LAYOUT_MAX_HEIGHT);
+                        // A heading (etc.) composed via an IME stays heading-styled (§8.3); a blockquote
+                        // stays indented. Resolve the kind → indent so the composition paragraph shares
+                        // the committed paragraph's layout width and draw origin (§5A.3).
+                        let kind = self.resolve_style(&app.text, i);
+                        let indent = indent_for(kind);
+                        let ox = PAD_DIP + indent;
+                        let raw = self.make_layout(&units, self.text_format.as_raw(), (text_w - indent).max(1.0), LAYOUT_MAX_HEIGHT);
                         if raw.is_null() {
                             continue;
                         }
-                        // A heading (etc.) composed via an IME stays heading-styled (§8.3). Color too,
-                        // so it doesn't flip to body-colored mid-composition; the marker range comes
-                        // from the spliced provisional text (what's actually on screen).
-                        if let Some(kind) = self.resolve_style(&app.text, i) {
-                            apply_paragraph_style(raw, kind, units.len());
+                        // Color too, so it doesn't flip to body-colored mid-composition; the marker
+                        // range comes from the spliced provisional text (what's actually on screen).
+                        if let Some(k) = kind {
+                            apply_paragraph_style(raw, k, units.len());
                             let marker_len = crate::styles::marker_len_of_line(&units);
-                            self.apply_paragraph_color(raw, kind, marker_len, units.len());
+                            self.apply_paragraph_color(raw, k, marker_len, units.len());
                         }
                         let layout = ComPtr::from_raw(raw);
                         let lptr = layout.as_raw();
                         let base = lo.clamp(ps, pe) - ps; // local start of the composition
                         if c.target_end > c.target_start {
-                            fill_selection_range(rt, v, lptr, sel, PAD_DIP, oy, (base + c.target_start) as u32, (c.target_end - c.target_start) as u32);
+                            fill_selection_range(rt, v, lptr, sel, ox, oy, (base + c.target_start) as u32, (c.target_end - c.target_start) as u32);
                         }
-                        (v.draw_text_layout)(rt, D2D_POINT_2F { x: PAD_DIP, y: oy }, lptr, text_brush, 0);
-                        underline_range(rt, v, lptr, caret_b, PAD_DIP, oy, base as u32, c.text.len() as u32);
+                        (v.draw_text_layout)(rt, D2D_POINT_2F { x: ox, y: oy }, lptr, text_brush, 0);
+                        underline_range(rt, v, lptr, caret_b, ox, oy, base as u32, c.text.len() as u32);
                         if caret_owner == Some(i) {
                             let local_caret = base + c.caret_units.min(c.text.len());
-                            draw_caret(rt, v, lptr, local_caret, units.len(), PAD_DIP, oy, caret_b);
+                            draw_caret(rt, v, lptr, local_caret, units.len(), ox, oy, caret_b);
                         }
                     } else {
                         // A committed paragraph: lay it out (folding its measured height), draw the
                         // selection portion that falls in it, the text, and the caret if it lives here.
-                        let (layout, clen) = match self.lay_out_paragraph(&app.text, i, text_w) {
+                        let (layout, clen, indent) = match self.lay_out_paragraph(&app.text, i, text_w) {
                             Some(l) => l,
                             None => continue,
                         };
                         let lptr = layout.as_raw();
+                        let ox = PAD_DIP + indent; // blockquote/list shift right (§5A.3)
                         if app.has_selection() {
                             let s = lo.max(ps);
                             let e = hi.min(pe);
                             if e > s {
-                                fill_selection_range(rt, v, lptr, sel, PAD_DIP, oy, (s - ps) as u32, (e - s) as u32);
+                                fill_selection_range(rt, v, lptr, sel, ox, oy, (s - ps) as u32, (e - s) as u32);
                             }
                         }
-                        (v.draw_text_layout)(rt, D2D_POINT_2F { x: PAD_DIP, y: oy }, lptr, text_brush, 0);
+                        (v.draw_text_layout)(rt, D2D_POINT_2F { x: ox, y: oy }, lptr, text_brush, 0);
                         if caret_owner == Some(i) {
                             let local = (app.caret - ps).min(clen);
-                            draw_caret(rt, v, lptr, local, clen, PAD_DIP, oy, caret_b);
+                            draw_caret(rt, v, lptr, local, clen, ox, oy, caret_b);
                         }
                     }
                 }
@@ -543,28 +563,33 @@ impl Renderer {
         text: &[u16],
         i: usize,
         width: f32,
-    ) -> Option<(ComPtr<IDWriteTextLayout>, usize)> {
+    ) -> Option<(ComPtr<IDWriteTextLayout>, usize, f32)> {
         let start = self.para_starts[i];
         let end = self.para_content_end(i, text.len());
-        let raw = self.make_layout(&text[start..end], self.text_format.as_raw(), width, LAYOUT_MAX_HEIGHT);
+        // Resolve the block kind FIRST: it sets the indent (§5A.3), which reduces the layout width so
+        // wrapping — and therefore the measured height folded below — matches the indented paint.
+        let kind = self.resolve_style(text, i);
+        let indent = indent_for(kind);
+        let layout_width = (width - indent).max(1.0);
+        let raw = self.make_layout(&text[start..end], self.text_format.as_raw(), layout_width, LAYOUT_MAX_HEIGHT);
         if raw.is_null() {
             return None;
         }
         let layout = ComPtr::from_raw(raw);
         // Source-highlight (N-STYLING): apply this paragraph's block style BEFORE measuring, so the
         // folded height reflects the styled (e.g. taller heading) layout and paint + point-queries
-        // agree. `resolve_style` uses the immediate lexical guess while a parse is in flight (STYLING
-        // §4) so a just-typed heading is measured tall right away. Font attributes (size/weight/style)
-        // change geometry; color (SetDrawingEffect, §5A.1) does not, but goes through the same one
-        // authority so paint and queries share ONE styled layout. The range is always the whole current
-        // paragraph — a stale span offset can only pick the wrong *kind*, never read out of range (§4).
-        if let Some(kind) = self.resolve_style(text, i) {
-            apply_paragraph_style(layout.as_raw(), kind, end - start);
+        // agree. Font attributes (size/weight/style) change geometry; color (SetDrawingEffect, §5A.1)
+        // does not, but goes through the same one authority so paint and queries share ONE styled
+        // layout. The range is always the whole current paragraph — a stale span offset can only pick
+        // the wrong *kind*, never read out of range (§4). The indent is returned so paint (draw origin),
+        // caret, and hit-test all shift by the same amount off this one layout.
+        if let Some(k) = kind {
+            apply_paragraph_style(layout.as_raw(), k, end - start);
             let marker_len = crate::styles::marker_len_of_line(&text[start..end]);
-            self.apply_paragraph_color(layout.as_raw(), kind, marker_len, end - start);
+            self.apply_paragraph_color(layout.as_raw(), k, marker_len, end - start);
         }
         self.fold_paragraph_height(i, layout.as_raw());
-        Some((layout, end - start))
+        Some((layout, end - start, indent))
     }
 
     /// Attach the source-highlight color for a paragraph's block `kind` to its transient `layout` via
@@ -726,7 +751,7 @@ impl Renderer {
                 return 0;
             }
             let (i, top) = self.heights.locate(cy);
-            let (layout, clen) = match self.lay_out_paragraph(text, i, width) {
+            let (layout, clen, indent) = match self.lay_out_paragraph(text, i, width) {
                 Some(l) => l,
                 None => return 0,
             };
@@ -735,7 +760,7 @@ impl Renderer {
             let mut m: DWRITE_HIT_TEST_METRICS = zeroed();
             let hr = ((*(*layout.as_raw()).vtbl).hit_test_point)(
                 layout.as_raw(),
-                cx,
+                cx - indent, // undo the paragraph's indent to get layout-local x (§5A.3); DWrite clamps <0 to line start
                 (cy - top).max(0.0), // local y within the paragraph
                 &mut trailing,
                 &mut inside,
@@ -767,11 +792,11 @@ impl Renderer {
                 return None;
             }
             let i = self.para_of_offset(offset);
-            let (layout, clen) = self.lay_out_paragraph(text, i, width)?;
+            let (layout, clen, indent) = self.lay_out_paragraph(text, i, width)?;
             let local = offset - self.para_starts[i];
             let (x, ly, h) = caret_geometry(layout.as_raw(), local.min(clen), clen)?;
             let top = self.heights.para_top(i);
-            Some((x, top + ly, h))
+            Some((indent + x, top + ly, h)) // shift content-x by the paragraph indent (§5A.3)
         }
     }
 
@@ -793,7 +818,10 @@ impl Renderer {
                 let (lo, hi) = app.selection();
                 let i = self.para_of_offset(lo);
                 let units = self.spliced_paragraph(&app.text, i, lo, hi, &c.text);
-                let raw = self.make_layout(&units, self.text_format.as_raw(), width, LAYOUT_MAX_HEIGHT);
+                // Match the composition paint's indented layout width + x-origin (§5A.3), so the
+                // candidate window / scroll-follows caret sit at the composed glyph in a quote.
+                let indent = indent_for(self.resolve_style(&app.text, i));
+                let raw = self.make_layout(&units, self.text_format.as_raw(), (width - indent).max(1.0), LAYOUT_MAX_HEIGHT);
                 if raw.is_null() {
                     return None;
                 }
@@ -801,7 +829,7 @@ impl Renderer {
                 let local_caret = (lo - self.para_starts[i]) + c.caret_units.min(c.text.len());
                 let (x, ly, h) = caret_geometry(layout.as_raw(), local_caret, units.len())?;
                 let top = self.heights.para_top(i);
-                Some((x, top + ly, h))
+                Some((indent + x, top + ly, h))
             },
         }
     }
@@ -1397,6 +1425,39 @@ mod tests {
             }
             com_release(plain as *mut c_void);
             com_release(styled as *mut c_void);
+        }
+    }
+
+    #[test]
+    fn indent_maps_blockquote_and_list_only() {
+        // The one place kind → indent (§5A.3): only blockquotes and list items shift right.
+        assert_eq!(indent_for(Some(StyleKind::BlockQuote)), INDENT_DIP);
+        assert_eq!(indent_for(Some(StyleKind::ListItem)), INDENT_DIP);
+        assert_eq!(indent_for(Some(StyleKind::Heading(1))), 0.0);
+        assert_eq!(indent_for(Some(StyleKind::PullQuote)), 0.0);
+        assert_eq!(indent_for(Some(StyleKind::Divider)), 0.0);
+        assert_eq!(indent_for(None), 0.0);
+    }
+
+    #[test]
+    fn indent_narrows_the_layout_so_height_only_grows() {
+        // The load-bearing §5A.3 claim: an indented paragraph is laid out at width − indent, so the
+        // height folded into the N5 index reflects the narrower *paint*. A narrower width can only
+        // keep or grow a paragraph's height (more wrapping) — never shrink it — so the height index
+        // stays exact for indented paragraphs. Same text, full vs indented width.
+        unsafe {
+            let long = "a moderately long blockquote line that will wrap once it is narrowed by the indent";
+            let (_f, _fmt, wide, _t) = build_layout(long, 300.0);
+            let (_f2, _fmt2, narrow, _t2) = build_layout(long, 300.0 - INDENT_DIP);
+            let h = |l: *mut IDWriteTextLayout| -> f32 {
+                let mut m: DWRITE_TEXT_METRICS = zeroed();
+                assert!(((*(*l).vtbl).get_metrics)(l, &mut m) >= 0);
+                m.height
+            };
+            let (hw, hn) = (h(wide), h(narrow));
+            assert!(hn >= hw - 0.01, "narrower indent width can only grow height: {hn} vs {hw}");
+            com_release(wide as *mut c_void);
+            com_release(narrow as *mut c_void);
         }
     }
 
