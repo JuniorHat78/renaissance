@@ -131,6 +131,86 @@ attributes only (size/weight/style — no per-run brush, so no color yet). Start
 These are constants next to the existing `FONT_SIZE_DIP` — every one a future knob. The point of Wave 1
 is that **headings become prominent**; the rest is a coherent, growable table.
 
+## 5A. Wave-1.5 — the look (color, dimmed markers, indent, rules)
+
+Wave 1 made headings *bigger*; Wave-1.5 makes the editor **read as a styled source document** — the
+source-highlight actually looks styled, not just sized. Everything here derives from what we already
+have — the block `StyleKind` spans + a per-paragraph **lexical marker scan** — so **no parser change**
+(that is Wave 2's job). Five moves, each a feel knob the author tunes.
+
+### 5A.1 Color — `SetDrawingEffect`, consume-only
+
+The mechanism is the key unlock and it stays **consume-only COM** (no custom `IDWriteTextRenderer`
+callback, which would mean *implementing* a text renderer). Set an `ID2D1SolidColorBrush` as the
+**drawing effect** on a `DWRITE_TEXT_RANGE` of the paragraph layout — `IDWriteTextLayout::
+SetDrawingEffect` (**slot 38**, currently a typed placeholder). `ID2D1RenderTarget::DrawTextLayout`
+recognises a drawing effect that is an `ID2D1Brush` and paints that range with it automatically. So
+color is "attach a brush to a range", symmetric with the Wave-1 `SetFontWeight`/`Size`/`Style` calls.
+
+- **COM:** type slot 38 `set_drawing_effect(*mut IDWriteTextLayout, *mut IUnknown, DWRITE_TEXT_RANGE)
+  -> HRESULT` (an `ID2D1SolidColorBrush*` is-a `IUnknown*`). ABI-assert `offset_of` == 38. **Smoke** the
+  slot on real DWrite (the phantom-`draw_mesh` lesson — a never-*called* slot AVs on first paint): color
+  a range, `DrawTextLayout` it, assert no AV and the layout still hit-tests coherently.
+- **Brushes:** the renderer creates a small themed palette of `ID2D1SolidColorBrush`es once, alongside
+  the existing text/sel/caret brushes, and recreates them with the target on device-loss. Palette (feel
+  knobs, theme-aware): `heading` (accent), `marker_dim` (muted/low-contrast), `quote` (muted), `rule`.
+
+### 5A.2 Dimmed markers — the source-editor tell
+
+The markdown markers stay on screen (source-highlight) but **recede**, so content pops and the file
+still reads as its source: dim `#{1,6}` + its trailing space on a heading, the `>` (+ optional space)
+on a blockquote, the `-`/`*`/`1.` + space on a list item. Apply the `marker_dim` brush to `[0,
+marker_len)`; the content after keeps its color.
+
+- The marker length is computed **lexically per paragraph** (`marker_len_of_line`, platform-free in
+  `styles.rs`, sharing the exact rules of `provisional_style_from_line` and the parser). Held
+  parser-faithful by an oracle: `marker_len_of_line(line)` equals the parser's `text_offset −
+  line_start` for that block (the count of source units the parser skips before the content).
+
+### 5A.3 Indent — blockquotes & list items shift right
+
+A blockquote / list-item paragraph draws at left origin `PAD_DIP + indent(kind)` instead of `PAD_DIP`.
+Because geometry is **one authority** (paint and the point-queries share the paragraph's draw origin
+and layout), the indent is applied once, at the `ox` used by both — so caret and hit-test stay correct
+with no special-casing.
+
+- **Width/height consistency (the load-bearing detail):** an indent reduces the available text width,
+  so an indented paragraph must be laid out at width `text_w − indent`, not `text_w`. Otherwise a long
+  quote would *paint* wrapped at the narrower width but *measure* its height at the full width — height
+  index and paint would disagree. `lay_out_paragraph` therefore takes the paragraph's effective width
+  from its kind, and `fold_paragraph_height` records that (still one authority; the N5 index stays
+  exact). Horizontal indent never shifts `para_top` — only the reduced width can grow a paragraph's
+  height, which folds in normally.
+- **Oracle:** the N5 `virtualized_geometry_matches_whole_doc` equivalence is extended to a doc with an
+  indented paragraph — its caret x = `ox + local` still matches the whole-doc reference.
+
+### 5A.4 Divider rule — a drawn primitive
+
+A `Divider` paragraph (`---`) draws a real **horizontal rule**: a thin `FillRectangle` (**slot 17**,
+already present) across the content width at the line's vertical centre, in the `rule` brush. The `---`
+source text stays (source fidelity — you can still edit it) but **dimmed**. No height special-case — the
+paragraph is a normal one-line height holding `---`.
+
+### 5A.5 List — dim + indent only (bullets deferred, honestly)
+
+Wave-1.5 gives list items the **dimmed marker** (5A.2) and the **indent** (5A.3). A real bullet *glyph*
+(painting `•` where the buffer holds `-`) is a **display ≠ source divergence** — that is the
+hide-markers / rendered model, a separate landmark we are deliberately not doing yet. So Wave-1.5 keeps
+the literal `-`/`*`/`1.`, just dimmed and indented. (Named deferral, not an omission.)
+
+### 5A.6 Checkpoints
+
+- **1.5a — color infra + block color + dimmed markers.** Type slot 38 (ABI-assert + smoke); the brush
+  palette (created/rebuilt with the target); `SetDrawingEffect` in `lay_out_paragraph` for block color
+  (heading accent, quote tint) and the dimmed leading marker range (`marker_len_of_line`). One vertical
+  slice (the bin-crate dead-code reality). Oracles: the slot-38 color smoke + the `marker_len_of_line`
+  parser-faithful oracle (platform-free).
+- **1.5b — indent.** Blockquote/list left indent at the one-authority origin, width reduced by the
+  indent so height stays exact; caret/hit-test read it. The equivalence oracle extended for an indented
+  paragraph.
+- **1.5c — divider rule.** The drawn `FillRectangle` hairline + dimmed `---`; a windowed smoke paints a
+  divider doc (no AV), ASan-clean.
+
 ## 6. The COM surface (typed, ABI-asserted, smoke-exercised)
 
 `IDWriteTextLayout` range formatting — three slots currently `usize` placeholders in the vtable, now
@@ -237,14 +317,17 @@ The author's feel pass on the size/weight table (§5), on a real manuscript, is 
 
 ## 11. Deferred (named)
 
-- **Inline styling (Wave 2)** — `Strong`/`Emphasis`/`Code`/`Link`. Needs inline spans; the fork: (a) a
-  parity-safe internal `position` on inline nodes emitted by the Rust parser but not serialized, vs (b)
-  re-tokenizing markers in the editor. Decided when built.
-- **Color** — `SetDrawingEffect` (slot 38) + a per-run brush (dim the markers, tint code, color links).
-- **Indent / rules / bullets (Wave-1.5)** — blockquote/list indent (shift the paragraph draw origin),
-  a divider's horizontal rule (a drawn primitive), list bullet glyphs.
-- **Marker dimming** — needs color (above); until then markers render in the body attributes.
-- **The rendered / hide-markers model** — the display↔source mapping landmark (a different node).
+- **Inline styling (Wave 2)** — `Strong`/`Emphasis`/`Code`/`Link`. Needs inline spans. **Fork resolved
+  (2026-07-06):** teach the shared Rust parser to emit an **internal, non-serialized `position`** on
+  inline nodes (the editor reads it in-process; the serialized JSON is unchanged, so the frozen-golden
+  parity oracle stays green with no downstream churn), NOT a second in-editor tokenizer — the parser is
+  ours to extend, and inline markdown is too fiddly to reimplement lexically without drift. Builds on
+  the 5A color infra (dim inline markers, tint `Code`, color+underline `Link`).
+- **Color / dimmed markers / indent / divider rule (Wave-1.5)** — §5A; **building now** (color via
+  `SetDrawingEffect` slot 38 consume-only, lexical marker dimming, blockquote/list indent, a drawn
+  divider rule). List *bullet glyphs* remain deferred (a display≠source divergence — the rendered model).
+- **The rendered / hide-markers model** — the display↔source mapping landmark (a different node); real
+  bullet glyphs, hidden markers, and mid-line WYSIWYG live here.
 - **Per-run styling *within* a paragraph** beyond inline (mixed sizes mid-line) — falls out of Wave 2.
 
 ## 12. Ledger deltas (fold into the umbrella §8 on reconcile)

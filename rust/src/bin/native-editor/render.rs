@@ -56,6 +56,14 @@ const LAYOUT_MAX_HEIGHT: f32 = 1.0e6;
 /// The window background / clear color (also painted behind the status strip).
 const BG_COLOR: D2D1_COLOR_F = D2D1_COLOR_F { r: 0.99, g: 0.985, b: 0.97, a: 1.0 };
 
+/// The source-highlight brush palette (STYLING §5A.1) — created from the render target, so rebuilt
+/// with it on device loss. Each is a feel knob (`HEADING_COLOR`/`MARKER_DIM_COLOR`/`QUOTE_COLOR`).
+struct Palette {
+    heading: ComPtr<ID2D1SolidColorBrush>,
+    marker_dim: ComPtr<ID2D1SolidColorBrush>,
+    quote: ComPtr<ID2D1SolidColorBrush>,
+}
+
 pub struct Renderer {
     // Field order is drop order: brushes/formats/target before the factories.
     target: ComPtr<ID2D1HwndRenderTarget>,
@@ -65,6 +73,11 @@ pub struct Renderer {
     // Opaque background fill — repaints the status strip so scrolled text can't bleed under
     // it (the pinned-chrome band, SCRIPTORIUM-NATIVE-LAYOUT.md §6). Device-dependent.
     bg_brush: ComPtr<ID2D1SolidColorBrush>,
+    // The Wave-1.5 source-highlight palette (heading accent, dimmed markers, quote grey), attached to
+    // sub-ranges via SetDrawingEffect so DrawTextLayout paints them (STYLING §5A.1). Device-dependent
+    // — rebuilt with the target on device loss, and it MUST outlive any layout it's attached to (a
+    // dropped brush behind a live drawing effect is a use-after-free), which it does: Renderer-lifetime.
+    palette: Palette,
     text_format: ComPtr<IDWriteTextFormat>,
     status_format: ComPtr<IDWriteTextFormat>,
     // --- virtualized layout (N5, SCRIPTORIUM-NATIVE-VIRTUAL-LAYOUT.md) --------
@@ -127,6 +140,13 @@ const CARET_COLOR: D2D1_COLOR_F = D2D1_COLOR_F { r: 0.16, g: 0.40, b: 0.85, a: 1
 // Translucent so the glyphs read through the highlight it sits behind.
 const SEL_COLOR: D2D1_COLOR_F = D2D1_COLOR_F { r: 0.16, g: 0.40, b: 0.85, a: 0.25 };
 
+// The Wave-1.5 source-highlight palette (STYLING §5A.1) — every value a feel knob the author tunes.
+// Headings take a deliberate deep-indigo accent (already bold+big); markers recede to a low-contrast
+// grey so the file still reads as its source but the content pops; quotes grey down as secondary text.
+const HEADING_COLOR: D2D1_COLOR_F = D2D1_COLOR_F { r: 0.14, g: 0.20, b: 0.42, a: 1.0 };
+const MARKER_DIM_COLOR: D2D1_COLOR_F = D2D1_COLOR_F { r: 0.66, g: 0.66, b: 0.70, a: 1.0 };
+const QUOTE_COLOR: D2D1_COLOR_F = D2D1_COLOR_F { r: 0.42, g: 0.44, b: 0.50, a: 1.0 };
+
 impl Renderer {
     /// Build the whole object graph for `hwnd`. Returns the HRESULT of the first
     /// failing call (N0 surfaces it; N1+ tightens error handling).
@@ -156,6 +176,7 @@ impl Renderer {
             // Device-dependent resources (target + brushes), rebuildable on device loss.
             let (target, text_brush, caret_brush, sel_brush, bg_brush) =
                 create_device_resources(d2d_factory.as_raw(), hwnd, dpi)?;
+            let palette = create_palette(target.as_raw())?;
 
             // Text formats.
             let text_format =
@@ -174,6 +195,7 @@ impl Renderer {
                 caret_brush,
                 sel_brush,
                 bg_brush,
+                palette,
                 text_format,
                 status_format,
                 heights: HeightIndex::new(),
@@ -213,11 +235,19 @@ impl Renderer {
     unsafe fn recreate_device_resources(&mut self) {
         match create_device_resources(self.d2d_factory.as_raw(), self.hwnd, self.dpi) {
             Ok((target, text_brush, caret_brush, sel_brush, bg_brush)) => {
-                self.target = target;
-                self.text_brush = text_brush;
-                self.caret_brush = caret_brush;
-                self.sel_brush = sel_brush;
-                self.bg_brush = bg_brush;
+                // The palette brushes come from the target, so rebuild them from the NEW one before
+                // swapping it in — on failure keep the old resources and retry next frame (as below).
+                match create_palette(target.as_raw()) {
+                    Ok(palette) => {
+                        self.target = target;
+                        self.text_brush = text_brush;
+                        self.caret_brush = caret_brush;
+                        self.sel_brush = sel_brush;
+                        self.bg_brush = bg_brush;
+                        self.palette = palette;
+                    }
+                    Err(hr) => eprintln!("palette recreate failed: 0x{hr:08x}"),
+                }
             }
             Err(hr) => eprintln!("device-resource recreate failed: 0x{hr:08x}"),
         }
@@ -322,9 +352,13 @@ impl Renderer {
                         if raw.is_null() {
                             continue;
                         }
-                        // A heading (etc.) composed via an IME stays heading-styled (§8.3).
+                        // A heading (etc.) composed via an IME stays heading-styled (§8.3). Color too,
+                        // so it doesn't flip to body-colored mid-composition; the marker range comes
+                        // from the spliced provisional text (what's actually on screen).
                         if let Some(kind) = self.resolve_style(&app.text, i) {
                             apply_paragraph_style(raw, kind, units.len());
+                            let marker_len = crate::styles::marker_len_of_line(&units);
+                            self.apply_paragraph_color(raw, kind, marker_len, units.len());
                         }
                         let layout = ComPtr::from_raw(raw);
                         let lptr = layout.as_raw();
@@ -520,14 +554,54 @@ impl Renderer {
         // Source-highlight (N-STYLING): apply this paragraph's block style BEFORE measuring, so the
         // folded height reflects the styled (e.g. taller heading) layout and paint + point-queries
         // agree. `resolve_style` uses the immediate lexical guess while a parse is in flight (STYLING
-        // §4) so a
-        // just-typed heading is measured tall right away. The range is always the whole current
+        // §4) so a just-typed heading is measured tall right away. Font attributes (size/weight/style)
+        // change geometry; color (SetDrawingEffect, §5A.1) does not, but goes through the same one
+        // authority so paint and queries share ONE styled layout. The range is always the whole current
         // paragraph — a stale span offset can only pick the wrong *kind*, never read out of range (§4).
         if let Some(kind) = self.resolve_style(text, i) {
             apply_paragraph_style(layout.as_raw(), kind, end - start);
+            let marker_len = crate::styles::marker_len_of_line(&text[start..end]);
+            self.apply_paragraph_color(layout.as_raw(), kind, marker_len, end - start);
         }
         self.fold_paragraph_height(i, layout.as_raw());
         Some((layout, end - start))
+    }
+
+    /// Attach the source-highlight color for a paragraph's block `kind` to its transient `layout` via
+    /// SetDrawingEffect (STYLING §5A.1): the content in the kind's brush (heading accent / quote grey)
+    /// and the leading `[0, marker_len)` markdown marker dimmed. Drawing effects don't affect
+    /// metrics/hit-testing — this is paint-only styling riding the one shared layout, so a caret query
+    /// through this same layout is unaffected. Body/list/divider (no content brush) fall through to
+    /// DrawTextLayout's default text brush; Wave-1.5b/c give list + divider their own visuals.
+    unsafe fn apply_paragraph_color(
+        &self,
+        layout: *mut IDWriteTextLayout,
+        kind: StyleKind,
+        marker_len: usize,
+        content_len: usize,
+    ) {
+        if content_len == 0 {
+            return;
+        }
+        let lv = &*(*layout).vtbl;
+        let full = content_len as u32;
+        let content_brush = match kind {
+            StyleKind::Heading(_) => Some(self.palette.heading.as_raw()),
+            StyleKind::BlockQuote | StyleKind::PullQuote => Some(self.palette.quote.as_raw()),
+            StyleKind::ListItem | StyleKind::Divider => None,
+        };
+        // Content color: the range AFTER the marker, so the dimmed marker isn't overpainted.
+        if let Some(b) = content_brush {
+            let start = marker_len.min(content_len) as u32;
+            if full > start {
+                (lv.set_drawing_effect)(layout, b as *mut c_void, DWRITE_TEXT_RANGE { startPosition: start, length: full - start });
+            }
+        }
+        // Dim the leading markdown marker (`#`s / `>` + ws).
+        if marker_len > 0 {
+            let m = marker_len.min(content_len) as u32;
+            (lv.set_drawing_effect)(layout, self.palette.marker_dim.as_raw() as *mut c_void, DWRITE_TEXT_RANGE { startPosition: 0, length: m });
+        }
     }
 
     /// The block style to actually apply to paragraph `i` (STYLING §4). When the AST styles are current the
@@ -829,6 +903,18 @@ unsafe fn create_device_resources(
     let sel_brush = ComPtr::from_raw(make_brush(target.as_raw(), SEL_COLOR)?);
     let bg_brush = ComPtr::from_raw(make_brush(target.as_raw(), BG_COLOR)?);
     Ok((target, text_brush, caret_brush, sel_brush, bg_brush))
+}
+
+/// Build the source-highlight brush palette from a render target (STYLING §5A.1) — kept separate
+/// from `create_device_resources` (which the recovery path also uses via a tuple) so the palette is
+/// purely additive: it is created right after the target on construction and rebuilt with it on
+/// device loss. On any failure the caller keeps the old (dead) palette and retries next frame.
+unsafe fn create_palette(rt: *mut ID2D1HwndRenderTarget) -> Result<Palette, HRESULT> {
+    Ok(Palette {
+        heading: ComPtr::from_raw(make_brush(rt, HEADING_COLOR)?),
+        marker_dim: ComPtr::from_raw(make_brush(rt, MARKER_DIM_COLOR)?),
+        quote: ComPtr::from_raw(make_brush(rt, QUOTE_COLOR)?),
+    })
 }
 
 /// CreateSolidColorBrush on a render target.
@@ -1289,6 +1375,12 @@ mod tests {
             assert!((sv.set_font_size)(styled, FONT_SIZE_DIP * 1.7, range) >= 0, "SetFontSize (slot 35)");
             assert!((sv.set_font_weight)(styled, DWRITE_FONT_WEIGHT_BOLD, range) >= 0, "SetFontWeight (slot 32)");
             assert!((sv.set_font_style)(styled, DWRITE_FONT_STYLE_ITALIC, range) >= 0, "SetFontStyle (slot 33)");
+            // Exercise SetDrawingEffect (slot 38, the Wave-1.5 color path) on real DWrite in the GATED
+            // suite — a NULL effect is legal (clears any effect), so this pins the slot's offset +
+            // calling convention without needing a render target to make a brush (the phantom-slot
+            // lesson: a never-*called* slot AVs on first use; the windowed smoke calls it with a real
+            // brush during paint, this calls it in the normal test run). Must not AV and returns S_OK.
+            assert!((sv.set_drawing_effect)(styled, null_mut(), range) >= 0, "SetDrawingEffect (slot 38)");
 
             let mut pm: DWRITE_TEXT_METRICS = zeroed();
             let mut sm: DWRITE_TEXT_METRICS = zeroed();

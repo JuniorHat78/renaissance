@@ -691,7 +691,11 @@ pub struct IDWriteTextLayoutVtbl {
     pub set_font_size: unsafe extern "system" fn(*mut IDWriteTextLayout, f32, DWRITE_TEXT_RANGE) -> HRESULT, // 35
     pub set_underline: usize,        // 36
     pub set_strikethrough: usize,    // 37
-    pub set_drawing_effect: usize,   // 38
+    // Attach a drawing effect (an ID2D1Brush*, as IUnknown*) to a sub-range; DrawTextLayout paints
+    // that range with the brush automatically — the consume-only color path (STYLING §5A.1). The
+    // brush pointer is passed as *mut c_void, matching how draw_text_layout/fill_rectangle take a
+    // brush. A stale effect (dropped brush) would be a use-after-free, so brushes outlive the paint.
+    pub set_drawing_effect: unsafe extern "system" fn(*mut IDWriteTextLayout, *mut c_void, DWRITE_TEXT_RANGE) -> HRESULT, // 38
     pub set_inline_object: usize,    // 39
     pub set_typography: usize,       // 40
     pub set_locale_name: usize,      // 41
@@ -923,6 +927,7 @@ mod layout_tests {
         assert_eq!(offset_of!(IDWriteTextLayoutVtbl, set_font_weight), 32 * P);
         assert_eq!(offset_of!(IDWriteTextLayoutVtbl, set_font_style), 33 * P);
         assert_eq!(offset_of!(IDWriteTextLayoutVtbl, set_font_size), 35 * P);
+        assert_eq!(offset_of!(IDWriteTextLayoutVtbl, set_drawing_effect), 38 * P);
         assert_eq!(offset_of!(IDWriteTextLayoutVtbl, get_metrics), 60 * P);
         assert_eq!(offset_of!(IDWriteTextLayoutVtbl, hit_test_point), 64 * P);
         assert_eq!(offset_of!(IDWriteTextLayoutVtbl, hit_test_text_position), 65 * P);

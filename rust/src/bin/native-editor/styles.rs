@@ -92,22 +92,42 @@ pub fn kind_for_paragraph(spans: &[StyleSpan], lo: usize, hi: usize) -> Option<S
 /// — including pull quotes and lists, whose styling the renderer keeps from the last-good AST — is
 /// `None` here. Kept byte-rule-faithful to the parser by `provisional_agrees_with_the_parser`.
 pub fn provisional_style_from_line(line: &[u16]) -> Option<StyleKind> {
-    // Heading: a run of 1..=6 '#' at column 0, then whitespace, then at least one more unit
-    // (parser.rs `parse_heading_line`: `!is_ws(line[marker]) || len - marker < 2` rejects).
+    scan_block_marker(line).map(|(kind, _)| kind)
+}
+
+/// The source length of the leading block marker on `line` — the units the parser treats as marker,
+/// not content (heading `#`s + one whitespace, or a blockquote `>` + an optional single whitespace),
+/// or 0 if the line has no owned marker. The renderer dims `[0, marker_len)` so the markdown markers
+/// recede while the content pops (STYLING §5A.2). Shares `scan_block_marker` with the style guess, so
+/// the dimmed range and the detected kind are always consistent (dim exactly what made it that kind).
+pub fn marker_len_of_line(line: &[u16]) -> usize {
+    scan_block_marker(line).map_or(0, |(_, len)| len)
+}
+
+/// The single lexical scan behind both `provisional_style_from_line` and `marker_len_of_line`: the
+/// block `StyleKind` a line's own leading markers determine, plus that marker's **source length**.
+/// Marker lengths mirror the parser's content offset: a heading skips `#`-run + one ws
+/// (`parse_heading_line`'s `text_offset = offset + marker_len + 1`); a blockquote skips optional
+/// leading ws + `>` + an optional single space (`parse_block_quote_line`'s `marker_length`).
+fn scan_block_marker(line: &[u16]) -> Option<(StyleKind, usize)> {
+    // Heading: 1..=6 '#' at column 0, then whitespace, then >=1 more unit.
     let mut h = 0;
     while h < line.len() && line[h] == 0x23 {
         h += 1;
     }
     if (1..=6).contains(&h) && h < line.len() && is_ws(line[h]) && line.len() - h >= 2 {
-        return Some(StyleKind::Heading(h.min(3) as u8));
+        // The style level clamps to 3, but the dimmed marker covers ALL of the actual '#' run + the
+        // one ws — so `###### x` dims 7 units even though its kind is Heading(3).
+        return Some((StyleKind::Heading(h.min(3) as u8), h + 1));
     }
-    // Blockquote: optional leading whitespace, then '>' (parser.rs `parse_block_quote_line`).
+    // Blockquote: optional leading whitespace, then '>', then an optional single literal space.
     let mut g = 0;
     while g < line.len() && is_ws(line[g]) {
         g += 1;
     }
     if g < line.len() && line[g] == 0x3E {
-        return Some(StyleKind::BlockQuote);
+        let sp = usize::from(g + 1 < line.len() && line[g + 1] == 0x20);
+        return Some((StyleKind::BlockQuote, g + 1 + sp));
     }
     None
 }
@@ -200,6 +220,20 @@ mod tests {
         assert_eq!(lex("   > indented quote"), Some(StyleKind::BlockQuote), "leading ws before '>' is allowed");
         assert_eq!(lex("plain prose"), None);
         assert_eq!(lex(""), None);
+    }
+
+    #[test]
+    fn marker_len_covers_the_leading_marker() {
+        let m = |s: &str| marker_len_of_line(&s.encode_utf16().collect::<Vec<u16>>());
+        assert_eq!(m("# Heading"), 2, "# + space");
+        assert_eq!(m("### Three"), 4, "### + space");
+        assert_eq!(m("###### Six"), 7, "all six # + space, even though the level clamps to 3");
+        assert_eq!(m("> quote"), 2, "> + space");
+        assert_eq!(m(">quote"), 1, "> with no space");
+        assert_eq!(m("   > indented"), 5, "3 leading spaces + > + space");
+        assert_eq!(m("plain prose"), 0);
+        assert_eq!(m("#nospace"), 0, "not a heading → no marker");
+        assert_eq!(m(""), 0);
     }
 
     #[test]

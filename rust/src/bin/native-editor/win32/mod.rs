@@ -1576,8 +1576,9 @@ mod smoke_tests {
 
             // AST-styled rendering (SCRIPTORIUM-NATIVE-STYLING.md §9): drive the styled draw path on
             // real DWrite. Fold a Heading style span over the typed text directly (a synthetic parse
-            // result), then paint — `draw` → `lay_out_paragraph` → `apply_paragraph_style` calls the
-            // newly-typed SetFontSize/Weight/Style slots on a live layout inside a real paint (the
+            // result), then paint — `draw` → `lay_out_paragraph` → `apply_paragraph_style` +
+            // `apply_paragraph_color` call the SetFontSize/Weight/Style slots AND SetDrawingEffect
+            // (slot 38, Wave-1.5 color) with a real brush on a live layout inside a real paint (the
             // integration companion to the bare-layout oracle). Must not panic.
             {
                 let cs = &mut *(GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut WindowState);
