@@ -446,6 +446,20 @@ impl App {
         matches!(self.find.as_ref().map(|fs| fs.focus), Some(Focus::Replace))
     }
 
+    /// Is a bar *field* focused right now? False when find is closed, or open with focus in the
+    /// document (the non-modal case — keystrokes edit the document, the bar floating). `win32` uses
+    /// this to route the keyboard.
+    pub fn find_field_focused(&self) -> bool {
+        matches!(self.find.as_ref(), Some(fs) if fs.field_focused())
+    }
+
+    /// Return keyboard focus to the document while leaving the bar open (a click in the document).
+    pub fn find_focus_document(&mut self) {
+        if let Some(fs) = &mut self.find {
+            fs.focus = Focus::Document;
+        }
+    }
+
     /// Tab between the query and replace fields (only when the replace field is visible).
     pub fn find_toggle_focus(&mut self) {
         if let Some(fs) = &mut self.find {
@@ -549,8 +563,8 @@ impl App {
     pub fn find_field_copy(&self) -> Vec<u16> {
         match &self.find {
             Some(fs) => match fs.focus {
-                Focus::Query => fs.query.selected_units(),
                 Focus::Replace => fs.replace.selected_units(),
+                _ => fs.query.selected_units(),
             },
             None => Vec::new(),
         }
@@ -1258,5 +1272,39 @@ mod find_app_tests {
         assert_eq!(app.find_state().unwrap().query.caret(), 3);
         app.find_backspace(); // deletes the 'n' before the caret → "baana"
         assert_eq!(app.find_state().unwrap().query.text(), &"baana".encode_utf16().collect::<Vec<_>>()[..]);
+    }
+
+    #[test]
+    fn non_modal_document_stays_editable_with_the_bar_open() {
+        // The whole point of the non-modal bar: with find open but focus in the document, typing
+        // edits the document (not the query), and the query is left untouched.
+        let mut app = app_with("cat dog cat");
+        app.set_caret(0, false);
+        app.find_begin(false);
+        query(&mut app, "cat");
+        assert!(app.find_field_focused()); // opens focused on the query field
+        app.find_focus_document(); // a click in the text returns focus to the document
+        assert!(!app.find_field_focused());
+        assert!(app.is_finding()); // ...but the bar is still open
+        // Now "typing" (routed to the document by win32 because no field is focused) edits the doc.
+        app.set_caret(0, false);
+        app.input_char('X' as u16);
+        assert_eq!(s(&app), "Xcat dog cat");
+        assert_eq!(app.find_state().unwrap().query.text(), &"cat".encode_utf16().collect::<Vec<_>>()[..]);
+    }
+
+    #[test]
+    fn ctrl_f_pulls_focus_back_into_the_bar() {
+        // Ctrl+F while doc-focused (via find_begin's already-open path) refocuses + reselects the
+        // query — the standard "hit Ctrl+F again to get back to searching" feel.
+        let mut app = app_with("alpha beta");
+        app.set_selection(0, 5); // seed the query "alpha" so reselection is observable
+        app.find_begin(false);
+        app.find_focus_document();
+        assert!(!app.find_field_focused());
+        app.find_begin(false); // Ctrl+F again
+        assert!(app.find_field_focused());
+        assert!(!app.find_focus_is_replace());
+        assert!(app.find_state().unwrap().query.has_selection()); // reselected, ready to retype
     }
 }

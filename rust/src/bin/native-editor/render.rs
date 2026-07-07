@@ -378,10 +378,12 @@ impl Renderer {
                 let comp_para = comp.map(|_| self.para_of_offset(lo));
                 // The one paragraph that paints the caret: the composition's while composing, else
                 // the caret's — so exactly one paragraph draws it (and none if blinked off).
-                // While find-mode is open, focus (and the caret) live in the find bar, so the
-                // document caret is suppressed — the active match is shown by its amber fill, not a
-                // caret (FIND §5). The field caret is drawn by `draw_find_bar`.
-                let caret_owner = if !caret_visible || app.is_finding() {
+                // The find bar is non-modal (FIND §4): the document caret shows whenever a bar
+                // *field* isn't focused — i.e. find closed, OR open with focus in the document (you
+                // keep editing under the floating bar). It's suppressed only while a field owns the
+                // keyboard; then the field draws its own caret and the active match shows as an amber
+                // fill instead.
+                let caret_owner = if !caret_visible || app.find_field_focused() {
                     None
                 } else if comp.is_some() {
                     comp_para
@@ -451,9 +453,11 @@ impl Renderer {
                         };
                         let lptr = layout.as_raw();
                         let ox = PAD_DIP + indent; // blockquote/list shift right (§5A.3)
-                        // The blue selection is suppressed in find-mode (the active match's amber
-                        // fill stands in for it — the selection *is* the active match, FIND §5).
-                        if app.has_selection() && !app.is_finding() {
+                        // The blue selection shows while the document has focus (find closed, or the
+                        // non-modal bar open with focus in the text). It's suppressed only while a
+                        // bar field is focused — there the active match's amber fill stands in for it
+                        // (the selection *is* the active match, FIND §5).
+                        if app.has_selection() && !app.find_field_focused() {
                             let s = lo.max(ps);
                             let e = hi.min(pe);
                             if e > s {

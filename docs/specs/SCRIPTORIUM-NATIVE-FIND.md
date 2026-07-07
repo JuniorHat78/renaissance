@@ -10,17 +10,18 @@ navigation + the self-drawn bar + both Replace transactions, `56f3c5c`) — coll
 and style-a+style-b, because the `App` find/replace methods are dead in a bin crate until `win32`
 routes to them (`pub` ≠ reachability), so a warning-free tree per commit outweighed the split —
 then **F-d** the mouse + system-key routing (§4/§8), the input plumbing surfaced by the author's
-first hands-on pass (a self-drawn bar receives neither clicks nor Alt keys for free).
-Validated: 115 oracles (11 match-engine incl. a 20k-iter differential fuzz, 4 `FindState`, 8
-`MiniEdit`, 12 App find/replace incl. the self-match + right-to-left transaction proofs + the
-click-focus/caret proofs, 5 `find_layout` bar-geometry) + the windowed smoke driving find-mode on
-real DirectWrite (both input branches, the bar + highlight render, both Replace transactions, a
-click on a field + a toggle, Alt via `WM_SYSKEYDOWN`) + ASan-clean across the new draw + field
-hit-test calls, clippy clean. The
-bar's *look* (colors/geometry/wrap affordance) is the author's feel-loop (§9). One deferral noted
-below: undo *while find-mode is open* (Ctrl+Z routes nowhere in the find key table — Esc then
-undo); and full IME *composition preview* in the query field (committed input works; the inline
-preview is the document's, suppressed in find-mode).
+first hands-on pass (a self-drawn bar receives neither clicks nor Alt keys for free), then **F-e**
+the **non-modal** rebuild (the bar no longer captures the keyboard: the document stays editable and
+Ctrl+Z works with the bar open — the author's second-pass gripes).
+Validated: 117 oracles (11 match-engine incl. a 20k-iter differential fuzz, 4 `FindState`, 8
+`MiniEdit`, 16 App find/replace incl. the self-match + right-to-left transaction proofs + the
+click-focus/caret + non-modal proofs, 5 `find_layout` bar-geometry) + the windowed smoke driving
+find on real DirectWrite (both input branches, the bar + highlight render, both Replace
+transactions, a click on a field + a toggle, Alt via `WM_SYSKEYDOWN`, a document click + type while
+the bar floats) + ASan-clean across the new draw + field hit-test calls, clippy clean. The
+bar's *look* (colors/geometry/wrap affordance) is the author's feel-loop (§9) — clean-pill direction
+chosen, with real Replace buttons landing in F-f. One deferral remains: full IME *composition
+preview* in the query field (committed input works; the inline preview is the document's).
 
 Built against the umbrella (`SCRIPTORIUM-NATIVE-EDITOR.md`) — same dependency line (the OS
 API, no crate), same seam (`app` platform-free; only `win32`/`render` touch the OS), same
@@ -139,13 +140,27 @@ is the craftsman payoff: a text input is *already solved*, so the bar is a small
 composition, not a new engine. `MiniEdit` lives in `app` (platform-free, oracle-able); the bar's
 *geometry* (a strip near the top-right, over the document) and *paint* live in `render`.
 
-**Focus + routing (the input seam).** `App` gains a `focus: Focus { Document, FindQuery,
-FindReplace }`. `win32` routes a keystroke to the focused sink. The find bar is a **mode**, not
-a window: opening it (Ctrl+F) sets focus to the query and seeds it from the document selection
-(the universal "select a word, Ctrl+F, it's pre-filled" affordance); Tab moves query↔replace;
-**Esc** closes the bar and returns focus to the document, leaving the caret **on the active
-match** (so you close find and start editing exactly where you landed). The document keeps
-rendering and reparsing live underneath — find-mode never freezes the editor.
+**Focus + routing (the input seam) — NON-MODAL (revised in F-e).** `FindState.focus: Focus
+{ Document, Query, Replace }`. `win32` routes each keystroke to the focused sink. Critically, the
+bar is **not a mode that captures the keyboard** — it floats *over* a still-live document, and
+focus can rest in the `Document` with the bar open. Opening it (Ctrl+F) moves focus to the query
+and seeds it from the document selection (the universal "select a word, Ctrl+F, it's pre-filled"
+affordance). From there:
+- A **click in a field** (or Ctrl+F / Ctrl+H) moves focus into the bar; **Tab** flips query↔replace.
+- A **click in the document** returns focus to `Document` — and now **typing edits the document,
+  arrows move the document caret, and Ctrl+Z undoes document edits**, all with the bar still open.
+- **Esc** closes the bar, leaving the caret on the active match (close find, start editing where
+  you landed).
+
+This replaces F-b/F-c's original **modal** capture (the bar owned *all* keys while open), which was
+the correct-but-wrong first cut: it made the document un-editable and, worse, *swallowed Ctrl+Z*
+after a Replace (undo isn't a find-bar key, so it went nowhere). Non-modal dissolves both. `win32`
+gates on `App::find_field_focused()` (open **and** focus in a field) — false ⇒ the keystroke falls
+through to the document handlers. A small set of **global** find keys work in *any* focus while the
+bar is open (`handle_find_global_key`): **Esc**, **F3 / Shift+F3** (jump matches while you keep
+typing — the standard global "find next"), **Ctrl+F / Ctrl+H**. Everything else (Enter-to-nav/
+replace, Tab, field editing, the Alt toggles) is **field-context** and fires only when a field
+holds focus. The document keeps rendering and reparsing live underneath throughout.
 
 **Keys (in find-mode):**
 - **Ctrl+F** open / focus query (seed from selection). **Ctrl+H** open with replace visible.
@@ -271,6 +286,16 @@ forces it, as IO's two did):
   path, not `WM_KEYDOWN`. Zero new FFI (reuses the bound `HitTestPoint`). Smoke extended: synthetic
   clicks on the query field + `Aa` toggle and Alt+C/Alt+W via `WM_SYSKEYDOWN`, driven through the
   real WndProc on live DirectWrite, ASan-clean.
+- **F-e — non-modal find. ✅ BUILT (`§4`).** The second round of the author's hands-on pass: the bar
+  was **modal** (it captured the whole keyboard), which made the document un-editable while open and
+  swallowed **Ctrl+Z** after a Replace. Rebuilt non-modal: `Focus` gained a `Document` variant;
+  `win32` routes on `App::find_field_focused()` so keystrokes fall through to the document unless a
+  field is focused; a document click calls `find_focus_document()`; a **global** key set (Esc, F3/
+  Shift+F3, Ctrl+F/H via `handle_find_global_key`) works in any focus while the field table stays
+  field-context. Renderer follows suit — the document caret + blue selection show when a field
+  *isn't* focused. No new FFI (pure routing). 4 App oracles (doc-editable-while-open, Ctrl+F
+  refocus, click focus-follow) + the smoke extended to click into the document and type through the
+  real WndProc, asserting the edit lands on the *document* with the bar still open.
 
 **Key wiring facts (built):** VK constants for the find keys added to `win32::sys`; `handle_find_key`
 is the find command table (returns `false` for plain typing → falls to WM_CHAR → the field); WM_CHAR

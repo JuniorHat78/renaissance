@@ -21,10 +21,13 @@ use std::ops::Range;
 use crate::grapheme;
 use crate::minedit::MiniEdit;
 
-/// Which find-bar field holds focus while find-mode is open (§4). Tab toggles them; the
-/// document has focus only when find-mode is closed (`App::find` is `None`).
+/// Where the keyboard goes while the find bar is open (§4). The bar is **non-modal**: it can be
+/// open with focus still in the `Document` (you keep typing/undoing in your text, the bar floating
+/// over it), or in one of its two fields. Tab toggles the two fields; a click or Ctrl+F moves focus
+/// into the bar; a click in the document (or Esc) returns it to `Document`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Focus {
+    Document,
     Query,
     Replace,
 }
@@ -75,12 +78,20 @@ impl FindState {
         }
     }
 
-    /// The field that currently has focus (for routing input + drawing the caret).
+    /// The field that currently has focus (for routing input + drawing the caret). `Document` has
+    /// no field; callers gate field edits on `field_focused()` first, so it defaults to the query
+    /// field here rather than panicking.
     pub fn focused(&mut self) -> &mut MiniEdit {
         match self.focus {
-            Focus::Query => &mut self.query,
             Focus::Replace => &mut self.replace,
+            _ => &mut self.query,
         }
+    }
+
+    /// Is a bar *field* focused (vs. the document)? Gates keyboard routing: when false, keystrokes
+    /// go to the document even though the bar is open.
+    pub fn field_focused(&self) -> bool {
+        self.focus != Focus::Document
     }
 
     /// Recompute the match set if `(content_gen, query, opts)` changed since last time — the lazy,

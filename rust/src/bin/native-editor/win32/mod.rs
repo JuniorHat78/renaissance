@@ -256,10 +256,12 @@ unsafe fn wndproc_impl(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> 
         }
         WM_CHAR => {
             let ch = wparam as u16;
-            if state.app.is_finding() {
-                // Find-mode (FIND §4): only printable units reach the focused bar field; control
+            if state.app.find_field_focused() {
+                // A bar field has the keyboard (FIND §4): only printable units reach it; control
                 // units (Enter/Backspace/Tab/Esc) are handled as commands in WM_KEYDOWN, so they're
-                // swallowed here to avoid double-handling (e.g. Ctrl+H's 0x08, Enter's 0x0D).
+                // swallowed here to avoid double-handling (e.g. Ctrl+H's 0x08, Enter's 0x0D). When the
+                // bar is open but the *document* is focused, this branch is skipped and typing edits
+                // the document below — the non-modal behaviour.
                 if ch >= 0x20 && ch != 0x7F {
                     state.app.find_input(ch);
                     // Reveal the re-sought active match (the document caret tracks it).
@@ -320,12 +322,27 @@ unsafe fn wndproc_impl(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> 
             // the document's. Unhandled keys fall through to DefWindowProc → WM_CHAR → the field.
             // The shared tail still runs (reveal the active match, repaint), so a nav/replace scrolls
             // its match into view exactly like a caret move.
+            // The find bar is non-modal (FIND §4). While it's open:
+            //   1. A small set of *global* keys work no matter where focus is — Esc (close),
+            //      F3/Shift+F3 (jump matches while you keep editing), Ctrl+F/Ctrl+H (pull focus into
+            //      the bar). These run even when the document is focused.
+            //   2. If a bar *field* is focused, its edit/motion table (handle_find_key) owns the rest,
+            //      and plain typing falls to WM_CHAR → the field.
+            //   3. Otherwise the document is focused — fall through to the document key table below,
+            //      so Ctrl+Z / arrows / typing all reach the text with the bar still floating.
             if state.app.is_finding() {
-                if handle_find_key(state, hwnd, vk, shift, ctrl, alt) {
+                if handle_find_global_key(state, vk, shift, ctrl) {
                     after_find_key(state, hwnd);
                     return 0;
                 }
-                return DefWindowProcW(hwnd, msg, wparam, lparam);
+                if state.app.find_field_focused() {
+                    if handle_find_key(state, hwnd, vk, shift, ctrl, alt) {
+                        after_find_key(state, hwnd);
+                        return 0;
+                    }
+                    return DefWindowProcW(hwnd, msg, wparam, lparam);
+                }
+                // Document-focused with the bar open: fall through to the document handling below.
             }
 
             match vk {
@@ -425,7 +442,9 @@ unsafe fn wndproc_impl(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> 
         // work; returning 0 swallows the key so DefWindowProc doesn't ring the menu bell. Anything
         // we don't consume (Alt+F4, Alt+Space) still falls through to DefWindowProc.
         WM_SYSKEYDOWN => {
-            if state.app.is_finding() {
+            // The Alt accelerators are field-context (Alt+Enter replace-all, Alt+C/Alt+W toggles),
+            // so they fire only when a bar field is focused — not while you're editing the document.
+            if state.app.find_field_focused() {
                 let shift = key_down(VK_SHIFT);
                 let ctrl = key_down(VK_CONTROL);
                 if handle_find_key(state, hwnd, wparam as u32, shift, ctrl, true) {
@@ -436,9 +455,9 @@ unsafe fn wndproc_impl(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> 
             DefWindowProcW(hwnd, msg, wparam, lparam)
         }
         WM_SYSCHAR => {
-            // The character companion of a consumed WM_SYSKEYDOWN. While the find bar is open we
+            // The character companion of a consumed WM_SYSKEYDOWN. While a bar field is focused we
             // drove input from the key path already, so swallow this to silence the menu bell.
-            if state.app.is_finding() {
+            if state.app.find_field_focused() {
                 0
             } else {
                 DefWindowProcW(hwnd, msg, wparam, lparam)
@@ -473,13 +492,16 @@ unsafe fn wndproc_impl(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> 
         WM_LBUTTONDOWN => {
             // While the find bar is open, a click inside it drives the bar (focus a field, place
             // the field caret, flip a toggle) instead of moving the document caret. A click outside
-            // the bar falls through to the document (find stays open).
+            // the bar returns focus to the document (non-modal, FIND §4) and moves the caret there —
+            // the bar stays open, floating.
             let px = get_x_lparam(lparam);
             let py = get_y_lparam(lparam);
             if state.app.is_finding() && find_mouse_down(state, hwnd, px, py) {
-                state.caret_visible = true;
-                InvalidateRect(hwnd, null(), 0);
+                after_find_key(state, hwnd); // reveal the active match, reparse if a replace ran, repaint
             } else {
+                if state.app.is_finding() {
+                    state.app.find_focus_document(); // click in the text → keyboard follows
+                }
                 mouse_down(state, hwnd, px, py, key_down(VK_SHIFT));
             }
             0
@@ -698,23 +720,39 @@ unsafe fn place_field_caret(state: &mut WindowState, replace: bool, field: &find
     state.app.find_place_field_caret(idx);
 }
 
-unsafe fn handle_find_key(state: &mut WindowState, hwnd: HWND, vk: u32, shift: bool, ctrl: bool, alt: bool) -> bool {
+/// The find keys that work regardless of where focus is while the bar is open (FIND §4): Esc
+/// closes; F3 / Shift+F3 jump to the next/previous match even while you're editing the document;
+/// Ctrl+F / Ctrl+H pull focus back into the bar (Ctrl+H also reveals the replace row). Returns
+/// whether the key was consumed. Handled *before* the field table so they fire in any focus.
+unsafe fn handle_find_global_key(state: &mut WindowState, vk: u32, shift: bool, ctrl: bool) -> bool {
     let a = &mut state.app;
     match vk {
         VK_ESCAPE => a.find_end(),
+        VK_F3 => {
+            if shift {
+                a.find_prev();
+            } else {
+                a.find_next();
+            }
+        }
+        VK_F if ctrl => a.find_begin(false),
+        VK_H if ctrl => a.find_begin(true),
+        _ => return false,
+    }
+    true
+}
+
+/// The find-bar *field* command table — runs only when a bar field has focus (FIND §4). Returns
+/// `true` if the key was consumed; `false` for plain typing (→ WM_CHAR → the field).
+unsafe fn handle_find_key(state: &mut WindowState, hwnd: HWND, vk: u32, shift: bool, ctrl: bool, alt: bool) -> bool {
+    let a = &mut state.app;
+    match vk {
         VK_RETURN => {
             if alt {
                 a.find_replace_all();
             } else if a.find_focus_is_replace() {
                 a.find_replace_current();
             } else if shift {
-                a.find_prev();
-            } else {
-                a.find_next();
-            }
-        }
-        VK_F3 => {
-            if shift {
                 a.find_prev();
             } else {
                 a.find_next();
@@ -739,8 +777,6 @@ unsafe fn handle_find_key(state: &mut WindowState, hwnd: HWND, vk: u32, shift: b
                 a.find_paste(&units);
             }
         }
-        VK_F if ctrl => a.find_begin(false),
-        VK_H if ctrl => a.find_begin(true),
         VK_C if alt => a.find_toggle_case(),
         VK_W if alt => a.find_toggle_word(),
         _ => return false,
@@ -1933,6 +1969,28 @@ mod smoke_tests {
             }
             InvalidateRect(hwnd, null(), 0);
             SendMessageW(hwnd, WM_PAINT, 0, 0);
+
+            // Non-modal routing (F-e): a click in the document (top-left, clear of the top-right bar)
+            // returns keyboard focus to the document while the bar stays open, so a following WM_CHAR
+            // edits the *document*, not the query. This is the fix for "can't type in the doc while
+            // find is open" — driven through the real WndProc.
+            let len_before_nonmodal = {
+                let cs = &*(GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut WindowState);
+                cs.app.text.len()
+            };
+            SendMessageW(hwnd, WM_LBUTTONDOWN, 0, (8_isize | (8_isize << 16)) as LPARAM);
+            SendMessageW(hwnd, WM_LBUTTONUP, 0, (8_isize | (8_isize << 16)) as LPARAM);
+            {
+                let cs = &*(GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut WindowState);
+                assert!(cs.app.is_finding(), "a document click keeps the bar open");
+                assert!(!cs.app.find_field_focused(), "a document click moves focus to the document");
+            }
+            SendMessageW(hwnd, WM_CHAR, 'Q' as usize, 0); // routed to the document (no field focused)
+            {
+                let cs = &*(GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut WindowState);
+                assert_eq!(cs.app.text.len(), len_before_nonmodal + 1, "typing edits the document while find is open");
+            }
+
             SendMessageW(hwnd, WM_KEYDOWN, VK_ESCAPE as usize, 0); // close find-mode
             {
                 let cs = &*(GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut WindowState);
