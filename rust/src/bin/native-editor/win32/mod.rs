@@ -18,6 +18,7 @@ use std::time::Instant;
 use sys::*;
 
 use crate::app::{App, Motion};
+use crate::find_layout::{self, FindBarGeom, Hit};
 use crate::grapheme;
 use crate::parse::ParseService;
 use crate::render::Renderer;
@@ -320,13 +321,8 @@ unsafe fn wndproc_impl(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> 
             // The shared tail still runs (reveal the active match, repaint), so a nav/replace scrolls
             // its match into view exactly like a caret move.
             if state.app.is_finding() {
-                handled = handle_find_key(state, hwnd, vk, shift, ctrl, alt);
-                if handled {
-                    state.goal_x = None;
-                    reparse_if_dirty(state); // a replace changed content; a query edit no-ops
-                    ensure_caret_visible(state);
-                    state.caret_visible = true;
-                    InvalidateRect(hwnd, null(), 0);
+                if handle_find_key(state, hwnd, vk, shift, ctrl, alt) {
+                    after_find_key(state, hwnd);
                     return 0;
                 }
                 return DefWindowProcW(hwnd, msg, wparam, lparam);
@@ -423,6 +419,31 @@ unsafe fn wndproc_impl(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> 
                 DefWindowProcW(hwnd, msg, wparam, lparam)
             }
         }
+        // Alt-modified keys (and F10) arrive here, not on WM_KEYDOWN — Windows routes them through
+        // the *system* key path because Alt is historically the menu key. In find-mode we dispatch
+        // them into the same command table so Alt+Enter (replace-all) and Alt+C / Alt+W (toggles)
+        // work; returning 0 swallows the key so DefWindowProc doesn't ring the menu bell. Anything
+        // we don't consume (Alt+F4, Alt+Space) still falls through to DefWindowProc.
+        WM_SYSKEYDOWN => {
+            if state.app.is_finding() {
+                let shift = key_down(VK_SHIFT);
+                let ctrl = key_down(VK_CONTROL);
+                if handle_find_key(state, hwnd, wparam as u32, shift, ctrl, true) {
+                    after_find_key(state, hwnd);
+                    return 0;
+                }
+            }
+            DefWindowProcW(hwnd, msg, wparam, lparam)
+        }
+        WM_SYSCHAR => {
+            // The character companion of a consumed WM_SYSKEYDOWN. While the find bar is open we
+            // drove input from the key path already, so swallow this to silence the menu bell.
+            if state.app.is_finding() {
+                0
+            } else {
+                DefWindowProcW(hwnd, msg, wparam, lparam)
+            }
+        }
         WM_TIMER => {
             if wparam == CARET_TIMER_ID {
                 state.caret_visible = !state.caret_visible;
@@ -450,7 +471,17 @@ unsafe fn wndproc_impl(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> 
             0
         }
         WM_LBUTTONDOWN => {
-            mouse_down(state, hwnd, get_x_lparam(lparam), get_y_lparam(lparam), key_down(VK_SHIFT));
+            // While the find bar is open, a click inside it drives the bar (focus a field, place
+            // the field caret, flip a toggle) instead of moving the document caret. A click outside
+            // the bar falls through to the document (find stays open).
+            let px = get_x_lparam(lparam);
+            let py = get_y_lparam(lparam);
+            if state.app.is_finding() && find_mouse_down(state, hwnd, px, py) {
+                state.caret_visible = true;
+                InvalidateRect(hwnd, null(), 0);
+            } else {
+                mouse_down(state, hwnd, px, py, key_down(VK_SHIFT));
+            }
             0
         }
         WM_MOUSEMOVE => {
@@ -598,6 +629,75 @@ unsafe fn wndproc_impl(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> 
 /// plain typing key, which then falls through to DefWindowProc → WM_CHAR → the focused field.
 /// Enter navigates from the query field / replaces from the replace field; Alt+Enter replaces all;
 /// Esc closes; the letter chords edit/toggle. Field arrows move within the field, not the document.
+/// The shared tail after a consumed find-mode key (from either the WM_KEYDOWN or WM_SYSKEYDOWN
+/// path): a nav/replace ends the vertical run, may have changed content (reparse), and should
+/// reveal the active match and repaint — exactly like a document caret move.
+unsafe fn after_find_key(state: &mut WindowState, hwnd: HWND) {
+    state.goal_x = None;
+    reparse_if_dirty(state); // a replace changed content; a query edit no-ops
+    ensure_caret_visible(state);
+    state.caret_visible = true;
+    InvalidateRect(hwnd, null(), 0);
+}
+
+/// A left-click while the find bar is open. Returns whether the bar consumed it: a click on a
+/// field focuses it and places the field caret where you clicked; a click on a toggle flips it; a
+/// click in the panel's dead space is swallowed (so it doesn't fall to the document behind the
+/// bar); a click outside the panel returns `false` so the document handles it (find stays open).
+unsafe fn find_mouse_down(state: &mut WindowState, hwnd: HWND, px: i32, py: i32) -> bool {
+    // Client width → DIPs (the geometry's coordinate space); the click point likewise.
+    let mut rc: RECT = zeroed();
+    GetClientRect(hwnd, &mut rc);
+    let scale = 96.0 / state.dpi as f32;
+    let dip_w = (rc.right - rc.left) as f32 * scale;
+    let cx = px as f32 * scale;
+    let cy = py as f32 * scale;
+
+    // Snapshot what we need from the (immutably borrowed) find state, then drop the borrow so the
+    // dispatch below can mutate `app`.
+    let (replace_visible, qtext, rtext) = match state.app.find_state() {
+        Some(f) => (f.replace_visible, f.query.text().to_vec(), f.replace.text().to_vec()),
+        None => return false,
+    };
+    let g = find_layout::compute(dip_w, replace_visible);
+    match g.hit(cx, cy) {
+        Hit::Query => {
+            place_field_caret(state, false, &g.query, &qtext, cx);
+            true
+        }
+        Hit::Replace => {
+            // `replace` is Some here (the hit only fires when the replace row is visible).
+            if let Some(rr) = g.replace {
+                place_field_caret(state, true, &rr, &rtext, cx);
+            }
+            true
+        }
+        Hit::ToggleCase => {
+            state.app.find_toggle_case();
+            true
+        }
+        Hit::ToggleWord => {
+            state.app.find_toggle_word();
+            true
+        }
+        Hit::Panel => true,    // swallow: keep the bar's focus, don't disturb the document
+        Hit::Outside => false, // let the document handle the click
+    }
+}
+
+/// Focus a bar field and place its caret at the clicked x (hit-tested against the field's text via
+/// the renderer, so it lands on a cluster boundary exactly like the document).
+unsafe fn place_field_caret(state: &mut WindowState, replace: bool, field: &find_layout::Rect, text: &[u16], cx: f32) {
+    state.app.find_set_focus(replace);
+    let (tx, _) = FindBarGeom::field_text_origin(field);
+    let inner_w = FindBarGeom::field_inner_w(field);
+    let idx = match state.renderer.as_ref() {
+        Some(r) => r.hit_test_field(text, inner_w, cx - tx),
+        None => text.len(),
+    };
+    state.app.find_place_field_caret(idx);
+}
+
 unsafe fn handle_find_key(state: &mut WindowState, hwnd: HWND, vk: u32, shift: bool, ctrl: bool, alt: bool) -> bool {
     let a = &mut state.app;
     match vk {
@@ -1787,6 +1887,45 @@ mod smoke_tests {
             SendMessageW(hwnd, WM_KEYDOWN, VK_BACK as usize, 0); // find_backspace
             InvalidateRect(hwnd, null(), 0);
             SendMessageW(hwnd, WM_PAINT, 0, 0); // paint the bar (both fields, caret, counter, toggles) + highlights
+
+            // Mouse + system-key routing (this checkpoint): click a field well and a toggle on the
+            // real self-drawn bar (drives `find_mouse_down` + `hit_test_field` on live DirectWrite),
+            // then flip a toggle via WM_SYSKEYDOWN (the Alt path). Compute the bar geometry exactly
+            // as the handler does, so the synthetic clicks land on the intended parts.
+            let case_before = {
+                let cs = &*(GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut WindowState);
+                let mut rc: RECT = zeroed();
+                GetClientRect(hwnd, &mut rc);
+                let scale = 96.0 / cs.dpi as f32;
+                let g = crate::find_layout::compute((rc.right - rc.left) as f32 * scale, true);
+                let mid = |r: crate::find_layout::Rect| {
+                    let x = ((r.left + r.right) / 2.0 / scale) as isize;
+                    let y = ((r.top + r.bottom) / 2.0 / scale) as isize;
+                    ((y << 16) | (x & 0xffff)) as LPARAM
+                };
+                let (qlp, aalp) = (mid(g.query), mid(g.aa));
+                (qlp, aalp, cs.app.find_state().unwrap().opts.case_sensitive)
+            };
+            SendMessageW(hwnd, WM_LBUTTONDOWN, 0, case_before.0); // click query field: focus + place caret
+            {
+                let cs = &*(GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut WindowState);
+                assert!(!cs.app.find_focus_is_replace(), "clicking the query field focuses it");
+            }
+            SendMessageW(hwnd, WM_LBUTTONDOWN, 0, case_before.1); // click the "Aa" toggle
+            {
+                let cs = &*(GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut WindowState);
+                assert_ne!(cs.app.find_state().unwrap().opts.case_sensitive, case_before.2, "clicking Aa flips case");
+            }
+            SendMessageW(hwnd, WM_SYSKEYDOWN, VK_C as usize, 0); // Alt+C: flip case back
+            SendMessageW(hwnd, WM_SYSKEYDOWN, VK_W as usize, 0); // Alt+W: whole-word on
+            {
+                let cs = &*(GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut WindowState);
+                let o = &cs.app.find_state().unwrap().opts;
+                assert_eq!(o.case_sensitive, case_before.2, "Alt+C toggles case back");
+                assert!(o.whole_word, "Alt+W enables whole-word");
+            }
+            InvalidateRect(hwnd, null(), 0);
+            SendMessageW(hwnd, WM_PAINT, 0, 0);
             {
                 let cs = &mut *(GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut WindowState);
                 cs.app.find_replace_current();

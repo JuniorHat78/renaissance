@@ -15,6 +15,7 @@ use core::mem::zeroed;
 use core::ptr::{null, null_mut};
 
 use crate::app::App;
+use crate::find_layout::{self, FB_FIELD_H};
 use crate::heights::HeightIndex;
 use crate::styles::{StyleKind, StyleSpan};
 use crate::win32::sys::*;
@@ -190,6 +191,11 @@ fn indent_for(kind: Option<StyleKind>) -> f32 {
         Some(StyleKind::BlockQuote) | Some(StyleKind::ListItem) => INDENT_DIP,
         _ => 0.0,
     }
+}
+
+/// A find-bar geometry rect (DIPs) as a Direct2D rect.
+fn to_d2d(r: &find_layout::Rect) -> D2D1_RECT_F {
+    D2D1_RECT_F { left: r.left, top: r.top, right: r.right, bottom: r.bottom }
 }
 
 impl Renderer {
@@ -530,39 +536,24 @@ impl Renderer {
             Some(f) => f,
             None => return,
         };
-        // Geometry (DIPs).
-        let margin = 12.0;
-        let pad = 8.0;
-        let field_h = 24.0;
-        let row_gap = 6.0;
-        let counter_w = 52.0;
-        let toggle_w = 26.0;
-        let gap = 6.0;
-        let bar_w = 400.0_f32.min(dip_w - margin * 2.0).max(220.0);
-        let rows = if fs.replace_visible { 2 } else { 1 };
-        let bar_h = pad * 2.0 + field_h * rows as f32 + row_gap * (rows - 1) as f32;
-        let bar_x = (dip_w - margin - bar_w).max(margin);
-        let bar_y = margin;
+        // Geometry (DIPs) — the ONE source both paint and click hit-testing read (find_layout), so
+        // a click always lands on exactly what was drawn here.
+        let g = find_layout::compute(dip_w, fs.replace_visible);
 
         let text_brush = self.text_brush.as_raw() as *mut c_void;
         let dim = self.palette.bar_dim.as_raw() as *mut c_void;
         let caret_b = self.caret_brush.as_raw() as *mut c_void;
 
         // Panel + 1-DIP border.
-        let panel = D2D1_RECT_F { left: bar_x, top: bar_y, right: bar_x + bar_w, bottom: bar_y + bar_h };
+        let panel = to_d2d(&g.panel);
         (v.fill_rectangle)(rt, &panel, self.palette.bar_bg.as_raw() as *mut c_void);
         self.stroke_rect(rt, v, &panel, self.palette.bar_border.as_raw() as *mut c_void, 1.0);
 
-        let field_x = bar_x + pad;
-        let field_w = bar_w - pad * 2.0 - counter_w - toggle_w * 2.0 - gap * 3.0;
-
         // ---- row 1: the query field + counter + toggles ----
-        let r1 = bar_y + pad;
         let focus_query = fs.focus == crate::find::Focus::Query;
-        self.draw_field(rt, v, field_x, r1, field_w, field_h, fs.query.text(), fs.query.caret(), caret_visible && focus_query, b"Find", caret_b, text_brush, dim);
+        self.draw_field(rt, v, g.query.left, g.query.top, g.query.width(), FB_FIELD_H, fs.query.text(), fs.query.caret(), caret_visible && focus_query, b"Find", caret_b, text_brush, dim);
 
-        // Counter: "3 / 17", or dim "no results" when the query is set but unmatched, or blank empty.
-        let counter_x = field_x + field_w + gap;
+        // Counter: "3 / 17", or "0/0" when the query is set but unmatched, or blank when empty.
         let counter: String = if fs.query.is_empty() {
             String::new()
         } else if fs.match_count() == 0 {
@@ -574,26 +565,23 @@ impl Renderer {
             let cu: Vec<u16> = counter.encode_utf16().collect();
             // The counter tints toward the active-match color briefly after a wrap (FIND §5).
             let cbrush = if fs.wrapped { self.palette.match_active.as_raw() as *mut c_void } else { dim };
-            self.draw_bar_text(rt, v, counter_x, r1 + 4.0, counter_w, &cu, cbrush);
+            self.draw_bar_text(rt, v, g.counter.left, g.counter.top + 4.0, g.counter.width(), &cu, cbrush);
         }
 
         // Toggles: "Aa" (case) and "W" (whole word) — tinted when active.
-        let aa_x = counter_x + counter_w + gap;
-        let w_x = aa_x + toggle_w + gap;
         let on = self.palette.match_active.as_raw() as *mut c_void;
         let aa: Vec<u16> = "Aa".encode_utf16().collect();
         let ww: Vec<u16> = "W".encode_utf16().collect();
-        self.draw_bar_text(rt, v, aa_x, r1 + 4.0, toggle_w, &aa, if fs.opts.case_sensitive { on } else { dim });
-        self.draw_bar_text(rt, v, w_x, r1 + 4.0, toggle_w, &ww, if fs.opts.whole_word { on } else { dim });
+        self.draw_bar_text(rt, v, g.aa.left, g.aa.top + 4.0, g.aa.width(), &aa, if fs.opts.case_sensitive { on } else { dim });
+        self.draw_bar_text(rt, v, g.word.left, g.word.top + 4.0, g.word.width(), &ww, if fs.opts.whole_word { on } else { dim });
 
         // ---- row 2: the replace field (when visible) ----
-        if fs.replace_visible {
-            let r2 = r1 + field_h + row_gap;
+        if let Some(rr) = g.replace {
             let focus_replace = fs.focus == crate::find::Focus::Replace;
-            self.draw_field(rt, v, field_x, r2, field_w, field_h, fs.replace.text(), fs.replace.caret(), caret_visible && focus_replace, b"Replace", caret_b, text_brush, dim);
-            // A dim hint of the replace keys.
+            self.draw_field(rt, v, rr.left, rr.top, rr.width(), FB_FIELD_H, fs.replace.text(), fs.replace.caret(), caret_visible && focus_replace, b"Replace", caret_b, text_brush, dim);
+            // A dim hint of the replace keys, right of the replace field.
             let hint: Vec<u16> = "\u{21B5} one   \u{2325}\u{21B5} all".encode_utf16().collect();
-            self.draw_bar_text(rt, v, counter_x, r2 + 4.0, counter_w + toggle_w * 2.0 + gap * 2.0, &hint, dim);
+            self.draw_bar_text(rt, v, g.counter.left, rr.top + 4.0, g.word.right - g.counter.left, &hint, dim);
         }
     }
 
@@ -657,7 +645,6 @@ impl Renderer {
         (v.fill_rectangle)(rt, &left, brush);
         (v.fill_rectangle)(rt, &right, brush);
     }
-
 
     /// Create an IDWriteTextLayout for `buf`. Caller owns it and must Release.
     /// Returns null on failure (e.g. HRESULT < 0).
@@ -1031,6 +1018,37 @@ impl Renderer {
             }
             // Clamp within the paragraph's content and lift to a document offset.
             self.para_starts[i] + local.min(clen)
+        }
+    }
+
+    /// Map a click inside a find-bar field to a caret unit offset in that field's short single-line
+    /// text. `local_x` is DIPs from the text origin (the field's inner-left). Same trailing-hit rule
+    /// as the document hit-test: clicking the right half of a cluster lands the caret past it. A
+    /// transient layout (a query is short), released before returning.
+    pub fn hit_test_field(&self, text: &[u16], inner_w: f32, local_x: f32) -> usize {
+        if text.is_empty() || local_x <= 0.0 {
+            return 0;
+        }
+        unsafe {
+            let l = self.make_layout(text, self.text_format.as_raw(), inner_w.max(1.0), FB_FIELD_H);
+            if l.is_null() {
+                return text.len();
+            }
+            let mut trailing: BOOL = 0;
+            let mut inside: BOOL = 0;
+            let mut m: DWRITE_HIT_TEST_METRICS = zeroed();
+            let hr = ((*(*l).vtbl).hit_test_point)(l, local_x, FB_FIELD_H / 2.0, &mut trailing, &mut inside, &mut m);
+            let idx = if hr < 0 {
+                text.len()
+            } else {
+                let mut i = m.text_position as usize;
+                if trailing != 0 {
+                    i += m.length as usize;
+                }
+                i.min(text.len())
+            };
+            com_release(l as *mut c_void);
+            idx
         }
     }
 

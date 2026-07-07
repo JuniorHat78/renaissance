@@ -116,6 +116,13 @@ impl MiniEdit {
         }
     }
 
+    /// Place the caret at an absolute unit offset (a mouse click's hit-test), clamped to the text
+    /// and collapsing any selection. The hit-tester already returns cluster boundaries, so no
+    /// grapheme snap is needed here.
+    pub fn place(&mut self, to: usize) {
+        self.go(to.min(self.text.len()), false);
+    }
+
     pub fn left(&mut self, extend: bool) {
         // Unshifted with a selection collapses to the near edge (document parity).
         if !extend && self.has_selection() {
@@ -222,6 +229,16 @@ mod tests {
         assert_eq!(m.caret(), 4); // start of "cat"
         m.word_left(false);
         assert_eq!(m.caret(), 0);
+    }
+
+    #[test]
+    fn place_sets_caret_and_clamps() {
+        let mut m = MiniEdit::seeded(&u("hello")); // all selected
+        m.place(2);
+        assert!(!m.has_selection());
+        assert_eq!(m.caret(), 2);
+        m.place(999); // past end clamps to len
+        assert_eq!(m.caret(), 5);
     }
 
     #[test]

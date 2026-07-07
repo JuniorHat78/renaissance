@@ -455,6 +455,22 @@ impl App {
         }
     }
 
+    /// Focus a specific field (a mouse click on a field well). The replace field is only focusable
+    /// when it's visible.
+    pub fn find_set_focus(&mut self, replace: bool) {
+        if let Some(fs) = &mut self.find {
+            fs.focus = if replace && fs.replace_visible { Focus::Replace } else { Focus::Query };
+        }
+    }
+
+    /// Place the caret in the focused field at an absolute unit offset — a click's hit-test result.
+    /// Collapses any selection; field motion never touches the match set, so no re-run.
+    pub fn find_place_field_caret(&mut self, index: usize) {
+        if let Some(fs) = &mut self.find {
+            fs.focused().place(index);
+        }
+    }
+
     /// Advance / retreat the active match, wrapping, and reselect it (Enter/F3, Shift+Enter/F3).
     pub fn find_next(&mut self) {
         let mut fs = match self.find.take() {
@@ -1202,5 +1218,45 @@ mod find_app_tests {
         app.find_end();
         assert!(!app.is_finding());
         assert_eq!(app.selection(), (8, 12)); // ready to edit exactly where you landed
+    }
+
+    #[test]
+    fn click_focus_switches_field_and_typing_follows() {
+        // A click focuses a field (find_set_focus); subsequent typing lands there. Mirrors the
+        // win32 mouse handler's dispatch, minus the geometry hit-test.
+        let mut app = app_with("cat dog cat");
+        app.set_caret(0, false);
+        app.find_begin(true); // replace visible; focus starts on the query field
+        query(&mut app, "cat");
+        // Click the replace field, then type — it must go to replace, not re-run the query.
+        app.find_set_focus(true);
+        assert!(app.find_focus_is_replace());
+        for c in "x".encode_utf16() {
+            app.find_input(c);
+        }
+        assert_eq!(app.find_state().unwrap().replace.text(), &"x".encode_utf16().collect::<Vec<_>>()[..]);
+        assert_eq!(app.find_state().unwrap().query.text(), &"cat".encode_utf16().collect::<Vec<_>>()[..]);
+        // Click back to the query field; focus follows.
+        app.find_set_focus(false);
+        assert!(!app.find_focus_is_replace());
+        // With the replace field hidden, a click on "replace" can't steal focus (stays on query).
+        app.find_end();
+        app.find_begin(false);
+        app.find_set_focus(true);
+        assert!(!app.find_focus_is_replace());
+    }
+
+    #[test]
+    fn click_places_the_field_caret() {
+        // find_place_field_caret sets the focused field's caret to a hit-tested offset (here fed
+        // directly). Collapses the seed's select-all so a later Backspace deletes one grapheme.
+        let mut app = app_with("banana");
+        app.set_selection(0, 6); // seeds query "banana", fully selected
+        app.find_begin(false);
+        app.find_place_field_caret(3); // caret between "ban|ana"
+        assert!(!app.find_state().unwrap().query.has_selection());
+        assert_eq!(app.find_state().unwrap().query.caret(), 3);
+        app.find_backspace(); // deletes the 'n' before the caret → "baana"
+        assert_eq!(app.find_state().unwrap().query.text(), &"baana".encode_utf16().collect::<Vec<_>>()[..]);
     }
 }

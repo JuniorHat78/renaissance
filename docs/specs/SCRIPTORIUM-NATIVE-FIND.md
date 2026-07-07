@@ -5,14 +5,18 @@ the last piece of table-stakes standing between the editor and *drafting in it f
 author cannot live in a tool that can't search its own document. Chosen by the author over
 two alternatives (undo-granularity polish — queued as the follow-on "Editing polish" node;
 and the site-integration through-line — deferred as an open fork, §11 of the umbrella). Built
-in two commits: **F-a** the pure match engine (`5989dff`), then **F-b + F-c together** (find-mode +
-navigation + the self-drawn bar + both Replace transactions) — collapsed like IO-a+IO-b and
-style-a+style-b, because the `App` find/replace methods are dead in a bin crate until `win32`
-routes to them (`pub` ≠ reachability), so a warning-free tree per commit outweighed the split.
-Validated: 107 oracles (11 match-engine incl. a 20k-iter differential fuzz, 4 `FindState`, 7
-`MiniEdit`, 10 App find/replace incl. the self-match + right-to-left transaction proofs) + the
-windowed smoke driving find-mode on real DirectWrite (both input branches, the bar + highlight
-render, both Replace transactions) + ASan-clean across the new draw calls, clippy clean. The
+in three commits: **F-a** the pure match engine (`5989dff`), then **F-b + F-c together** (find-mode +
+navigation + the self-drawn bar + both Replace transactions, `56f3c5c`) — collapsed like IO-a+IO-b
+and style-a+style-b, because the `App` find/replace methods are dead in a bin crate until `win32`
+routes to them (`pub` ≠ reachability), so a warning-free tree per commit outweighed the split —
+then **F-d** the mouse + system-key routing (§4/§8), the input plumbing surfaced by the author's
+first hands-on pass (a self-drawn bar receives neither clicks nor Alt keys for free).
+Validated: 115 oracles (11 match-engine incl. a 20k-iter differential fuzz, 4 `FindState`, 8
+`MiniEdit`, 12 App find/replace incl. the self-match + right-to-left transaction proofs + the
+click-focus/caret proofs, 5 `find_layout` bar-geometry) + the windowed smoke driving find-mode on
+real DirectWrite (both input branches, the bar + highlight render, both Replace transactions, a
+click on a field + a toggle, Alt via `WM_SYSKEYDOWN`) + ASan-clean across the new draw + field
+hit-test calls, clippy clean. The
 bar's *look* (colors/geometry/wrap affordance) is the author's feel-loop (§9). One deferral noted
 below: undo *while find-mode is open* (Ctrl+Z routes nowhere in the find key table — Esc then
 undo); and full IME *composition preview* in the query field (committed input works; the inline
@@ -151,6 +155,28 @@ rendering and reparsing live underneath — find-mode never freezes the editor.
   advances; **Ctrl+Alt+Enter** (or Replace-All key) replaces all.
 - **Esc** closes, focus → document, caret on the active match.
 
+**Mouse + the Alt keys — the input plumbing a self-drawn bar must own (F-d).** A self-drawn bar
+is not an OS widget, so *nothing routes to it for free* — the two ways a real user reaches for it
+(the mouse; the Alt accelerators) both need explicit wiring, and both were missing in F-b/F-c:
+
+- **Clicking the bar.** `WM_LBUTTONDOWN` hit-tests the bar *before* the document when find-mode is
+  open. The geometry is factored into **one platform-free source** — `find_layout::compute(dip_w,
+  replace_visible)` returns the panel + field + toggle rects — that **both** the renderer (to
+  paint) and the win32 handler (to hit-test) read, so a click can never land somewhere the paint
+  didn't put a control. A click on a field focuses it and places the field caret at the clicked
+  cluster (`Renderer::hit_test_field` — a transient single-line layout + `HitTestPoint`, the same
+  DWrite call the document uses); a click on a toggle flips it; a click in the panel's dead space
+  is swallowed (it must not fall through to the document behind the bar); a click *outside* the
+  panel falls through to the document (find stays open). Zero new FFI — `HitTestPoint` (slot 64)
+  was already bound + ABI-asserted.
+- **The Alt accelerators.** Alt-modified keys (Alt+Enter = Replace All, Alt+C = case, Alt+W =
+  whole-word) do **not** arrive on `WM_KEYDOWN` — Windows reserves Alt for menus and routes them
+  through the **system** key path (`WM_SYSKEYDOWN`/`WM_SYSCHAR`). F-b/F-c only handled `WM_KEYDOWN`,
+  so every Alt binding was dead (the key never reached `handle_find_key`) — a genuine bug, not an
+  OS limitation. F-d adds a `WM_SYSKEYDOWN` arm that, in find-mode, dispatches into the *same*
+  command table and returns 0 to swallow the menu bell; `WM_SYSCHAR` is swallowed in find-mode for
+  the same reason. Keys we don't consume (Alt+F4, Alt+Space) still fall through to `DefWindowProc`.
+
 ---
 
 ## 5. Rendering — reuse, not new pixels
@@ -234,6 +260,17 @@ forces it, as IO's two did):
   for-all transactions, right-to-left application, the self-match-safety oracle, count reporting.
   Alt+Enter = Replace All; Enter in the replace field = Replace + advance. Smoke drives both on a
   live window.
+- **F-d — mouse + system-key routing. ✅ BUILT (`§4`).** The plumbing that turns the bar from
+  keyboard-only into a real UI, from the author's first hands-on pass (F-b/F-c shipped both gaps):
+  (1) **click routing** — `find_layout.rs` (new, platform-free, 5 geometry oracles) as the one
+  source of the bar's rects that paint *and* hit-test share; `WM_LBUTTONDOWN` focuses a field +
+  places its caret (`Renderer::hit_test_field`, transient layout + `HitTestPoint`), flips a toggle,
+  swallows panel dead-space, or falls through to the document; `MiniEdit::place` +
+  `App::find_set_focus`/`find_place_field_caret` (2 App oracles). (2) **Alt via `WM_SYSKEYDOWN`/
+  `WM_SYSCHAR`** — the reason Alt+Enter/Alt+C/Alt+W were dead: Alt keys ride the system message
+  path, not `WM_KEYDOWN`. Zero new FFI (reuses the bound `HitTestPoint`). Smoke extended: synthetic
+  clicks on the query field + `Aa` toggle and Alt+C/Alt+W via `WM_SYSKEYDOWN`, driven through the
+  real WndProc on live DirectWrite, ASan-clean.
 
 **Key wiring facts (built):** VK constants for the find keys added to `win32::sys`; `handle_find_key`
 is the find command table (returns `false` for plain typing → falls to WM_CHAR → the field); WM_CHAR

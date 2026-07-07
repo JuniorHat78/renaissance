@@ -21,6 +21,7 @@
 mod buffer;
 mod codec;
 mod find;
+mod find_layout;
 mod grapheme;
 mod heights;
 mod minedit;

@@ -52,6 +52,12 @@ pub const WM_SIZE: u32 = 0x0005;
 pub const WM_PAINT: u32 = 0x000F;
 pub const WM_KEYDOWN: u32 = 0x0100;
 pub const WM_CHAR: u32 = 0x0102;
+// Alt-modified keys arrive on the *system* message path (Windows reserves Alt for menus), not
+// WM_KEYDOWN/WM_CHAR. We handle these in find-mode so Alt+Enter / Alt+C / Alt+W reach the bar, and
+// swallow them so DefWindowProc doesn't ring the menu bell.
+pub const WM_SYSKEYDOWN: u32 = 0x0104;
+pub const WM_SYSKEYUP: u32 = 0x0105;
+pub const WM_SYSCHAR: u32 = 0x0106;
 pub const WM_TIMER: u32 = 0x0113;
 pub const WM_VSCROLL: u32 = 0x0115;
 pub const WM_MOUSEWHEEL: u32 = 0x020A;
