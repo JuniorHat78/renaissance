@@ -116,7 +116,7 @@
     "test:discoverability": "node scripts/tests/discoverability-regression.js"
   },
   "devDependencies": {
-    "@axe-core/playwright": "^4.11.3",
+    "@axe-core/playwright": "^4.13.0",
     "ajv": "^8.20.0",
     "html-validate": "^11.5.3",
     "pixelmatch": "^7.2.0",
